@@ -1,0 +1,16 @@
+# The repo's product is POSIX shell hooks + a cross-platform bootstrap. A CRLF in a hooks/*.sh
+# shebang (`#!/usr/bin/env bash\r`) silently breaks the guardrail, so line endings are enforced
+# here regardless of contributor OS or core.autocrlf. Binaries are auto-detected and left alone.
+* text=auto eol=lf
+
+# Shell hooks are LF, always — non-negotiable.
+*.sh text eol=lf
+
+# PowerShell keeps its native CRLF on checkout. The UTF-8 BOM that Windows PowerShell 5.1 needs is
+# content, untouched by git's EOL handling (see knowledge/topics/powershell-utf8-bom-parsing.md).
+*.ps1 text eol=crlf
+
+# Never EOL-normalize binaries.
+*.png binary
+*.jpg binary
+*.gpg binary
