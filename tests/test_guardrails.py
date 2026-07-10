@@ -183,6 +183,15 @@ def test_line_continuation_does_not_evade():
     assert decision_of(parsed) == "ask", "backslash-newline split must be folded before matching"
 
 
+def test_mid_token_continuation_does_not_evade():
+    # A backslash-newline INSIDE a token: the shell removes it entirely (`app` + `ly` -> `apply`).
+    # Regression guard for the fold-to-empty fix — folding to a SPACE instead yields `app ly` / `-r f`
+    # and slips the verb past the patterns. Each of these must still be caught.
+    for cmd in ("terraform app\\\nly", "rm -r\\\nf x", "git mer\\\nge x"):
+        rc, parsed = run_guard(cmd)
+        assert decision_of(parsed) == "ask", f"mid-token continuation must fold and match: {cmd!r}"
+
+
 # ----------------------------------------------------------------------------- self-gating
 
 def test_inert_when_not_wired(tmp_path):
@@ -248,6 +257,11 @@ def guard_mod():
 
 def test_normalize_folds_continuations(guard_mod):
     assert guard_mod.normalize("rm -rf \\\n x") == "rm -rf  x"
+
+
+def test_normalize_joins_mid_token_without_space(guard_mod):
+    # The shell removes backslash-newline entirely, so a split INSIDE a token joins with nothing.
+    assert guard_mod.normalize("app\\\nly") == "apply"
 
 
 def test_strip_quoted_blanks_quotes(guard_mod):
