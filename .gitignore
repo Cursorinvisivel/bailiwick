@@ -1,8 +1,4 @@
 .bailiwick-outputs/
-# Legacy capture-staging dir name from older framework versions (dx / arch-toolkit era). A stale
-# global capture hook may still write here until it is re-installed from the current clone — never
-# commit raw captures. Kept ignored so an old hook can't re-contaminate the repo.
-.dx-outputs/
 
 # Decrypted dirty-zone captures restored from the encrypted backup for /curate.
 # NEVER commit — this is plaintext (possibly client-sensitive) data. See capture_backup.sh.
