@@ -137,8 +137,11 @@ DANGER_PREFILTER = re.compile(
 
 def normalize(command):
     """Fold shell line-continuations (backslash-newline) so a verb split across continued
-    lines cannot evade the patterns. Plain newlines stay — separate lines are separate commands."""
-    return re.sub(r"\\\r?\n", " ", command)
+    lines cannot evade the patterns. The shell removes `\\<newline>` entirely (joining with
+    nothing), so we replace it with the empty string — otherwise a mid-token split like
+    `terraform app\\<newline>ly` would normalize to `app ly` and slip past `apply`. Plain
+    newlines stay — separate lines are separate commands."""
+    return re.sub(r"\\\r?\n", "", command)
 
 
 def strip_quoted(command):
