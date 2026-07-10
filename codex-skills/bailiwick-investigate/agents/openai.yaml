@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bailiwick Investigate"
+  short_description: "Research a topic/reference into the bailiwick KB"
+  default_prompt: "Use $bailiwick-investigate to research a reference or question and propose gated bailiwick knowledge candidates."

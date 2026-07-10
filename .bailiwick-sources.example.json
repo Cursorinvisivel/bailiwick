@@ -1,0 +1,15 @@
+{
+  "//": "External knowledge sources the federation listener CONSULTS (read-only) during tasks and can INGEST from (human-gated, via /curate). Copy to .bailiwick-sources.json (gitignored, per machine). An empty or all-disabled 'sources' list => federation inactive. Only kind:filesystem is implemented today (a local read-only path / mounted clone); git|mcp|http are reserved for later.",
+  "sources": [
+    {
+      "id": "company-kb",
+      "enabled": false,
+      "kind": "filesystem",
+      "location": "/abs/path/to/company/knowledge-root",
+      "index": "INDEX.md",
+      "scope": "external:globex",
+      "trust": "reference",
+      "mode": "consult+ingest"
+    }
+  ]
+}

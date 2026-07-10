@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bailiwick Purge"
+  short_description: "De-identify a client/project from the library"
+  default_prompt: "Use $bailiwick-purge to remove every reference to a client/project — keep the reusable knowledge, delete only what is clearly client-specific. Present the plan for approval before changing anything."

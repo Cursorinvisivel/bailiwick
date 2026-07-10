@@ -1,0 +1,59 @@
+name: CI
+
+# The framework is plain Markdown + Python + shell with no build step, so CI just proves the
+# load-bearing scripts parse and the guardrail contract holds (tests/test_guardrails.py). This is
+# the executable half of CONTRIBUTING.md's verification checklist.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  guardrail-tests:
+    name: Guardrail contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pytest
+        run: python -m pip install --upgrade pip pytest
+      - name: Run guardrail contract tests
+        run: python -m pytest tests/ -q
+
+  static-checks:
+    name: Syntax & parse checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: bash -n on all shell scripts
+        run: |
+          set -e
+          fail=0
+          while IFS= read -r f; do
+            bash -n "$f" && echo "ok   $f" || { echo "FAIL $f"; fail=1; }
+          done < <(git ls-files '*.sh')
+          exit $fail
+      - name: py_compile on all Python
+        run: |
+          set -e
+          # shellcheck disable=SC2046
+          python -m py_compile $(git ls-files '*.py')
+          echo "all python compiled"
+      - name: Validate committed JSON parses
+        run: |
+          set -e
+          fail=0
+          while IFS= read -r f; do
+            python -c "import json,sys; json.load(open(sys.argv[1]))" "$f" \
+              && echo "ok   $f" || { echo "FAIL $f"; fail=1; }
+          done < <(git ls-files '*.json')
+          exit $fail

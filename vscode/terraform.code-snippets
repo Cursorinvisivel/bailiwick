@@ -1,0 +1,77 @@
+{
+  "Terraform GCP Resource Labels": {
+    "prefix": "gcp-labels",
+    "body": [
+      "labels = {",
+      "  env         = var.environment",
+      "  owner       = var.owner",
+      "  cost-center = var.cost_center",
+      "  managed-by  = \"terraform\"",
+      "}"
+    ],
+    "description": "Required GCP labels block"
+  },
+  "Terraform Variable with Validation": {
+    "prefix": "tf-var-env",
+    "body": [
+      "variable \"environment\" {",
+      "  description = \"Deployment environment\"",
+      "  type        = string",
+      "",
+      "  validation {",
+      "    condition     = contains([\"dev\", \"stg\", \"prd\", \"shr\"], var.environment)",
+      "    error_message = \"Environment must be dev, stg, prd, or shr.\"",
+      "  }",
+      "}"
+    ],
+    "description": "Environment variable with validation"
+  },
+  "Terraform GCS Backend": {
+    "prefix": "tf-backend-gcs",
+    "body": [
+      "terraform {",
+      "  backend \"gcs\" {",
+      "    bucket = \"example-terraform-state\"",
+      "    prefix = \"${1:ambiente}/${2:componente}\"",
+      "  }",
+      "}"
+    ],
+    "description": "GCS backend configuration"
+  },
+  "Terraform GCP IAM Member (additive)": {
+    "prefix": "gcp-iam-member",
+    "body": [
+      "resource \"google_project_iam_member\" \"${1:name}\" {",
+      "  project = var.project_id",
+      "  role    = \"${2:roles/}\"",
+      "  member  = \"serviceAccount:${3:email}\"",
+      "}"
+    ],
+    "description": "Additive IAM binding (preferred over iam_binding)"
+  },
+  "Terraform versions.tf": {
+    "prefix": "tf-versions",
+    "body": [
+      "terraform {",
+      "  required_version = \">= 1.5.0\"",
+      "",
+      "  required_providers {",
+      "    google = {",
+      "      source  = \"hashicorp/google\"",
+      "      version = \"~> 5.0\"",
+      "    }",
+      "  }",
+      "}"
+    ],
+    "description": "Standard versions.tf for GCP Terraform modules"
+  },
+  "Terraform Prevent Destroy": {
+    "prefix": "tf-lifecycle-protect",
+    "body": [
+      "lifecycle {",
+      "  prevent_destroy = true",
+      "}"
+    ],
+    "description": "Prevent accidental destruction of stateful resources"
+  }
+}

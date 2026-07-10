@@ -1,0 +1,26 @@
+.bailiwick-outputs/
+# Legacy capture-staging dir name from older framework versions (dx / arch-toolkit era). A stale
+# global capture hook may still write here until it is re-installed from the current clone — never
+# commit raw captures. Kept ignored so an old hook can't re-contaminate the repo.
+.dx-outputs/
+
+# Decrypted dirty-zone captures restored from the encrypted backup for /curate.
+# NEVER commit — this is plaintext (possibly client-sensitive) data. See capture_backup.sh.
+.bailiwick-inbox/
+
+# Claude Code per-developer MCP working config — hardcodes an absolute filesystem
+# root, so it is machine-specific. The committed template lives in vscode/mcp.json;
+# new projects/clones generate their own .mcp.json (see docs/getting-started.md).
+.mcp.json
+
+# Per-machine sync role (central|satellite). Each machine sets its own; see
+# .bailiwick-sync.example.json. Absent => satellite (safe default).
+.bailiwick-sync.json
+
+# Per-machine federation source registry (external/company KBs to consult + ingest from).
+# See .bailiwick-sources.example.json. Absent/empty => federation inactive.
+.bailiwick-sources.json
+
+# Python bytecode
+__pycache__/
+*.pyc

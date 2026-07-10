@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bailiwick Enrich"
+  short_description: "Draft enriched repo instructions"
+  default_prompt: "Use $bailiwick-enrich to scan this bootstrapped repo and draft enriched instruction files."

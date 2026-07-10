@@ -1,0 +1,54 @@
+{
+  "//": "bailiwick hooks. Merge this 'hooks' block into ~/.claude/settings.json ONCE (keep existing keys). Installs globally; the scripts self-gate to bailiwick-wired repos (a framework complement file — .bailiwick.local.md / CLAUDE.local.md / the Copilot instructions — referencing $BAILIWICK), so there is no per-repo setup. Paths are absolute to $BAILIWICK — nothing is copied. The PreToolUse 'guardrails.py' hook turns the non-negotiables into enforced decisions (deny apply/destroy & resource deletes; ask on git commit/push).",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/bailiwick/hooks/guardrails.py"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /path/to/bailiwick/hooks/session_start.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/bailiwick/hooks/capture_session.py"
+          },
+          {
+            "type": "command",
+            "command": "bash /path/to/bailiwick/hooks/capture_backup.sh push"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/bailiwick/hooks/capture_session.py"
+          },
+          {
+            "type": "command",
+            "command": "bash /path/to/bailiwick/hooks/capture_backup.sh push"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "//": "Per-machine config for the bailiwick. Copy to .bailiwick-sync.json (gitignored) on each machine. Absent file => 'satellite' (safe default: never pushes to main, never owns telemetry).",
+  "role": "satellite",
+  "machine": "laptop-01",
+
+  "//github_account": "OPTIONAL. Multi-account machines (client laptops / VMs) only. Pins which logged-in 'gh' account bootstrap wires into the github MCP server, overriding the access probe. 'github_account' = a blanket gh login; 'github_host' optionally overrides the API host. Use 'github_account_map' instead to pin per repo owner (owner -> gh login) — the deterministic form of your git URL-rewrite intent. All three are ignored unless more than one logged-in account can reach the repo; leave empty/{} to disable.",
+  "github_account": "",
+  "github_host": "",
+  "github_account_map": {},
+
+  "//curate": "OPTIONAL. 'deidentify': true forces every /curate promotion into de-identified mode — no client/project identifiers are ever stored (scope forced to generic, no clients/<id>/ files, org names/ids/project associations stripped at ingest), keeping only the reusable 'how it was solved'. Leave false for the normal model (client detail routed to clients/<id>/). Per-run override: '/curate --sanitized'.",
+  "curate": { "deidentify": false },
+
+  "//capture_backup": "OPTIONAL encrypted off-machine backup of the dirty zone (.bailiwick-outputs/) so un-curated captures survive disk loss. Only CIPHERTEXT leaves the machine; the gpg private key never does. Disabled by default. 'repo' must be a DEDICATED PRIVATE repo (not the framework repo, not a client repo). 'gpg_recipients' = public key fingerprint(s); the matching private key lives only on the machine that runs /curate. 'confidentiality_ack' must be true to back up data that may include client material — enabling it asserts your engagement terms permit it.",
+  "capture_backup": {
+    "enabled": false,
+    "confidentiality_ack": false,
+    "repo": "git@github.com:you/bailiwick-holding.git",
+    "gpg_recipients": ["<your-gpg-fingerprint>"],
+    "branch": "capture/<machine>",
+    "throttle_minutes": 5
+  }
+}

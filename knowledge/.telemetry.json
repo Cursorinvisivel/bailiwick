@@ -1,0 +1,194 @@
+{
+  "_schema": "1.1",
+  "_note": "Telemetry sidecar (usage counters joined to content by `id`). Zeroed baseline for the public release \u2014 populated by the Memory Agent during /curate. Single-writer by design; see FRAMEWORK.md.",
+  "_last_reconciled": null,
+  "entries": {
+    "agent-cli-hook-contracts": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "caf-naming-taxonomy": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "claude-mcp-wiring": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "code-review-rubric": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "engineering-defaults": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "environments": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "gcp-backend-gcs-pattern": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "gcp-gke-workload-identity": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "gcp-iam-conventions": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "gcp-labels-required": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "gcp-naming-conventions": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "llm-context-token-optimization": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "org-shorthands": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "powershell-utf8-bom-parsing": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "team-conventions": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "terraform-module-structure": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    },
+    "terraform-variable-conventions": {
+      "load_count": 0,
+      "applied_count": 0,
+      "useful_count": 0,
+      "source_sessions": 0,
+      "last_loaded": null,
+      "last_applied": null,
+      "last_useful": null,
+      "open_contradictions": 0,
+      "distinct_projects_used": []
+    }
+  }
+}

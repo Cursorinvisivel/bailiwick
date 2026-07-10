@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bailiwick Curate"
+  short_description: "Curate bailiwick captures"
+  default_prompt: "Use $bailiwick-curate to review pending bailiwick captures and propose curated knowledge updates."
