@@ -244,11 +244,21 @@ except Exception: print("")' 2>/dev/null || true)"
     ;;
   purge)
     rel="${2:-}"; [ -n "$rel" ] || { echo "usage: capture_backup.sh purge <relpath-under-branch>" >&2; exit 2; }
+    # A bare session name matches neither blob (two per session: .jsonl.gpg + .md.gpg) and
+    # exits 0 as "nothing to purge" — warn before it fails quiet.
+    case "$rel" in *.gpg) ;; *) echo "[backup] warning: relpath should end in .jsonl.gpg or .md.gpg — a bare session name never matches (two blobs per session)" >&2;; esac
     ensure_mirror
     git_id rm -q --ignore-unmatch "$rel" "$rel.sha256" 2>/dev/null || true
-    git_id commit -q -m "purge: $rel (curated)" 2>/dev/null || { echo "[backup] nothing to purge: $rel"; exit 0; }
-    git_id push -q origin "$BRANCH" 2>/dev/null || { bw_health capture_backup warn "purge push failed ($rel)"; echo "[backup] purge committed in mirror; push failed" >&2; }
-    echo "[backup] purged $rel"
+    git_id commit -q -m "purge: $rel (curated)" 2>/dev/null || echo "[backup] nothing new to purge: $rel"
+    # Always drain: a prior purge's push may have failed silently, leaving the mirror ahead —
+    # "commit succeeded" and "push attempted" must stay decoupled or stranded commits never flush.
+    git_id fetch -q origin "$BRANCH" 2>/dev/null || true
+    if [ -n "$(git_id rev-list "origin/$BRANCH..$BRANCH" -n1 2>/dev/null)" ]; then
+      bw_health capture_backup info "purge: draining unpushed mirror commit(s) ($rel)"
+      git_id push -q origin "$BRANCH" 2>/dev/null \
+        && echo "[backup] purged $rel" \
+        || { bw_health capture_backup warn "purge push failed ($rel)"; echo "[backup] purge committed in mirror; push failed" >&2; }
+    fi
     ;;
   *) echo "usage: capture_backup.sh [push | pull [dest] | purge <relpath>]" >&2; exit 2;;
 esac

@@ -17,7 +17,24 @@ python3 $BAILIWICK/skills/metrics/report.py [--top N] [--json]
 - `--json`: machine-readable (per-id rows + orphans/missing) for dashboards or trend tracking.
 - `--top N`: length of the "top by loads" and reach lists (default 10).
 
-Present the report to the user, then **interpret** the sections that call for action:
+## Present it (fixed structure — keep runs comparable)
+
+The script's output is deterministic; the presentation must be too, so consecutive runs can be
+compared at a glance. Always answer in exactly this shape, nothing more:
+
+1. **Raw report** — the script's output verbatim in one fenced code block. Never reformat it,
+   reorder its sections, or convert it into markdown tables/prose — its section layout IS the
+   stable interface.
+2. **`## Interpretation`** — one bullet group per report section that calls for action, in the
+   report's own order, labelled with the report's bracket names in bold (**[impact]**,
+   **[reach & graduation]**, **[archival]**, **[stale]**, **[reconciliation]**,
+   **[framework health]**). Omit sections that are empty or need nothing. Each action candidate
+   is a single bullet: `<id> — <proposed action> (<evidence>)`.
+3. **`## Bottom line`** — 2–3 sentences: is the library earning its place, and the single most
+   useful next step (e.g. "run /curate to reconcile", "archive these 4 cold files").
+
+No other headings, no summary tables, no re-derived statistics — interpretation content comes
+from the section guide below.
 
 ## How to read it (and what to do)
 - **[retrieval]** — `ever loaded` vs `cold`. The `loaded` signal is mechanical and reliable
