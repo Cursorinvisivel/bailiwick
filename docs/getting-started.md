@@ -60,9 +60,9 @@ This is idempotent (re-run it any time — e.g. after adding a new skill) and in
   preserved). These fire in *every* project but self-gate — they stay inert unless the repo is
   Bailiwick-wired.
 - The **global Claude Code skills** as symlinks in `~/.claude/skills/`: `/curate`, `/enrich`,
-  `/metrics`, `/investigate`, `/purge`.
-- The **Codex skill wrappers** (`$bailiwick-curate`, `$bailiwick-enrich`, `$bailiwick-investigate`,
-  `$bailiwick-purge`) in `~/.codex/skills/`.
+  `/learn`, `/metrics`, `/investigate`, `/purge`.
+- The **Codex skill wrappers** (`$bailiwick-curate`, `$bailiwick-enrich`, `$bailiwick-learn`,
+  `$bailiwick-investigate`, `$bailiwick-purge`) in `~/.codex/skills/`.
 - The **Codex and Gemini operator layers** — managed blocks in `~/.codex/AGENTS.md` and
   `~/.gemini/GEMINI.md` that teach those tools to read a repo's framework marker without shadowing
   the team's own `AGENTS.md` / `GEMINI.md`.
@@ -119,7 +119,11 @@ Windows: `bootstrap.ps1 /path/to/repo`, `bootstrap.ps1 -Seeded /path/to/repo`, e
 
 > **Onboarding an existing project?** After bootstrapping, run **`/enrich`** (Claude Code) or
 > **`$bailiwick-enrich`** (Codex). It scans the repo, asks only for what it can't infer, and drafts
-> filled-in instruction files for all four tools. Drafts only — it never commits.
+> filled-in instruction files for all four tools. Drafts only — it never commits. Then run
+> **`/learn`** (`$bailiwick-learn`): the same scan posture aimed at the *knowledge library* — it
+> distills the repo's decisions, patterns, and pitfalls into a pre-digested capture staged where
+> `/curate` gathers, so a final `/curate` promotes the repo's existing knowledge under the normal
+> human gate. Bootstrap → `/enrich` → `/learn` → `/curate` is the full onboarding sequence.
 
 ---
 
@@ -163,6 +167,9 @@ human gate. That's the core loop: **capture is enforced, promotion is gated.**
 The other global skills round out the workflow:
 
 - **`/enrich`** — draft project-context instruction files for a bootstrapped repo (see §3).
+- **`/learn`** — onboard an existing repo's knowledge at bootstrap time (see §3): scan the project
+  and stage its distilled decisions, patterns, and pitfalls as a pre-digested capture that the next
+  `/curate` promotes under the normal gate. Writes no knowledge itself.
 - **`/metrics`** — a read-only health report on the knowledge library (retrieval, the
   load→applied→used funnel, cold/stale candidates) plus a fleet view of framework health. Writes
   nothing.
@@ -176,7 +183,7 @@ The other global skills round out the workflow:
   destruction); `--attest` drafts a safety-net attestation of what was scrubbed. Pairs with
   `/curate --sanitized` (de-identified mode — stores no client/project identifiers).
 
-Codex users get thin native wrappers: `$bailiwick-curate`, `$bailiwick-enrich`, `$bailiwick-investigate`, `$bailiwick-purge`.
+Codex users get thin native wrappers: `$bailiwick-curate`, `$bailiwick-enrich`, `$bailiwick-learn`, `$bailiwick-investigate`, `$bailiwick-purge`.
 
 ---
 

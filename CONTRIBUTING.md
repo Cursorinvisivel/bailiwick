@@ -22,8 +22,8 @@ tools read live. Five moving parts, and how a session flows through them:
    demand. Not code, not installed anywhere — the agent reads the role and acts as it.
 3. **`hooks/`** — the only things that *run*: the runtime guardrail (`guardrails.py`), capture, sync,
    and health hooks, plus the installers that wire them in.
-4. **`skills/`** — human-gated procedures (`SKILL.md` files): `/curate`, `/enrich`, `/metrics`,
-   `/investigate`, `/purge`. Markdown procedures, not programs.
+4. **`skills/`** — human-gated procedures (`SKILL.md` files): `/curate`, `/enrich`, `/learn`,
+   `/metrics`, `/investigate`, `/purge`. Markdown procedures, not programs.
 5. **`scripts/bootstrap.sh`** (+ `bootstrap.ps1`) — onboards a repo (shadow or seeded) and installs
    the once-per-machine global wiring.
 

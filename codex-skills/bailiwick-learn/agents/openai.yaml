@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bailiwick Learn"
+  short_description: "Onboard an existing repo's knowledge as a gated capture"
+  default_prompt: "Use $bailiwick-learn to scan this repository and stage its reusable knowledge as a capture for gated curation."

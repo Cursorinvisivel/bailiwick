@@ -58,6 +58,12 @@ Enforced by Claude Code hooks ($BAILIWICK/hooks/):
   project-context-filled instruction files for all four tools, both the committed team baselines
   (framework-agnostic) and the hidden complements (framework-aware). Drafts only; never commits.
   Run it after bootstrapping an existing project.
+- **`/learn`** ($BAILIWICK/skills/learn/) — onboard an existing repo's knowledge at bootstrap
+  time: scan the project (decisions, IaC patterns, conventions, pitfalls) and distill the findings
+  into a pre-digested capture staged exactly where `/curate` gathers (seeded: `.bailiwick-outputs/`;
+  shadow: `~/.bailiwick/captures/<repo-key>/`) — promotion rides the standard capture→curate
+  human gate; writes no knowledge itself. Complement to `/enrich` (instruction files vs knowledge
+  candidates). Codex wrapper: `$bailiwick-learn`.
 - **`/metrics`** ($BAILIWICK/skills/metrics/) — read-only health report on the
   knowledge library (retrieval, load→applied→used funnel, cold/stale candidates, telemetry↔file
   reconciliation). No gate needed; writes nothing.

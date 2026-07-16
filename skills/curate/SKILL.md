@@ -33,7 +33,9 @@ gpg private key, so full centralized curation runs on the machine that holds it.
      carry `mode: shadow` + `origin_remote` — use those to judge scope (`generic` vs `client:<id>`)
      since the repo path is not self-identifying. Include them in the candidate gather exactly like
      in-repo captures.
-   - List `.bailiwick-outputs/*.md` (agent session outputs, if any).
+   - List `.bailiwick-outputs/*.md` (agent session outputs, if any — including `learn-*.md`
+     onboarding captures staged by `/learn`, which arrive pre-digested with a
+     `## Candidates for Promotion` section and dedup hints).
    - **Restore off-machine captures** (if `capture_backup` is enabled in `.bailiwick-sync.json`): run
      `bash $BAILIWICK/hooks/capture_backup.sh pull` — decrypts every backed-up blob
      (from any machine) into `$BAILIWICK/.bailiwick-inbox/raw/<machine>/<repo>/…` (needs the gpg private

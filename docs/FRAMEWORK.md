@@ -391,8 +391,8 @@ seeded variant:
 - **Global prerequisites (`--install-tools`):** installs the once-per-machine pieces when missing —
   terraform-mcp-server (`go install`), the capture/curation **+ guardrail** hooks
   (`~/.claude/settings.json`), the global **Claude Code skill symlinks** (`~/.claude/skills/`:
-  `/curate`, `/enrich`, `/metrics`, `/investigate`, `/purge`), the global **Codex skill symlinks** (`~/.codex/skills/`: `$bailiwick-curate`,
-  `$bailiwick-enrich`, `$bailiwick-investigate`, `$bailiwick-purge`), and the global **Codex + Gemini operator layers** (managed blocks in
+  `/curate`, `/enrich`, `/learn`, `/metrics`, `/investigate`, `/purge`), the global **Codex skill symlinks** (`~/.codex/skills/`: `$bailiwick-curate`,
+  `$bailiwick-enrich`, `$bailiwick-learn`, `$bailiwick-investigate`, `$bailiwick-purge`), and the global **Codex + Gemini operator layers** (managed blocks in
   `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md` that activate per-repo on the
   `.bailiwick.local.md` marker). Without it,
   every run *validates* these and prints ✓/✗ in the Next steps. (Skills and operator layers are
@@ -404,6 +404,14 @@ seeded variant:
   mandatory leakage guard) and the hidden complements (framework-aware). Drafts only; never commits.
   Best run right after bootstrapping an existing project. See `skills/enrich/SKILL.md`
   and `codex-skills/bailiwick-enrich/SKILL.md`.
+- **Learn after bootstrap (`/learn` in Claude Code, `$bailiwick-learn` in Codex):** the knowledge-side
+  complement to `/enrich` — scans the bootstrapped repo for **reusable knowledge** (decisions with
+  rationale, IaC patterns, pitfalls/workarounds, conventions in evidence) and distills it into one
+  pre-digested capture staged exactly where `/curate` gathers (seeded: `.bailiwick-outputs/`; shadow:
+  `~/.bailiwick/captures/<repo-key>/` — the manual session-output channel). Promotion rides the
+  standard capture→curate human gate; `/learn` itself writes no knowledge. Bootstrap → `/enrich` →
+  `/learn` → `/curate` is the full existing-project onboarding sequence. See `skills/learn/SKILL.md`
+  and `codex-skills/bailiwick-learn/SKILL.md`.
 - **Federation wiring:** injects each enabled external source's path as an extra MCP filesystem
   root (see §9).
 
@@ -534,11 +542,11 @@ Key consequences (the four tools do not share one uniform integration):
   `~/.codex/config.toml`. The github server resolves its token via a spawn shell (gh-auth or
   `$GITHUB_TOKEN`), independent of Codex env expansion.
 - **Codex skills mirror the Claude Code skills.** `codex-skills/bailiwick-curate`,
-  `codex-skills/bailiwick-enrich`, `codex-skills/bailiwick-investigate`, and
-  `codex-skills/bailiwick-purge` are Codex-native wrappers installed into `~/.codex/skills/` by
+  `codex-skills/bailiwick-enrich`, `codex-skills/bailiwick-learn`, `codex-skills/bailiwick-investigate`,
+  and `codex-skills/bailiwick-purge` are Codex-native wrappers installed into `~/.codex/skills/` by
   `--install-tools`. They intentionally point back to the canonical `skills/*/SKILL.md` files, so the
   procedure stays single-source while Codex gets a native `$bailiwick-curate` / `$bailiwick-enrich` /
-  `$bailiwick-investigate` / `$bailiwick-purge` trigger instead of a copied prompt.
+  `$bailiwick-learn` / `$bailiwick-investigate` / `$bailiwick-purge` trigger instead of a copied prompt.
 - **Gemini gets a global layer + shared marker, and (CLI) a wired guardrail.** `--install-tools` installs a
   managed block in `~/.gemini/GEMINI.md` (loaded first, so a repo `GEMINI.md` keeps precedence; the
   framework defaults are stated *in* the global file since the VS Code agent has no guaranteed loader
@@ -612,8 +620,8 @@ bailiwick/
   hooks/          session_start.sh  capture_session.py  capture_backup.sh  sync_knowledge.sh
                   guardrails.py  install_hooks.py  settings.template.json  health_common.sh
                   install_global_layer.sh  codex-global-agents.tmpl.md  gemini-global.tmpl.md
-  skills/         curate/  enrich/  metrics/{SKILL.md,report.py}  investigate/  purge/   (each a SKILL.md)
-  codex-skills/   bailiwick-curate/  bailiwick-enrich/  bailiwick-investigate/  bailiwick-purge/  (SKILL.md wrappers)
+  skills/         curate/  enrich/  learn/  metrics/{SKILL.md,report.py}  investigate/  purge/   (each a SKILL.md)
+  codex-skills/   bailiwick-curate/  bailiwick-enrich/  bailiwick-learn/  bailiwick-investigate/  bailiwick-purge/  (SKILL.md wrappers)
   copilot-instructions/   terraform-gcp(.gke/.data/.project-stack).md
   prompts/        iam-review · pr-review · module-docs · cost-estimate · security-pr-report
   vscode/         mcp.json (template) · terraform.code-snippets

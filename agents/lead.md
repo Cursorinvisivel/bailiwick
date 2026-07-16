@@ -85,8 +85,9 @@ are seeded only deliberately, via `--with-standards`, and stay framework-agnosti
 No per-repo hook step — capture/curation/guardrail hooks are installed once globally in
 `~/.claude/settings.json` and self-gate on the complement marker (or the shadow allowlist).
 
-After bootstrap, suggest `/enrich` to draft project-context-filled instruction files, then proceed
-with the original task using the full Mandatory Workflow above.
+After bootstrap, suggest `/enrich` to draft project-context-filled instruction files and `/learn`
+to stage the repo's existing knowledge as a capture for `/curate`, then proceed with the original
+task using the full Mandatory Workflow above.
 
 ## Absolute Rules
 - Never run terraform apply, destroy
