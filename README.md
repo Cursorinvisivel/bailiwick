@@ -64,9 +64,9 @@ Windows PowerShell mirrors every flag with a single dash: `bootstrap.ps1 -Instal
 👉 **Full walkthrough** — prerequisites, verification, and your first knowledge cycle — in
 **[docs/getting-started.md](docs/getting-started.md)**.
 
-**Also included** (all covered in [Operations](docs/operations.md)): five skills — `/curate`,
-`/enrich`, `/metrics`, `/investigate`, `/purge` — plus an optional encrypted off-machine capture
-backup and multi-machine central/satellite sync over plain git.
+**Also included** (all covered in [Operations](docs/operations.md)): six skills — `/curate`,
+`/enrich`, `/learn`, `/metrics`, `/investigate`, `/purge` — plus an optional encrypted off-machine
+capture backup and multi-machine central/satellite sync over plain git.
 
 ## Supported tools
 
@@ -124,7 +124,7 @@ A map of the whole set is in **[docs/README.md](docs/README.md)**.
 knowledge/   INDEX.md · topics/ patterns/ context/ templates/ · .telemetry.json
 agents/      role definitions (lead + 5 domain-context + 7 execution)
 hooks/       guardrail + capture + sync + health hooks, and the installers
-skills/      /curate · /enrich · /metrics · /investigate · /purge  (+ codex-skills/ wrappers)
+skills/      /curate · /enrich · /learn · /metrics · /investigate · /purge  (+ codex-skills/ wrappers)
 scripts/     bootstrap.sh · bootstrap.ps1  (repo onboarding)
 docs/        this documentation set · decisions/ (framework ADRs)
 ```
