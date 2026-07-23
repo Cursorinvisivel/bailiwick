@@ -1,0 +1,116 @@
+name: Bug report
+description: Something in the framework behaves differently than documented — hooks, bootstrap, skills, sync.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Not sure it's a bug?** Ask in
+        [Q&A](https://github.com/Cursorinvisivel/bailiwick/discussions/categories/q-a) instead —
+        threads get converted to issues when they turn out to be defects, so nothing is lost.
+
+        **Guardrail behaviour** (a command that should have been intercepted and wasn't, or the
+        reverse) has [its own form](https://github.com/Cursorinvisivel/bailiwick/issues/new?template=guardrail.yml)
+        with the fields needed to turn it into a test case.
+
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Which tool
+      description: The four adapters differ by design — see [FRAMEWORK.md §10](https://github.com/Cursorinvisivel/bailiwick/blob/main/docs/FRAMEWORK.md) and [compatibility.md](https://github.com/Cursorinvisivel/bailiwick/blob/main/docs/compatibility.md).
+      options:
+        - Claude Code
+        - Codex CLI
+        - Gemini CLI
+        - Gemini Code Assist (VS Code agent)
+        - GitHub Copilot (VS Code)
+        - Not tool-specific / don't know
+    validations:
+      required: true
+
+  - type: input
+    id: tool-version
+    attributes:
+      label: Tool version
+      description: e.g. `claude --version`, `codex --version`, `gemini --version`. Put "n/a" if not tool-specific.
+      placeholder: "codex 0.142.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - WSL
+        - Windows (PowerShell)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Wiring mode
+      description: How the affected repo was bootstrapped.
+      options:
+        - Shadow (default — nothing written into the repo)
+        - Seeded (hidden in-repo wiring)
+        - "--init (new repo)"
+        - "--with-standards (tracked team baselines)"
+        - Not applicable / global install only
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part
+      options:
+        - bootstrap / installers (scripts/)
+        - capture hooks (Stop / SessionEnd / SessionStart)
+        - encrypted capture backup
+        - multi-machine sync / federation
+        - a skill (/curate, /enrich, /learn, /metrics, /investigate, /purge)
+        - knowledge library or index
+        - MCP wiring
+        - docs
+        - other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command and output
+      description: "The command you ran and what it printed. For bootstrap issues, `--dry-run` output is ideal — it writes nothing and shows the full plan. Redact before pasting."
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs. actual
+      description: What you expected to happen, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: "What you already tried, whether it worked before an upgrade, relevant bits of `.bailiwick-sync.json` or the wired repo's state. Optional."
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Before submitting
+      options:
+        - label: "I've removed all private and client data — no real project IDs, org names, client codenames, internal domains, or secrets. (Captures and transcripts routinely contain the real thing.)"
+          required: true
+        - label: I searched existing issues and discussions for the same problem.
+          required: true
