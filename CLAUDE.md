@@ -92,13 +92,25 @@ See $BAILIWICK/hooks/README.md.
 - github: access to repos, PRs, issues
 - terraform: HashiCorp provider docs and registry
 
+### Desktop reference (optional, read-only)
+Claude Desktop and ChatGPT Desktop have no hook system, so they sit **outside** the four adapters
+above and outside capture/curation/guardrails entirely. `bootstrap.sh --install-tools --with-desktop`
+optionally wires a single narrowly-scoped `bailiwick-knowledge` MCP filesystem server — rooted at
+`knowledge/` only, never the rest of the framework — into each app's own MCP config, auto-detecting
+macOS/Windows/WSL paths (`hooks/install_desktop_mcp.py`, idempotent, bailiwick-* named). This lets
+either app **consult** the knowledge library for reference outside a coding session; it can never
+write back into it. Pair it with `knowledge/templates/desktop-reference-instructions.md`, pasted into
+the app's Project/custom instructions, since the retrieval discipline below isn't auto-injected there.
+
 ## Non-Negotiable Rules
 These are **runtime-enforced** by the same `guardrails.py` engine under **three adapters** —
 Claude Code (PreToolUse, forced confirmations), **Codex CLI** (PreToolUse, deny + break-glass
 allow-once; needs a one-time hook trust — Codex prompts on first fire in the `codex` CLI, not VS Code), and **Gemini CLI** (BeforeTool, `ask` confirmations) —
 installed globally by `bootstrap.sh --install-tools`, self-gating to wired repos. Nothing dangerous
 runs silently or on agent initiative. **Copilot** has no hook equivalent (policy only); the Gemini
-**VS Code agent's** hook support is unverified (policy there — keep YOLO mode off).
+**VS Code agent's** hook support is unverified (policy there — keep YOLO mode off). **Claude Desktop /
+ChatGPT Desktop** are outside all three enforcement layers (no hook system at all) — the optional
+`--with-desktop` wiring above is deliberately read-only and scoped to `knowledge/` only for this reason.
 - **High-impact actions re-confirm even when instructed** — terraform/terragrunt apply & destroy;
   kubectl/helm mutations (apply/delete/patch/scale/drain/rollout, install/upgrade/uninstall);
   gcloud/gsutil/az/aws mutating verbs (delete/destroy/update/patch/rm); recursive/forced `rm`;
