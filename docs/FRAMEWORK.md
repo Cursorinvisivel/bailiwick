@@ -282,7 +282,7 @@ apply exactly as they would in a seeded repo. Capture/session hooks are **Claude
 | `guardrails.py` | **PreToolUse** (`Bash`) | **Runtime guardrail (ADR-006).** Three tiers, each resolving to an in-the-moment gate — a **forced confirmation** under Claude Code and Gemini CLI, a **hard deny with break-glass** under Codex (no confirm dialog; §10) — so nothing dangerous runs silently or on agent initiative: **EXEMPT** (dirty-zone capture plumbing always passes — data-loss prevention); **ASK-IMPACT** (real-world impact re-confirms *even when user-instructed*: terraform/terragrunt `apply`/`destroy`, kubectl/helm mutations, gcloud/gsutil/az/aws mutating verbs incl. `update`/`patch`/`rm`, recursive/forced `rm`, `git merge`, `gh repo delete`); **ASK-GO-AHEAD** (`git commit`/`push`, `gh pr create`/`merge`/`close` need a clear user go-ahead; AI attribution signatures in the message get their own confirmation). Validation-only commands (plan/validate/fmt, `--dry-run`, read-only CLI) pass untouched; line-continuations folded before matching. Self-gated. **Tiered failure mode (ADR-005):** on evaluation error it fails **closed** (deny) for commands that trip a destructive pre-filter, else fails **open**; `BAILIWICK_BREAK_GLASS=1` downgrades that error-path deny to ask. **Direct-command patterns only — not a complete security boundary** (misses `make apply`, wrapper scripts, aliases, Terraform-MCP actions). Every decision is logged to `~/.bailiwick/guardrail-audit.log`. |
 | `session_start.sh` | SessionStart | Assert framework defaults; **inject `INDEX.md`**; **inbound ff-pull** of the Bailiwick clone (throttled, clean-`main`-only, non-fatal); nag on pending captures; nag on framework-health **errors in the last ~24h** (this machine's shard); warn loudly if `python3` is missing (guardrail+capture inactive); nag if INDEX > ~20 KB (shard). |
 | `capture_session.py` | Stop, SessionEnd | Copy the transcript to `<project>/.bailiwick-outputs/raw/<id>.jsonl` when the session did substantive work (mutations or ≥3 tool calls). No intelligence, no promotion. |
-| `capture_backup.sh` | Stop, SessionEnd (push); `/curate` (pull/purge) | **Optional** durable backup: gpg-encrypts new captures and pushes **ciphertext** to a per-machine branch of a dedicated private repo (`capture_backup` in `.bailiwick-sync.json`; off + `confidentiality_ack: false` by default). `pull` decrypts to `.bailiwick-inbox/` for curate (runnable from any wired repo); `purge` drops a blob from the **current tree** (not history — ciphertext persists in git history until rewritten/key-destroyed). Blobs are keyed by the collision-resistant `repo_key` (origin-based), so same-basename repos never commingle. Private key never leaves the curating machine. **Best-effort / fail-open**, local-mirror-first — a failed push lags the remote copy but never loses the capture; push success/failure (with unpushed-commit count) is logged to the framework-health shard, surfaced by `/metrics` and the SessionStart error nag. Also transports each machine's **health shard** (encrypted) on `push` and refreshes the fleet's shards into `~/.bailiwick/health/remote/` on `pull`. |
+| `capture_backup.sh` | Stop, SessionEnd (push); `/curate` (pull/purge) | **Optional** durable backup: gpg-encrypts new captures and pushes **ciphertext** to a per-machine branch of a dedicated private repo (`capture_backup` in `.bailiwick-sync.json`; off + `confidentiality_ack: false` by default). `pull` decrypts to `.bailiwick-inbox/raw/` for curate (runnable from any wired repo); `purge` drops a blob from the **current tree** (not history — ciphertext persists in git history until rewritten/key-destroyed). Blobs are keyed by the collision-resistant `repo_key` (origin-based), so same-basename repos never commingle. Private key never leaves the curating machine. **Best-effort / fail-open**, local-mirror-first — a failed push lags the remote copy but never loses the capture; push success/failure (with unpushed-commit count) is logged to the framework-health shard, surfaced by `/metrics` and the SessionStart error nag. Also transports each machine's **health shard** (encrypted) on `push` and refreshes the fleet's shards into `~/.bailiwick/health/remote/` on `pull`. |
 
 Helpers (not hook events): `sync_knowledge.sh` (outbound knowledge sync — §8), `install_hooks.py`
 (idempotent safe-merge of the hooks block into `~/.claude/settings.json`, matcher-preserving;
@@ -396,7 +396,8 @@ seeded variant:
   `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md` that activate per-repo on the
   `.bailiwick.local.md` marker). Without it,
   every run *validates* these and prints ✓/✗ in the Next steps. (Skills and operator layers are
-  global, not per-repo.)
+  global, not per-repo.) Optionally, `--with-desktop` also wires the read-only Desktop
+  knowledge-reference MCP for Claude/ChatGPT Desktop (§10).
 - **Enrich after bootstrap (`/enrich` in Claude Code, `$bailiwick-enrich` in Codex):** scans the
   bootstrapped repo (Terraform backend/providers/modules, GCP project IDs, environments, CI/CD,
   structure), asks only for gaps it couldn't infer, and **drafts project-context-filled instruction
@@ -479,6 +480,16 @@ The framework is cloned per machine; `.bailiwick-sync.json` (gitignored) sets ea
 (a single central merge authority — avoids the append-heavy conflict class on `INDEX.md` /
 `.telemetry.json`). Telemetry being central-owned removes its conflict class entirely; central
 seeds rows for satellite-PR files on its next reconcile.
+
+**Public-origin instances are contribute-only (ADR-009).** A clone whose `origin` is the public OSS
+repo is a place to *contribute from*, never to *ingest into*: the documented default is a private
+downstream (`origin` → your own private repo, `upstream` → the public OSS with its push URL disabled)
+so a `/curate` push can never land private knowledge in public. See `staying-private.md` and
+threat-model **T9**.
+> **Status:** the private-first *topology* is documented and in effect; the *mechanical* ingestion
+> block ADR-009 specifies (sync/curate refusal on a public-origin remote plus the `allow_public_push`
+> override) is **not yet implemented** — tracked as a `TODO(ADR-009)` at the enforcement points
+> (`sync_knowledge.sh`, `session_start.sh`, `skills/curate/SKILL.md`, `bootstrap.sh`/`.ps1`).
 
 ---
 
@@ -573,6 +584,15 @@ Key consequences (the four tools do not share one uniform integration):
   `~/.gemini/settings.json`, VS Code user `mcp.json`/instructions), leaving the repo untouched —
   verified per adapter in §7.1. Only local Copilot instruction auto-injection is build-dependent
   (VS Code #304101); its user-scope MCP is unaffected.
+- **Desktop reference (read-only, outside the four adapters).** Claude Desktop and ChatGPT Desktop
+  have no hook system, so they sit outside capture/curation/guardrails entirely. `bootstrap.sh
+  --install-tools --with-desktop` (and `bootstrap.ps1 -InstallTools -WithDesktop`) optionally wires a
+  single read-only `bailiwick-knowledge` MCP filesystem server — rooted at `knowledge/` **only**,
+  never the rest of the framework, never writable — into each app's own MCP config
+  (`hooks/install_desktop_mcp.py`, idempotent, path auto-detected for macOS/Windows/WSL). It lets
+  either app *consult* the library outside a coding session; pair it with
+  `knowledge/templates/desktop-reference-instructions.md`. Deliberately **not** a fifth adapter — a
+  reference channel with no enforcement and no capture.
 
 ---
 
@@ -619,14 +639,15 @@ bailiwick/
   agents/         lead + 5 domain + 7 execution (13 files)
   hooks/          session_start.sh  capture_session.py  capture_backup.sh  sync_knowledge.sh
                   guardrails.py  install_hooks.py  settings.template.json  health_common.sh
-                  install_global_layer.sh  codex-global-agents.tmpl.md  gemini-global.tmpl.md
+                  install_global_layer.sh  install_adapter_hooks.py  install_desktop_mcp.py
+                  codex-global-agents.tmpl.md  gemini-global.tmpl.md
   skills/         curate/  enrich/  learn/  metrics/{SKILL.md,report.py}  investigate/  purge/   (each a SKILL.md)
   codex-skills/   bailiwick-curate/  bailiwick-enrich/  bailiwick-learn/  bailiwick-investigate/  bailiwick-purge/  (SKILL.md wrappers)
   copilot-instructions/   terraform-gcp(.gke/.data/.project-stack).md
   prompts/        iam-review · pr-review · module-docs · cost-estimate · security-pr-report
   vscode/         mcp.json (template) · terraform.code-snippets
   docs/           FRAMEWORK.md (this file) · threat-model.md · telemetry-validation-protocol.md
-                  getting-started.md · operations.md · README.md · decisions/ (framework ADRs, adr-001…008)
+                  getting-started.md · operations.md · README.md · decisions/ (framework ADRs, adr-001…009)
 ```
 Hidden per-machine in **wired target repos** (via `.git/info/exclude`, never shared): `.bailiwick-outputs/`,
 `.mcp.json`, `.vscode/mcp.json`, `.codex/config.toml`, `.gemini/settings.json`, `CLAUDE.local.md`,

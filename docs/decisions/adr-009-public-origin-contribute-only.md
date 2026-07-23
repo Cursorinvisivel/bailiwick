@@ -12,6 +12,16 @@ scope:         generic
 
 # ADR-009 — Public-origin instances are contribute-only (ingestion blocked)
 
+> **Implementation status (as of 2026-07-23): the decision stands, but the *mechanical* enforcement
+> in Decision §2 is NOT yet implemented.** The private-first **topology** (Decision §1, documented in
+> [staying-private.md](../staying-private.md)) is in effect as *convention* — rename `origin`,
+> disable the `upstream` push URL, keep a separate contribute-only clone. The layered **code**
+> enforcement — `sync_knowledge.sh` refusing to propagate on a public-origin remote, the `/curate`
+> Step 0 abort, the `session_start.sh` notice, the `--install-tools` warning, and the
+> `allow_public_push` override — does **not exist in the scripts yet**; it is tracked as
+> `TODO(ADR-009)` at each enforcement point. Until it lands, protection is documentation + convention
+> only, not a mechanical guarantee.
+
 ## Context
 
 Bailiwick is published as a public OSS repository, but every user's *instance* of it is private by
@@ -37,7 +47,8 @@ convention.
    contribute-only clone whose `origin` is the public OSS; generic changes are re-created there.
    GitHub forks are never a private downstream (a fork of a public repo is itself public).
 
-2. **Mechanism: a public-origin instance is contribute-only, ingestion-blocked.** The marker is
+2. **Mechanism (PLANNED — not yet implemented; see the status note above): a public-origin instance
+   is contribute-only, ingestion-blocked.** The marker is
    the remote itself — `git remote get-url origin` — matched against the canonical OSS slug
    (`Cursorinvisivel/bailiwick`) under any host alias or protocol. Enforcement is layered:
    - `hooks/sync_knowledge.sh` **refuses to propagate** (exit 1, commits stay local) on a

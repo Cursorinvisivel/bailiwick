@@ -169,6 +169,8 @@ fi
 # --install-tools with NO target = global-only: install/validate the once-per-machine prerequisites
 # (hooks, skills, Codex skills, operator layers, terraform-mcp) and skip ALL per-repo wiring. Shadow
 # mode makes this global-first setup the norm — no throwaway repo needed just to run --install-tools.
+# TODO(ADR-009): warn at --install-tools time when this clone's `origin` is the public OSS repo
+# (contribute-only); the clone can validate/develop but must not ingest. Not yet implemented.
 GLOBAL_ONLY=0
 if [ "$INSTALL_TOOLS" -eq 1 ] && [ -z "$TARGET_ARG" ]; then GLOBAL_ONLY=1; fi
 if [ "$GLOBAL_ONLY" -ne 1 ] && [ "$UNINSTALL" -ne 1 ] && [ -z "$TARGET_ARG" ]; then

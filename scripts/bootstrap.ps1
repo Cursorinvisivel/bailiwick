@@ -17,8 +17,10 @@
   Usage:
     pwsh scripts/bootstrap.ps1 [-Seeded|-Shadow] [-Init] [-WithAgents] [-WithCopilot] [-WithGemini] [-AllTools]
                                [-WithStandards] [-Update] [-Visible] [-Force] [-Clobber] [-NoGhAuth]
-                               [-InstallTools] <target-repo-path>
-    pwsh scripts/bootstrap.ps1 -InstallTools            (global-only: no target repo needed)
+                               [-InstallTools] [-WithDesktop] [-DryRun] <target-repo-path>
+    pwsh scripts/bootstrap.ps1 -InstallTools [-WithDesktop]                 (global-only: no target repo needed)
+    pwsh scripts/bootstrap.ps1 -Uninstall [-DryRun]                        (remove global wiring; bailiwick-scoped)
+    pwsh scripts/bootstrap.ps1 -Uninstall <repo> [-PurgeCaptures] [-DryRun]  (un-seed one repo; captures preserved)
 
   Modes (SHADOW is the DEFAULT):
   (no mode flag) SHADOW MODE: activates the framework for <repo> WITHOUT writing ANY files into
@@ -58,6 +60,13 @@
   Your captures/health/audit data and go-installed MCP binaries are left in place. Preview it with -DryRun.
   -PurgeCaptures (only with '-Uninstall <repo>') also deletes that repo's .bailiwick-outputs/ INCLUDING
   any uncurated captures (default is to preserve + warn). Irreversible.
+  -WithDesktop (only with -InstallTools): wire a READ-ONLY 'bailiwick-knowledge' MCP filesystem server -
+  rooted at knowledge/ ONLY, never the rest of the framework, never writable - into Claude Desktop and
+  ChatGPT Desktop's own MCP config, so either app can CONSULT the knowledge library outside a coding
+  session. Both apps sit OUTSIDE the four hook-adapters (no hook system, so no capture/curation/guardrails).
+  Auto-detects the macOS/Windows config paths; idempotent (delegates the merge to install_desktop_mcp.py).
+  Pair it with knowledge/templates/desktop-reference-instructions.md - paste that into each app's
+  Project/custom instructions. The bash bootstrap.sh exposes the same flag as --with-desktop.
 #>
 [CmdletBinding()]
 param(
@@ -79,6 +88,7 @@ param(
   [switch]$DryRun,
   [switch]$Uninstall,
   [switch]$PurgeCaptures,
+  [switch]$WithDesktop,
   [switch]$Help
 )
 
@@ -208,6 +218,48 @@ function Remove-Allowlist([string]$bwHome) {
   else { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue; Write-Host "  removed: shadow allowlist $f" }
 }
 
+# Resolve where Claude Desktop / ChatGPT Desktop keep their own MCP config, if at all. Both apps share
+# the same `mcpServers` JSON shape but live OUTSIDE the four sanctioned adapters (no hook system) -
+# best-effort path detection for the optional -WithDesktop reference wiring, never a dependency of
+# anything else. Sets $script:ClaudeDesktopCfg / $script:ChatgptDesktopCfg (empty if undetectable) and
+# $script:DesktopOsNote.
+function Resolve-DesktopPaths {
+  $script:ClaudeDesktopCfg = ''; $script:ChatgptDesktopCfg = ''; $script:DesktopOsNote = ''
+  # $IsWindows is undefined on Windows PowerShell 5.1 (which only ever runs on Windows) - treat null as Windows.
+  if ($IsWindows -or ($null -eq $IsWindows)) {
+    if ($env:APPDATA) {
+      $script:ClaudeDesktopCfg  = Join-Path $env:APPDATA 'Claude/claude_desktop_config.json'
+      $script:ChatgptDesktopCfg = Join-Path $env:APPDATA 'ChatGPT/chatgpt_config.json'
+    } else {
+      $script:DesktopOsNote = 'Windows but %APPDATA% is unset - wire manually'
+    }
+  } elseif ($IsMacOS) {
+    $script:ClaudeDesktopCfg  = Join-Path $HOME 'Library/Application Support/Claude/claude_desktop_config.json'
+    $script:ChatgptDesktopCfg = Join-Path $HOME 'Library/Application Support/ChatGPT/chatgpt_config.json'
+  } elseif ($IsLinux) {
+    # Neither app ships an official Linux build; Claude Desktop community builds follow XDG - best-effort only.
+    $script:ClaudeDesktopCfg = Join-Path $HOME '.config/Claude/claude_desktop_config.json'
+    $script:DesktopOsNote = 'native Linux - ChatGPT Desktop has no Linux build; the Claude Desktop path is a best-effort guess for unofficial/community builds'
+  } else {
+    $script:DesktopOsNote = 'unrecognized OS - wire manually'
+  }
+}
+
+# Drop only the bailiwick-knowledge MCP entry (everything else preserved). Native JSON so uninstall
+# needs no python. Best-effort; leaves the file untouched on parse failure.
+function Remove-DesktopMcp([string]$f) {
+  if (-not $f -or -not (Test-Path -LiteralPath $f)) { return }
+  if (-not (Select-String -Path $f -Pattern 'bailiwick-knowledge' -Quiet)) { return }
+  if (Dry) { Plan "remove the bailiwick-knowledge MCP entry from $f"; return }
+  try { $d = [System.IO.File]::ReadAllText($f) | ConvertFrom-Json } catch { return }
+  if ($d.PSObject.Properties['mcpServers']) {
+    $d.mcpServers.PSObject.Properties.Remove('bailiwick-knowledge')
+    if (@($d.mcpServers.PSObject.Properties.Name).Count -eq 0) { $d.PSObject.Properties.Remove('mcpServers') }
+  }
+  [System.IO.File]::WriteAllText($f, (($d | ConvertTo-Json -Depth 20) + "`n"))
+  Write-Host "  removed: bailiwick-knowledge MCP entry from $f"
+}
+
 function Invoke-BailiwickUninstall {
   $codexHomeU  = if ($env:CODEX_HOME)  { $env:CODEX_HOME }  else { Join-Path $HOME '.codex' }
   $geminiHomeU = if ($env:GEMINI_HOME) { $env:GEMINI_HOME } else { Join-Path $HOME '.gemini' }
@@ -224,6 +276,9 @@ function Invoke-BailiwickUninstall {
   Remove-MarkerBlock (Join-Path $geminiHomeU 'GEMINI.md')  '<!-- BEGIN bailiwick'     '<!-- END bailiwick -->' 'Gemini operator layer'
   Remove-GeminiJson (Join-Path $geminiHomeU 'settings.json')
   Remove-BailiwickSymlinks
+  Resolve-DesktopPaths
+  Remove-DesktopMcp $script:ClaudeDesktopCfg
+  Remove-DesktopMcp $script:ChatgptDesktopCfg
   Remove-Allowlist $bwHomeU
   Write-Host ""
   Write-Host "  Left intact by design: this clone (delete the directory to remove it fully); your captures,"
@@ -436,11 +491,13 @@ function Resolve-GhAccount {
 }
 
 # and skip ALL per-repo wiring. Shadow mode makes this global-first setup the norm.
+# TODO(ADR-009): warn at -InstallTools time when this clone's `origin` is the public OSS repo
+# (contribute-only); the clone can validate/develop but must not ingest. Not yet implemented.
 $GlobalOnly = ($InstallTools -and -not $Target)
 if ($Help -or (-not $Target -and -not $GlobalOnly -and -not $Uninstall)) {
   Get-Help $PSCommandPath -Detailed 2>$null
-  Write-Host "Usage: bootstrap.ps1 [-Seeded|-Shadow] [-Init] [-WithAgents] [-WithCopilot] [-AllTools] [-WithStandards] [-Update] [-Visible] [-Force] [-Clobber] [-NoGhAuth] [-InstallTools] [-DryRun] <target-repo-path>"
-  Write-Host "       bootstrap.ps1 -InstallTools            (global-only: no target repo needed)"
+  Write-Host "Usage: bootstrap.ps1 [-Seeded|-Shadow] [-Init] [-WithAgents] [-WithCopilot] [-AllTools] [-WithStandards] [-Update] [-Visible] [-Force] [-Clobber] [-NoGhAuth] [-InstallTools] [-WithDesktop] [-DryRun] <target-repo-path>"
+  Write-Host "       bootstrap.ps1 -InstallTools [-WithDesktop]   (global-only: no target repo needed)"
   Write-Host "       bootstrap.ps1 -Uninstall [-DryRun]     (remove the global once-per-machine wiring; bailiwick-scoped)"
   Write-Host "       bootstrap.ps1 -Uninstall <repo> [-PurgeCaptures] [-DryRun]  (un-seed one repo; captures preserved)"
   Write-Host "Default mode is SHADOW (zero-footprint; personal): no files are written into the repo."
@@ -1013,6 +1070,7 @@ if ($DryRun -and $InstallTools) {
   Write-Host "    - wire the guardrail into ~/.codex/config.toml + ~/.gemini/settings.json (install_adapter_hooks.py)"
   Write-Host "    - symlink skills into ~/.claude/skills/ and ~/.codex/skills/"
   Write-Host "    - install operator layers into ~/.codex/AGENTS.md + ~/.gemini/GEMINI.md"
+  if ($WithDesktop) { Write-Host "    - wire the read-only bailiwick-knowledge MCP into Claude/ChatGPT Desktop configs (install_desktop_mcp.py)" }
   Write-Host "  [dry-run] nothing installed; the status lines below reflect the CURRENT state."
   $InstallTools = $false
 }
@@ -1170,6 +1228,41 @@ if (Test-GlobalLayer $geminiAgents) {
   $geminiStatus = "MISSING Gemini operator layer - re-run with -InstallTools. Only needed if you use Gemini."
 }
 
+# --- Optional READ-ONLY knowledge reference for Claude Desktop / ChatGPT Desktop (-WithDesktop) ---
+# Neither app has a hook system, so this is deliberately OUTSIDE capture/curation/guardrails (those only
+# cover the four sanctioned adapters). A single bailiwick-knowledge MCP filesystem server rooted at
+# knowledge/ ONLY, never the rest of the framework, and never writable from either app. Opt-in and
+# -InstallTools-gated; status is always shown once detection runs (mirrors bootstrap.sh --with-desktop).
+$desktopInstr = Join-Path $BailiwickRoot 'knowledge/templates/desktop-reference-instructions.md'
+Resolve-DesktopPaths
+function Test-DesktopWired([string]$f) { $f -and (Test-Path -LiteralPath $f) -and (Select-String -Path $f -Pattern 'bailiwick-knowledge' -Quiet) }
+function Invoke-DesktopWire([string]$label, [string]$cfg) {
+  if (-not $cfg) { return }
+  Write-Host "  -WithDesktop: $label knowledge reference ($cfg)..."
+  & $pyExe.Source (Join-Path $BailiwickRoot 'hooks/install_desktop_mcp.py') $cfg (Join-Path $BailiwickRoot 'knowledge') 2>&1 | ForEach-Object { "    $_" }
+}
+if ($WithDesktop -and $InstallTools -and $pyExe) {
+  Write-Host "  -WithDesktop: wiring the read-only knowledge-reference MCP server..."
+  Invoke-DesktopWire 'Claude Desktop' $script:ClaudeDesktopCfg
+  Invoke-DesktopWire 'ChatGPT Desktop' $script:ChatgptDesktopCfg
+} elseif ($WithDesktop -and $InstallTools -and -not $pyExe) {
+  Write-Host "  -WithDesktop: SKIPPED - python3/python not found (needed to merge the MCP config safely)."
+}
+if (Test-DesktopWired $script:ClaudeDesktopCfg) {
+  $claudeDtStatus = "OK Claude Desktop wired to knowledge/ (read-only) - $($script:ClaudeDesktopCfg) - paste $desktopInstr into its Project instructions"
+} elseif ($script:ClaudeDesktopCfg) {
+  $claudeDtStatus = "-- Claude Desktop not wired ($($script:ClaudeDesktopCfg)) - re-run with -InstallTools -WithDesktop, or wire manually if you don't use Claude Desktop"
+} else {
+  $claudeDtStatus = "-- Claude Desktop config path not detected" + $(if ($script:DesktopOsNote) { " ($($script:DesktopOsNote))" } else { "" })
+}
+if (Test-DesktopWired $script:ChatgptDesktopCfg) {
+  $chatgptDtStatus = "OK ChatGPT Desktop wired to knowledge/ (read-only) - $($script:ChatgptDesktopCfg) - paste $desktopInstr into its Project instructions"
+} elseif ($script:ChatgptDesktopCfg) {
+  $chatgptDtStatus = "-- ChatGPT Desktop not wired ($($script:ChatgptDesktopCfg)) - re-run with -InstallTools -WithDesktop, or wire manually if you don't use ChatGPT Desktop"
+} else {
+  $chatgptDtStatus = "-- ChatGPT Desktop config path not detected" + $(if ($script:DesktopOsNote) { " ($($script:DesktopOsNote))" } else { "" })
+}
+
 if ($GlobalOnly) {
   Write-Host ""
   Write-Host "OK Global bailiwick prerequisites installed/validated (no repo wired)."
@@ -1181,6 +1274,8 @@ if ($GlobalOnly) {
   Write-Host "  - $codexSkillStatus"
   Write-Host "  - $codexStatus"
   Write-Host "  - $geminiStatus"
+  Write-Host "  - $claudeDtStatus"
+  Write-Host "  - $chatgptDtStatus"
   Write-Host "  - wire a repo:  bootstrap.ps1 <repo>   (shadow/zero-footprint by default; -Seeded for in-repo hidden wiring)"
 } elseif ($Shadow) {
   # Reached only on a shadow run WITH -InstallTools (plain shadow runs exit in the shadow block).
@@ -1194,6 +1289,8 @@ if ($GlobalOnly) {
   Write-Host "  - $codexSkillStatus"
   Write-Host "  - $codexStatus"
   Write-Host "  - $geminiStatus"
+  Write-Host "  - $claudeDtStatus"
+  Write-Host "  - $chatgptDtStatus"
 } else {
   Write-Host ""
   Write-Host "OK Bootstrapped '$RepoName'."
@@ -1207,5 +1304,7 @@ if ($GlobalOnly) {
   Write-Host "  - $codexStatus"
   if ($codexMcpStatus) { Write-Host "  - $codexMcpStatus" }
   Write-Host "  - $geminiStatus"
+  Write-Host "  - $claudeDtStatus"
+  Write-Host "  - $chatgptDtStatus"
   Write-Host "  - edit CLAUDE.local.md project-specific sections  (stack, environments, backend, CI/CD)"
 }
