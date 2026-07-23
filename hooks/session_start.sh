@@ -82,6 +82,10 @@ cat <<'EOF'
 - Capture is enforced via hooks; promotion to the knowledge library stays human-gated via /curate.
 EOF
 
+# TODO(ADR-009): when this clone's `origin` is the public OSS repo (contribute-only), print a
+# contribute-only notice here so user and agent know ingestion (/curate, sync) is blocked on this
+# instance. Not yet implemented — see docs/decisions/adr-009.
+
 # --- Inbound knowledge sync: keep the Bailiwick clone current (ff-only, throttled, non-fatal) ---
 sync_inbound() {
   command -v git >/dev/null 2>&1 || return 0

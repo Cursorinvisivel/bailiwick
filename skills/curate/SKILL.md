@@ -21,6 +21,7 @@ gpg private key, so full centralized curation runs on the machine that holds it.
 - `.telemetry.json` is the ONLY knowledge file written without approval (commit with `telemetry:` prefix).
 - Never duplicate: check INDEX.md tags AND read candidate files before any write (NEW / EXPAND / IMPROVE / SKIP).
 - Raw captures in `.bailiwick-outputs/raw/` are unsanitised and may contain client IAM, project IDs, or secrets. Abstract to generic before promoting; route client-identifying detail to `clients/<id>/`. Never commit raw captures.
+- **TODO(ADR-009):** a planned Step 0 will abort curation — before extracting anything — when this clone's `origin` is the public OSS repo (contribute-only), unless `allow_public_push` is set. Not yet implemented: until it lands, run `/curate` only on a **private-downstream** clone, never on a public-origin one (see [staying-private.md](../../docs/staying-private.md)).
 
 ## Procedure
 

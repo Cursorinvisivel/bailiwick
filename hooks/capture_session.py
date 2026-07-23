@@ -27,13 +27,14 @@ MIN_TOOL_CALLS = 3
 # Tightened (BACKLOG §4 / ADR-004 follow-up): a path *mention* in an arbitrary tool input — e.g.
 # Write/Edit of a doc that quotes the path — is NOT a load. Only genuine read operations count:
 #   - the Read tool (file_path input)
-#   - MCP filesystem read tools (read_file / read_text_file / read_multiple_files / …)
+#   - MCP filesystem read tools (read_file / read_text_file / read_multiple_files / …), under
+#     either the seeded-mode server name `filesystem` or the shadow-mode `bailiwick-filesystem`
 #   - Bash, only when the command actually reads content (cat/head/tail/less/more/grep/rg/sed/awk)
 # id = filename stem for topics/patterns/context; clients/<cid>/<stem>.md carries id <cid>-<stem>
 # (per the observed frontmatter convention, e.g. clients/acme/project-map.md → acme-project-map).
 KNOWLEDGE_RE = re.compile(r"knowledge/(?:topics|patterns|context)/([a-z0-9][a-z0-9-]*)\.md")
 CLIENT_KNOWLEDGE_RE = re.compile(r"knowledge/clients/([a-z0-9][a-z0-9-]*)/([a-z0-9][a-z0-9-]*)\.md")
-MCP_FS_READ_RE = re.compile(r"^mcp__filesystem__read_")
+MCP_FS_READ_RE = re.compile(r"^mcp__(?:bailiwick-)?filesystem__read_")
 BASH_READ_RE = re.compile(r"\b(cat|head|tail|less|more|grep|rg|sed|awk)\b")
 
 

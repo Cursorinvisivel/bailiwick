@@ -135,7 +135,7 @@ without exposing raw transcripts.
 
 **How.** The Stop/SessionEnd hooks `gpg`-encrypt new captures and push **ciphertext only** to a
 per-machine branch of a **dedicated private repo**. The gpg **private key never leaves the machine**
-that runs `/curate`, which decrypts blobs into `.bailiwick-inbox/`, promotes the relevant bits to the
+that runs `/curate`, which decrypts blobs into `.bailiwick-inbox/raw/`, promotes the relevant bits to the
 clean zone, and purges the blob. Because the remote only ever holds ciphertext, the post-curate
 purge is hygiene — not a history rewrite you have to trust.
 

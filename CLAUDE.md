@@ -96,8 +96,10 @@ See $BAILIWICK/hooks/README.md.
 Claude Desktop and ChatGPT Desktop have no hook system, so they sit **outside** the four adapters
 above and outside capture/curation/guardrails entirely. `bootstrap.sh --install-tools --with-desktop`
 optionally wires a single narrowly-scoped `bailiwick-knowledge` MCP filesystem server — rooted at
-`knowledge/` only, never the rest of the framework — into each app's own MCP config, auto-detecting
-macOS/Windows/WSL paths (`hooks/install_desktop_mcp.py`, idempotent, bailiwick-* named). This lets
+`knowledge/` only, never the rest of the framework — into each app's own MCP config. `bootstrap.sh`
+(and `bootstrap.ps1`) auto-detects the macOS/Windows/WSL config paths and delegates the idempotent,
+non-destructive merge to `hooks/install_desktop_mcp.py` (scoped to the single `bailiwick-knowledge`
+server). This lets
 either app **consult** the knowledge library for reference outside a coding session; it can never
 write back into it. Pair it with `knowledge/templates/desktop-reference-instructions.md`, pasted into
 the app's Project/custom instructions, since the retrieval discipline below isn't auto-injected there.

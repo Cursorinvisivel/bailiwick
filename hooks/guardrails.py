@@ -13,14 +13,15 @@ instead of mere instructions:
 
   - ASK-IMPACT (forced reconfirmation — even when the user instructed the agent):
           actions with real-world impact — terraform/terragrunt apply & destroy;
-          kubectl apply/delete/patch/replace/scale/drain + mutating rollouts;
+          kubectl apply/delete/patch/replace/scale/drain/cordon/uncordon +
+          mutating rollouts;
           helm install/upgrade/uninstall/rollback; gcloud/gsutil/az
           delete/destroy/update/patch/rm; mutating aws verbs and aws s3 rm/rb/mv;
           recursive/forced shell rm; git merge; gh repo delete. These never run on
           agent initiative alone: the harness surfaces a confirmation so the user
           re-confirms that this specific action really is the intent.
   - ASK-GO-AHEAD (forced confirmation): git commit / git push and PR opening/merging
-          (gh pr create|merge|close). Allowed only on a clear user go-ahead — never
+          (gh pr create|merge|close|ready). Allowed only on a clear user go-ahead — never
           silently, never agent-initiated. A commit/PR message carrying an AI
           attribution signature (Co-Authored-By: Claude / "Generated with ... Claude" /
           the robot emoji) gets its own confirmation so a signature never lands unnoticed.
