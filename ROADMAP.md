@@ -6,7 +6,9 @@ honest analysis of what it would take to grow beyond that, plus smaller items on
 the core reference where it would otherwise read as unfinished.
 
 **Nothing here is a commitment or a shipped feature** — it is design thinking. Discussion and
-contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+contributions are welcome: argue with any of it — especially the [open questions](#open-questions) —
+in **[Discussions → Ideas](https://github.com/Cursorinvisivel/bailiwick/discussions/categories/ideas)**;
+to build something, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 

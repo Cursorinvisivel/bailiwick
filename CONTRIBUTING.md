@@ -53,9 +53,15 @@ the depth layer; this file is the practical how-to-help.
 
 Pick the recipe that matches your change — each notes where it lives and how to verify it.
 
+> **Not sure yet? Start in [Discussions](https://github.com/Cursorinvisivel/bailiwick/discussions).**
+> Questions and setup help go to **Q&A**; a change you'd like to propose before building it goes to
+> **Ideas** — worth doing for anything invariant-touching, so the ADR conversation happens before the
+> PR. [SUPPORT.md](SUPPORT.md) has the full routing.
+
 - **A bug or behavior report.** Open an issue naming the tool (Claude Code / Codex / Gemini /
   Copilot), the exact command, expected vs. actual, and the relevant hook/adapter. A failing
-  `tests/test_guardrails.py` case is the ideal repro for guardrail issues.
+  `tests/test_guardrails.py` case is the ideal repro for guardrail issues. If you're not yet sure
+  it's a defect, ask in Q&A first — threads get converted to issues when they turn out to be one.
 - **Knowledge (topics / patterns).** Add a Markdown file under `knowledge/topics/` or
   `knowledge/patterns/` following the frontmatter schema (see the `INDEX.md` header and
   `knowledge/templates/topic-file-template.md`), add its `INDEX.md` row, and author a `## Related`

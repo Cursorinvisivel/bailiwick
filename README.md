@@ -129,6 +129,15 @@ scripts/     bootstrap.sh · bootstrap.ps1  (repo onboarding)
 docs/        this documentation set · decisions/ (framework ADRs)
 ```
 
+## Community & support
+
+**[Discussions](https://github.com/Cursorinvisivel/bailiwick/discussions)** is the place to interact —
+questions and setup help in **[Q&A](https://github.com/Cursorinvisivel/bailiwick/discussions/categories/q-a)**,
+proposals and roadmap feedback in **[Ideas](https://github.com/Cursorinvisivel/bailiwick/discussions/categories/ideas)**,
+your own library or adaptation in **[Show and tell](https://github.com/Cursorinvisivel/bailiwick/discussions/categories/show-and-tell)**.
+Issues are for reproducible bugs; vulnerabilities go [privately](SECURITY.md), never in public.
+If you're not sure it's a bug, start a discussion — see **[SUPPORT.md](SUPPORT.md)**.
+
 ## Contributing & license
 
 Issues and PRs welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)**. The one hard rule: **no private

@@ -1,0 +1,14 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or help getting set up
+    url: https://github.com/Cursorinvisivel/bailiwick/discussions/categories/q-a
+    about: "Ask in Q&A — install, bootstrap modes, adapters, curation, how-do-I. Answers get marked, so the next person finds them."
+  - name: Idea, feature proposal, or roadmap feedback
+    url: https://github.com/Cursorinvisivel/bailiwick/discussions/categories/ideas
+    about: "Propose it in Ideas first — ROADMAP.md open questions are discussed there before they become issues or PRs."
+  - name: Show your setup, knowledge library, or adaptation
+    url: https://github.com/Cursorinvisivel/bailiwick/discussions/categories/show-and-tell
+    about: "Share how you use Bailiwick — domains other than cloud/IaC are especially welcome. No private or client data."
+  - name: Security vulnerability (private)
+    url: https://github.com/Cursorinvisivel/bailiwick/security/advisories/new
+    about: "Never open a public issue for a vulnerability or for leaked private data — report it privately here. See SECURITY.md."
