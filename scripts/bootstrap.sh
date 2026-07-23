@@ -51,6 +51,18 @@ Options:
                    ~/.gemini/GEMINI.md layer (installed by --install-tools); the team's own GEMINI.md
                    is never shadowed. A team-tracked .gemini/settings.json is left untouched.
   --all-tools      Shorthand for --with-agents --with-copilot --with-gemini.
+  --with-desktop   Only with '--install-tools': wire a READ-ONLY 'bailiwick-knowledge' MCP
+                   filesystem server (rooted at knowledge/ only, never the rest of the framework)
+                   into Claude Desktop and ChatGPT Desktop's own MCP config — so either app can
+                   consult the knowledge library for reference outside a coding session. Neither
+                   app has a hook system, so this is deliberately OUTSIDE capture/curation/
+                   guardrails (see CLAUDE.md); nothing said there is captured, and nothing can be
+                   written back into the library from there. Detects macOS / native Windows / WSL
+                   (resolves the Windows-host config via cmd.exe+wslpath) config paths automatically;
+                   prints manual instructions when a path can't be resolved. Idempotent, bailiwick-*
+                   named (never collides with your own MCP servers). Pair with the printed
+                   knowledge/templates/desktop-reference-instructions.md — paste it into each app's
+                   Project/custom instructions, since retrieval discipline isn't auto-injected there.
   --with-standards Also seed agnostic, self-contained BASELINE standard files (CLAUDE.md, and
                    AGENTS.md / .github/copilot-instructions.md per the tool flags) with generic
                    engineering best practices. These are TRACKED (shared with the team), contain no
@@ -74,9 +86,10 @@ Options:
                    terraform-mcp-server and github-mcp-server binaries (via 'go install', needs go), the
                    capture/curation + guardrail hooks (merged into ~/.claude/settings.json),
                    the global Claude skill symlinks (~/.claude/skills/: /curate, /enrich, /learn, /metrics, /investigate, /purge), the
-                   Codex skill symlinks (~/.codex/skills/: bailiwick-curate, bailiwick-enrich, bailiwick-learn, bailiwick-investigate, bailiwick-purge), and the global
+                   Codex skill symlinks (~/.codex/skills/: bailiwick-curate, bailiwick-enrich, bailiwick-learn, bailiwick-investigate, bailiwick-purge), the global
                    Codex + Gemini operator layers (managed blocks in ~/.codex/AGENTS.md and
-                   ~/.gemini/GEMINI.md). Idempotent — no-op for anything already present. Off by
+                   ~/.gemini/GEMINI.md), and, only with --with-desktop, the read-only Claude/ChatGPT
+                   Desktop knowledge-reference MCP wiring (see --with-desktop above). Idempotent — no-op for anything already present. Off by
                    default (it touches global state + the network). Run with NO <target-repo-path>
                    for a global-only install — nothing per-repo is written (handy after adding a new
                    skill, or as first-time machine setup for shadow mode).
@@ -112,7 +125,7 @@ framework is written to the tracked .gitignore, so a clone shows no trace of it.
 USAGE
 }
 
-DO_INIT=0; WITH_AGENTS=0; WITH_COPILOT=0; WITH_GEMINI=0; FORCE=0; CLOBBER=0; VISIBLE=0; UPDATE=0; NO_GH_AUTH=0; INSTALL_TOOLS=0; WITH_STANDARDS=0; SHADOW=0; SEEDED=0; DRY_RUN=0; UNINSTALL=0; PURGE_CAPTURES=0; TARGET_ARG=""
+DO_INIT=0; WITH_AGENTS=0; WITH_COPILOT=0; WITH_GEMINI=0; WITH_DESKTOP=0; FORCE=0; CLOBBER=0; VISIBLE=0; UPDATE=0; NO_GH_AUTH=0; INSTALL_TOOLS=0; WITH_STANDARDS=0; SHADOW=0; SEEDED=0; DRY_RUN=0; UNINSTALL=0; PURGE_CAPTURES=0; TARGET_ARG=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
@@ -123,6 +136,7 @@ while [ $# -gt 0 ]; do
     --with-copilot) WITH_COPILOT=1 ;;
     --with-gemini) WITH_GEMINI=1 ;;
     --all-tools) WITH_AGENTS=1; WITH_COPILOT=1; WITH_GEMINI=1 ;;
+    --with-desktop) WITH_DESKTOP=1 ;;
     --with-standards) WITH_STANDARDS=1 ;;
     --update) UPDATE=1 ;;
     --no-gh-auth) NO_GH_AUTH=1 ;;
@@ -172,6 +186,49 @@ fi
 # ================================ dry-run + uninstall ===========================================
 DRY() { [ "$DRY_RUN" -eq 1 ]; }
 plan() { printf '  [dry-run] would %s\n' "$1"; }
+
+# Resolve where Claude Desktop / ChatGPT Desktop keep their own MCP config, if at all. Both apps
+# share the same `mcpServers` JSON shape but live OUTSIDE the four sanctioned adapters (Claude
+# Code/Codex/Gemini/Copilot) — neither has a hook system, so this is best-effort path detection
+# for the optional --with-desktop reference wiring, never a dependency of anything else. Sets
+# CLAUDE_DESKTOP_CFG / CHATGPT_DESKTOP_CFG (empty if undetectable) and DESKTOP_OS_NOTE.
+resolve_desktop_paths() {
+  CLAUDE_DESKTOP_CFG=""; CHATGPT_DESKTOP_CFG=""; DESKTOP_OS_NOTE=""
+  local uname_s; uname_s="$(uname -s 2>/dev/null || echo unknown)"
+  local is_wsl=0
+  if [ -f /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; then is_wsl=1; fi
+
+  if [ "$is_wsl" -eq 1 ]; then
+    # Desktop apps (if installed) run on the Windows HOST, not inside WSL — resolve the real
+    # Windows %APPDATA% via cmd.exe and translate it to a WSL path.
+    local win_appdata appdata_wsl
+    win_appdata="$(cmd.exe /c "echo %APPDATA%" 2>/dev/null | tr -d '\r')"
+    if [ -n "$win_appdata" ] && command -v wslpath >/dev/null 2>&1; then
+      appdata_wsl="$(wslpath -u "$win_appdata" 2>/dev/null || true)"
+    fi
+    if [ -n "${appdata_wsl:-}" ]; then
+      CLAUDE_DESKTOP_CFG="$appdata_wsl/Claude/claude_desktop_config.json"
+      CHATGPT_DESKTOP_CFG="$appdata_wsl/ChatGPT/chatgpt_config.json"
+      DESKTOP_OS_NOTE="WSL detected — targeting the Windows-host config paths (the apps run on Windows, not inside WSL)"
+    else
+      DESKTOP_OS_NOTE="WSL detected but couldn't resolve the Windows %APPDATA% path (cmd.exe/wslpath unavailable) — wire manually"
+    fi
+  elif [ "$uname_s" = "Darwin" ]; then
+    CLAUDE_DESKTOP_CFG="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+    CHATGPT_DESKTOP_CFG="$HOME/Library/Application Support/ChatGPT/chatgpt_config.json"
+  elif [ -n "${APPDATA:-}" ]; then
+    # Native Windows shell (Git Bash / MSYS / Cygwin) — %APPDATA% is already a usable env var.
+    CLAUDE_DESKTOP_CFG="$APPDATA/Claude/claude_desktop_config.json"
+    CHATGPT_DESKTOP_CFG="$APPDATA/ChatGPT/chatgpt_config.json"
+  elif [ "$uname_s" = "Linux" ]; then
+    # Neither app ships an official Linux build. Claude Desktop has unofficial/community Linux
+    # builds that follow the XDG convention — best-effort only. ChatGPT Desktop: no Linux build.
+    CLAUDE_DESKTOP_CFG="$HOME/.config/Claude/claude_desktop_config.json"
+    DESKTOP_OS_NOTE="native Linux — ChatGPT Desktop has no Linux build; the Claude Desktop path is a best-effort guess for unofficial/community builds"
+  else
+    DESKTOP_OS_NOTE="unrecognized OS ($uname_s) — wire manually"
+  fi
+}
 
 # Remove a marker-delimited BEGIN..END block from a text file, in place. Only ever matches
 # `bailiwick` markers, so a coexisting framework's blocks are never touched. Best-effort.
@@ -243,6 +300,24 @@ json.dump(d, open(f, "w", encoding="utf-8"), indent=2); open(f, "a").write("\n")
 PY
 }
 
+rm_desktop_mcp() {  # <file> — drop only the bailiwick-knowledge MCP entry (everything else preserved)
+  local f="$1"
+  [ -n "$f" ] && [ -f "$f" ] && grep -qF "bailiwick-knowledge" "$f" 2>/dev/null || return 0
+  if DRY; then plan "remove the bailiwick-knowledge MCP entry from $f"; return 0; fi
+  if python3 - "$f" <<'PY'; then echo "  removed: bailiwick-knowledge MCP entry from $f"; fi
+import json, sys
+f = sys.argv[1]
+try: d = json.load(open(f, encoding="utf-8"))
+except Exception: sys.exit(1)
+if not isinstance(d, dict): sys.exit(1)
+srv = d.get("mcpServers")
+if isinstance(srv, dict):
+    srv.pop("bailiwick-knowledge", None)
+    if not srv: d.pop("mcpServers", None)
+json.dump(d, open(f, "w", encoding="utf-8"), indent=2); open(f, "a").write("\n")
+PY
+}
+
 rm_symlinks() {  # only symlinks that resolve INTO this clone
   local d link tgt
   for d in "$HOME/.claude/skills" "${CODEX_HOME:-$HOME/.codex}/skills"; do
@@ -286,6 +361,9 @@ uninstall_global() {
   rm_block "$codex/AGENTS.md"   "<!-- BEGIN bailiwick"    "<!-- END bailiwick -->" "Codex operator layer"
   rm_block "$gem/GEMINI.md"     "<!-- BEGIN bailiwick"    "<!-- END bailiwick -->" "Gemini operator layer"
   rm_gemini_json
+  resolve_desktop_paths
+  rm_desktop_mcp "$CLAUDE_DESKTOP_CFG"
+  rm_desktop_mcp "$CHATGPT_DESKTOP_CFG"
   rm_symlinks
   rm_allowlist
   echo
@@ -1064,6 +1142,10 @@ if [ "$DRY_RUN" -eq 1 ] && [ "$INSTALL_TOOLS" -eq 1 ]; then
   echo "    • wire the guardrail into ~/.codex/config.toml + ~/.gemini/settings.json (install_adapter_hooks.py)"
   echo "    • symlink skills into ~/.claude/skills/ and ~/.codex/skills/"
   echo "    • install operator layers into ~/.codex/AGENTS.md + ~/.gemini/GEMINI.md"
+  if [ "$WITH_DESKTOP" -eq 1 ]; then
+    echo "    • merge a read-only bailiwick-knowledge MCP entry (rooted at knowledge/) into Claude"
+    echo "      Desktop + ChatGPT Desktop's own config (--with-desktop)"
+  fi
   echo "  [dry-run] nothing installed; the status lines below reflect the CURRENT state."
   INSTALL_TOOLS=0
 fi
@@ -1200,6 +1282,42 @@ else
   GEMINI_STATUS="✗ Gemini operator layer not installed — re-run with --install-tools. Only needed if you use Gemini."
 fi
 
+# --- Optional READ-ONLY knowledge reference for Claude Desktop / ChatGPT Desktop (--with-desktop) ---
+# Neither app has a hook system, so this is deliberately OUTSIDE capture/curation/guardrails — those
+# only cover the four sanctioned adapters (Claude Code/Codex/Gemini/Copilot). Scope is narrow by
+# design: a single bailiwick-knowledge MCP filesystem server rooted at knowledge/ ONLY, never the
+# rest of the framework, and never writable from either app. Opt-in and --install-tools-gated,
+# same as the Codex/Gemini operator layers above; status is always shown once detection runs.
+DESKTOP_INSTR="$BAILIWICK_ROOT/knowledge/templates/desktop-reference-instructions.md"
+resolve_desktop_paths
+desktop_present() { [ -n "$1" ] && [ -f "$1" ] && grep -qF "bailiwick-knowledge" "$1" 2>/dev/null; }
+desktop_wire() {  # <label> <config-path>
+  local label="$1" cfg="$2"
+  [ -n "$cfg" ] || return 0
+  if DRY; then plan "merge a read-only bailiwick-knowledge MCP entry into $label ($cfg)"; return 0; fi
+  echo "  --install-tools: $label knowledge reference ($cfg)…"
+  python3 "$BAILIWICK_ROOT/hooks/install_desktop_mcp.py" "$cfg" "$BAILIWICK_ROOT/knowledge" 2>&1 | sed 's/^/    /' || true
+}
+if [ "$WITH_DESKTOP" -eq 1 ] && [ "$INSTALL_TOOLS" -eq 1 ] && command -v python3 >/dev/null 2>&1; then
+  echo "  --with-desktop: wiring the read-only knowledge-reference MCP server…"
+  desktop_wire "Claude Desktop" "$CLAUDE_DESKTOP_CFG"
+  desktop_wire "ChatGPT Desktop" "$CHATGPT_DESKTOP_CFG"
+fi
+if desktop_present "$CLAUDE_DESKTOP_CFG"; then
+  CLAUDE_DT_STATUS="✓ Claude Desktop wired to knowledge/ (read-only) — $CLAUDE_DESKTOP_CFG — paste $DESKTOP_INSTR into its Project instructions"
+elif [ -n "$CLAUDE_DESKTOP_CFG" ]; then
+  CLAUDE_DT_STATUS="✗ Claude Desktop not wired ($CLAUDE_DESKTOP_CFG) — re-run with --install-tools --with-desktop, or wire manually if you don't use Claude Desktop"
+else
+  CLAUDE_DT_STATUS="✗ Claude Desktop config path not detected${DESKTOP_OS_NOTE:+ ($DESKTOP_OS_NOTE)}"
+fi
+if desktop_present "$CHATGPT_DESKTOP_CFG"; then
+  CHATGPT_DT_STATUS="✓ ChatGPT Desktop wired to knowledge/ (read-only) — $CHATGPT_DESKTOP_CFG — paste $DESKTOP_INSTR into its Project instructions"
+elif [ -n "$CHATGPT_DESKTOP_CFG" ]; then
+  CHATGPT_DT_STATUS="✗ ChatGPT Desktop not wired ($CHATGPT_DESKTOP_CFG) — re-run with --install-tools --with-desktop, or wire manually if you don't use ChatGPT Desktop"
+else
+  CHATGPT_DT_STATUS="✗ ChatGPT Desktop config path not detected${DESKTOP_OS_NOTE:+ ($DESKTOP_OS_NOTE)}"
+fi
+
 if [ "$GLOBAL_ONLY" -eq 1 ]; then
   printf '\n✓ Global bailiwick prerequisites installed/validated (no repo wired).\n'
   printf 'Next:\n'
@@ -1210,6 +1328,8 @@ if [ "$GLOBAL_ONLY" -eq 1 ]; then
   printf '  • %s\n' "$CODEX_SKILL_STATUS"
   printf '  • %s\n' "$CODEX_STATUS"
   printf '  • %s\n' "$GEMINI_STATUS"
+  printf '  • %s\n' "$CLAUDE_DT_STATUS"
+  printf '  • %s\n' "$CHATGPT_DT_STATUS"
   printf '  • wire a repo:  %s <repo>   (shadow/zero-footprint by default; --seeded for in-repo hidden wiring)\n' "$0"
 elif [ "$SHADOW" -eq 1 ]; then
   # Reached only on a shadow run WITH --install-tools (plain shadow runs exit in the shadow block).
@@ -1222,6 +1342,8 @@ elif [ "$SHADOW" -eq 1 ]; then
   printf '  • %s\n' "$CODEX_SKILL_STATUS"
   printf '  • %s\n' "$CODEX_STATUS"
   printf '  • %s\n' "$GEMINI_STATUS"
+  printf '  • %s\n' "$CLAUDE_DT_STATUS"
+  printf '  • %s\n' "$CHATGPT_DT_STATUS"
 else
   printf '\n✓ Bootstrapped %q.\n' "$REPO_NAME"
   printf 'Next:\n'
@@ -1234,5 +1356,7 @@ else
   printf '  • %s\n' "$CODEX_STATUS"
   [ -n "$CODEX_MCP_STATUS" ] && printf '  • %s\n' "$CODEX_MCP_STATUS"
   printf '  • %s\n' "$GEMINI_STATUS"
+  printf '  • %s\n' "$CLAUDE_DT_STATUS"
+  printf '  • %s\n' "$CHATGPT_DT_STATUS"
   printf '  • edit CLAUDE.local.md project-specific sections   (stack, environments, backend, CI/CD)\n'
 fi
