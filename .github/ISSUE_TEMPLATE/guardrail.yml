@@ -1,0 +1,100 @@
+name: Guardrail behaviour
+description: A command that should have been intercepted wasn't — or a safe one was blocked.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The guardrail's decision contract **is** its spec: `hooks/guardrails.py` plus the cases in
+        `tests/test_guardrails.py`. The most useful version of this report is one that reads like a
+        failing test — that's what the fields below are for.
+
+  - type: checkboxes
+    id: not-a-sandbox
+    attributes:
+      label: Scope check
+      description: "This one rules out the most common non-bug. See [SECURITY.md](https://github.com/Cursorinvisivel/bailiwick/blob/main/SECURITY.md) and [docs/threat-model.md](https://github.com/Cursorinvisivel/bailiwick/blob/main/docs/threat-model.md)."
+      options:
+        - label: "I understand the guardrail matches **direct commands only** — reaching an action through `make`, a wrapper script, a shell alias/function, or an MCP tool call bypasses it **by design**. It is a productivity guardrail, not a sandbox. My report isn't that."
+          required: true
+
+  - type: dropdown
+    id: adapter
+    attributes:
+      label: Adapter
+      description: Copilot is policy-only (no hook equivalent) and can't be the subject of this form.
+      options:
+        - Claude Code (PreToolUse, ask tiers)
+        - Codex CLI (PreToolUse, deny + break-glass)
+        - Gemini CLI (BeforeTool, ask)
+    validations:
+      required: true
+
+  - type: input
+    id: adapter-version
+    attributes:
+      label: Tool version
+      placeholder: "gemini 0.x.y"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What went wrong
+      options:
+        - "Missed — a high-impact command ran without interception"
+        - "Over-fired — a safe/validation-only command was intercepted"
+        - "Wrong tier — asked when it should deny, or vice versa"
+        - "Exemption not honoured — capture plumbing or a read-only command was blocked"
+        - "Break-glass allow-once didn't work (Codex)"
+        - "Hook didn't fire at all / errored"
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: The exact command
+      description: Verbatim, as the agent invoked it — spacing and flags matter to the matcher. Redact real identifiers, but keep the shape (`terraform apply -target=module.<redacted>`).
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: expected
+    attributes:
+      label: Expected decision
+      options:
+        - "allow — run untouched"
+        - "ask (high-impact) — force in-the-moment re-confirmation"
+        - "ask (go-ahead) — commit / push / PR needs a clear user go-ahead"
+        - "deny (+ break-glass) — Codex"
+        - "exempt — never blocked (capture plumbing)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: What actually happened
+      description: The prompt you saw (or didn't), any hook output or stderr, and whether the command ultimately ran.
+    validations:
+      required: true
+
+  - type: textarea
+    id: testcase
+    attributes:
+      label: Proposed test case
+      description: "Optional but the fastest path to a fix — a case for `tests/test_guardrails.py` in the shape of the existing ones. A PR with it is even better; see [CONTRIBUTING.md](https://github.com/Cursorinvisivel/bailiwick/blob/main/CONTRIBUTING.md)."
+      render: python
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Before submitting
+      options:
+        - label: I've removed all private and client data from the command and output above.
+          required: true
