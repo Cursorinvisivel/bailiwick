@@ -123,6 +123,12 @@ If you touch docs, sanity-check that relative links resolve.
 - Path-scoped and marker-delimited edits are a recurring safety pattern (installers only ever touch
   *their own* marked blocks / this clone's paths) — preserve it when editing the installers.
 
+## Code of conduct
+
+Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md) (Contributor Covenant 2.1).
+Reporting runs through GitHub's own abuse tooling; content that leaks private or client data goes
+through the private security channel instead — both are spelled out there.
+
 ## Security
 
 Please report security issues privately — see [SECURITY.md](SECURITY.md).
