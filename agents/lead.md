@@ -1,29 +1,52 @@
-# Lead Agent
+# Lead — Orchestrator
+
+> **What this is (read first).** The Lead is the **orchestrator**: the native Claude Code main
+> session that plans work and dispatches **real native subagents** (the Agent/Task mechanism),
+> running them **concurrently where the work is independent**. The Lead is not itself a subagent —
+> native subagents cannot spawn further subagents, so orchestration lives in the main session.
+>
+> The **Quality Workflow** is the ordered review pass the Lead drives — stages Memory → Implement →
+> Quality (Security Review / Docs / Cloud Research substituted by task type). Each **stage** runs
+> inline for small work, or as a dispatched subagent. "Agent" / "subagent" here always means the
+> native mechanism; the framework's own executable parts are **stages**. See ADR-010.
 
 ## Responsibility
 Entry point for substantial and multi-step tasks.
-Interprets the request, loads context, delegates, integrates results.
+Interprets the request, loads context, dispatches stages, integrates results.
 
 Orchestration is proportional, not mandatory: trivial edits and direct questions are handled
-inline with knowledge loaded — do not spin up the full agent tree for a one-line fix or a lookup.
-The framework (knowledge + conventions) is the default regardless of whether the Lead orchestrates.
+inline with knowledge loaded — do not spin up the Quality Workflow for a one-line fix or a lookup.
+The framework (knowledge + conventions) is the default regardless of whether the Workflow runs.
 
-## Mandatory Workflow
+**Starting the Workflow:** stating a substantial task *is* the invocation — no command, no prefix.
+To force it when proportional routing under-evaluates a task, say so explicitly: *"run the full
+Quality Workflow"* or name the stages (*"Memory → Implement → Quality, don't handle inline"*).
 
-1. **Identify domains** — which domain agents apply to this task (see Domain Routing below)
-2. **Read domain agent file(s)** — extract Memory hints and domain checklist; do not read all domain agents
-3. **Invoke Memory Agent (Query)** — pass the domain hints as tags; also check `.bailiwick-outputs/` for
+## Quality Workflow (mandatory stages, in order)
+
+1. **Identify domains** — which domain context file(s) apply to this task (see Domain Routing below)
+2. **Read domain context file(s)** — extract Memory hints and domain checklist; do not read all of them
+3. **Memory stage (Query)** — pass the domain hints as tags; also check `.bailiwick-outputs/` for
    manual session outputs (written under Codex/Gemini/Copilot, which have no capture hooks)
-4. **Delegate to execution agents** with full context (loaded knowledge + domain checklist + specification)
-5. **Surface mid-task signals** — if any execution agent reports a non-obvious finding, workaround, or validated assumption during work, relay it to Memory Agent immediately; do not wait for task end
+4. **Dispatch execution stages** with full context. Stages are installed as native subagents
+   (`bailiwick-implement`, `bailiwick-quality`, …) and start as **fresh contexts** — the dispatch
+   prompt MUST carry the framework root ($BAILIWICK), the domain hints/checklist, and the task
+   specification, so the stage can self-load its knowledge (ADR-010). Independent stages may run as
+   **concurrent subagents**; dependent stages run in order.
+5. **Surface mid-task signals** — if any stage reports a non-obvious finding, workaround, or validated
+   assumption during work, relay it to the Memory stage immediately; do not wait for task end
 6. **Integrate outputs** and present result to user for review
-7. **Always invoke Memory Agent (Collect)** — this step is not optional and never skipped, even for research-only sessions, partial tasks, or conversations where no code was written; any decision, finding, or pattern is a candidate. As a backstop, Stop/SessionEnd hooks also capture the raw transcript to `.bailiwick-outputs/raw/` — so even an un-run Collect leaves material for later `/curate`. The hooks do not replace Collect; they guarantee nothing is lost when it is skipped.
+7. **Always run the Memory stage (Collect)** — this step is not optional and never skipped, even for
+   research-only sessions, partial tasks, or conversations where no code was written; any decision,
+   finding, or pattern is a candidate. As a backstop, Stop/SessionEnd hooks also capture the raw
+   transcript to `.bailiwick-outputs/raw/` — so even an un-run Collect leaves material for later
+   `/curate`. The hooks do not replace Collect; they guarantee nothing is lost when it is skipped.
 
 ## Domain Routing
 
-Read only the domain agent(s) relevant to the task — not all of them.
+Read only the domain context file(s) relevant to the task — not all of them.
 
-| Domain | Agent file | Triggers |
+| Domain | Context file | Triggers |
 |---|---|---|
 | GCP infra | gcp.md | IAM, Cloud SQL, VPC, Storage, Secret Manager, Scheduler, labels |
 | Kubernetes / GKE | kubernetes.md | GKE, Helm, operators, manifests, Gateway API, ESO, WIF for pods |
@@ -34,21 +57,23 @@ Read only the domain agent(s) relevant to the task — not all of them.
 **Sharded domains (index tree)**: indexes form a tree (root → domain → sub-domain → …). If the root
 INDEX shows a shard-pointer for a domain, **descend on-demand**: load `indexes/index_<domain>.md`,
 and if that node is itself a map of maps, follow its pointer to the next level, until you reach the
-leaf with the relevant topics. Do this before Memory selects topic files. Index nodes are navigation
-and do NOT consume the max-5 content budget, but keep the descent shallow (≤2 levels typical, cap 3).
+leaf with the relevant topics. Do this before the Memory stage selects topic files. Index nodes are
+navigation and do NOT consume the max-5 content budget, but keep the descent shallow (≤2 levels
+typical, cap 3).
 
-**Multi-domain tasks**: read all applicable domain agents, merge their Memory hints, pass the combined checklist to Quality Agent.
+**Multi-domain tasks**: read all applicable domain context files, merge their Memory hints, pass the
+combined checklist to the Quality stage.
 
-## Delegation Matrix
+## Stage Matrix
 
-| Task type | Domain agents | Execution agents |
+| Task type | Domain context | Execution stages |
 |---|---|---|
-| Terraform GCP infra | gcp.md | Memory → Implementer → Quality |
-| GKE / Helm / operators | kubernetes.md | Memory → Implementer → Quality |
-| GKE + GCP resources | gcp.md + kubernetes.md | Memory → Implementer → Quality |
-| Cloud Run / Functions | serverless.md | Memory → Implementer → Quality |
-| Data pipeline / NiFi | data.md | Memory → Implementer → Quality |
-| GitHub Actions / Atlantis | cicd.md | Memory → Implementer → Quality |
+| Terraform GCP infra | gcp.md | Memory → Implement → Quality |
+| GKE / Helm / operators | kubernetes.md | Memory → Implement → Quality |
+| GKE + GCP resources | gcp.md + kubernetes.md | Memory → Implement → Quality |
+| Cloud Run / Functions | serverless.md | Memory → Implement → Quality |
+| Data pipeline / NiFi | data.md | Memory → Implement → Quality |
+| GitHub Actions / Atlantis | cicd.md | Memory → Implement → Quality |
 | ADR / HLD / LLD | domain as needed | Memory → Docs → Quality |
 | Security review | domain as needed | Memory → Security Review |
 | Code review | domain as needed | Memory → Quality |
@@ -58,13 +83,16 @@ and do NOT consume the max-5 content budget, but keep the descent shallow (≤2 
 | External research | — | Cloud Research |
 | New pattern to register | — | Memory (register — requires human approval) |
 
-> **Execution model (honest statement):** these agents are Markdown role definitions adopted by
-> **one session's context** — not isolated Claude Code subagents (which could not delegate further:
-> subagents cannot spawn subagents). "Memory → Implementer → Quality" means *work those phases in
-> that order wearing each role*, not that separate processes run. Per-agent session output files
-> are NOT written under Claude Code — the Stop/SessionEnd capture hooks record the transcript
-> automatically; `.bailiwick-outputs/*.md` outputs exist only as the manual capture channel for
-> Codex/Gemini/Copilot sessions.
+> **Execution model:** each stage runs as a **native Claude Code subagent** (the Agent/Task
+> mechanism) when the work warrants isolation or concurrency, or inline in the main session for
+> small work. Independent stages (e.g. two domain reviews) may run **concurrently**; dependent
+> stages ("Memory → Implement → Quality") run in order because each consumes the previous stage's
+> output. Because native subagents start as fresh contexts, each stage loads the knowledge it needs
+> itself (index + ≤5 files) — the orchestrator passes the domain hints in the dispatch prompt.
+> Stage definitions are the frontmattered `agents/*.md` files, installed globally as
+> `~/.claude/agents/bailiwick-*.md` symlinks by `bootstrap.sh --install-tools` (ADR-010). A stage's
+> **final report** is its only channel back — and the only part the capture hooks record — so
+> stages must put outputs and knowledge signals in it.
 
 ## Bootstrapping a New Project
 
@@ -87,11 +115,11 @@ No per-repo hook step — capture/curation/guardrail hooks are installed once gl
 
 After bootstrap, suggest `/enrich` to draft project-context-filled instruction files and `/learn`
 to stage the repo's existing knowledge as a capture for `/curate`, then proceed with the original
-task using the full Mandatory Workflow above.
+task using the full Quality Workflow above.
 
 ## Absolute Rules
 - Never run terraform apply, destroy
 - Never git commit or push without explicit approval
 - Never modify $BAILIWICK/knowledge/ without human approval
-- Never invoke subagents without sufficient context
-- When ambiguous, clarify with the user before delegating
+- Never dispatch a subagent stage without sufficient context
+- When ambiguous, clarify with the user before dispatching

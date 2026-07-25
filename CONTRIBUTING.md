@@ -18,8 +18,9 @@ tools read live. Five moving parts, and how a session flows through them:
 1. **`knowledge/`** — a curated Markdown library indexed by `INDEX.md` (a lean "map of maps" injected
    into every session). Files carry frontmatter (`id`, `type`, `tags`, `confidence`, `scope`, …) and
    a telemetry sidecar tracks usage.
-2. **`agents/`** — Markdown *role definitions* (lead + domain-context + execution) the tool adopts on
-   demand. Not code, not installed anywhere — the agent reads the role and acts as it.
+2. **`agents/`** — Markdown *role definitions* (lead orchestrator + domain-context + Quality Workflow
+   stages) the tool adopts on demand. Not code, not installed anywhere — the tool reads the role and
+   acts as it.
 3. **`hooks/`** — the only things that *run*: the runtime guardrail (`guardrails.py`), capture, sync,
    and health hooks, plus the installers that wire them in.
 4. **`skills/`** — human-gated procedures (`SKILL.md` files): `/curate`, `/enrich`, `/learn`,
@@ -32,7 +33,7 @@ loads the few knowledge files a task needs → the guardrail intercepts risky co
 stage the transcript → you run `/curate` to promote what's worth keeping.
 
 For the full design (readable cold), see **[docs/FRAMEWORK.md](docs/FRAMEWORK.md)** — especially §2
-(architecture), §3 (agents), and §14 (strengths & limitations). The **[docs/](docs/README.md)** set is
+(architecture), §3 (orchestration), and §14 (strengths & limitations). The **[docs/](docs/README.md)** set is
 the depth layer; this file is the practical how-to-help.
 
 ## Ground rules
@@ -71,7 +72,7 @@ Pick the recipe that matches your change — each notes where it lives and how t
   `EXEMPT_PATTERNS`, `ASK_IMPACT_PATTERNS`, or `ASK_GOAHEAD_PATTERNS` — and **add a matching case to
   `tests/test_guardrails.py`** (the decision contract is the spec). Widening what's guarded is
   usually fine; narrowing or exempting needs an ADR.
-- **An agent role or domain-context file.** Edit the Markdown under `agents/`. Keep roles focused and
+- **A workflow role or domain-context file.** Edit the Markdown under `agents/`. Keep roles focused and
   proportional; domain-context files (`gcp.md`, `kubernetes.md`, …) encode retrieval hints +
   checklists, they don't execute.
 - **A skill.** Skills are `SKILL.md` procedures under `skills/` (with Codex wrappers in

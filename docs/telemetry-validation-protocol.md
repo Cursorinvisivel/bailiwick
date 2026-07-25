@@ -45,7 +45,7 @@ Query `.telemetry.json` for entries matching all three conditions:
 - `last_useful` is null or older than 6 months
 
 ```
-# Quick read — paste into a session and ask Memory Agent to evaluate:
+# Quick read — paste into a session and ask the Memory stage to evaluate:
 "Read .telemetry.json. List any entry where load_count >= 5,
  useful_count <= 1, and last_useful is null or old. These are archival candidates."
 ```

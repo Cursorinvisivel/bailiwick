@@ -11,7 +11,7 @@ instruction files across **two layers** — keeping each on the right side of th
 boundary. Everything is a **draft for your review**; nothing is written without approval and nothing
 is ever committed by the skill.
 
-Use the Docs agent (`$BAILIWICK/agents/docs.md`) as the writer, the domain agents
+Use the Docs stage (`$BAILIWICK/agents/docs.md`) as the writer, the domain context files
 (`gcp.md` / `kubernetes.md` / `serverless.md` / `data.md` / `cicd.md`) as the "what to look for"
 checklist, and `engineering-defaults.md` as the always-on baseline.
 

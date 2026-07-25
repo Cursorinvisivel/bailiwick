@@ -1,4 +1,4 @@
-# Serverless Domain Agent
+# Serverless — domain context
 
 ## Scope
 Cloud Run services and jobs, Cloud Functions gen1/gen2, Eventarc, Pub/Sub-driven pipelines,
@@ -7,7 +7,7 @@ event-driven patterns.
 Not in scope: GKE workloads → kubernetes.md | Data processing at scale → data.md
 
 ## Memory Hints
-Pass these tags to Memory Agent based on what the task touches:
+Pass these tags to the Memory stage based on what the task touches:
 
 | Sub-area | Tags to load |
 |---|---|
@@ -16,8 +16,8 @@ Pass these tags to Memory Agent based on what the task touches:
 | IAM invoker patterns | gcp, iam, security, least-privilege |
 | Naming / labels | gcp, naming, conventions, labels, finops |
 
-> Few topics exist yet for this domain. If no topic file is found, signal Cloud Research Agent
-> to fetch current best practices before Implementer generates code.
+> Few topics exist yet for this domain. If no topic file is found, signal the Cloud Research stage
+> to fetch current best practices before the Implement stage generates code.
 
 ## Domain Checklist
 Apply during generation and review:

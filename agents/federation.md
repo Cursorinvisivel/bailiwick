@@ -1,4 +1,17 @@
-# Federation Agent (external memory listener)
+---
+name: bailiwick-federation
+description: Federation stage of the Bailiwick Quality Workflow — read-only consult of registered EXTERNAL knowledge sources (.bailiwick-sources.json), tagging every fact [external:<id>]. Dispatched by the Lead orchestrator during Memory Query when federation sources are enabled. Dormant until a source is registered.
+tools: Read, Grep, Glob, mcp__bailiwick-filesystem__read_text_file, mcp__bailiwick-filesystem__read_file, mcp__bailiwick-filesystem__read_multiple_files, mcp__bailiwick-filesystem__list_directory, mcp__bailiwick-filesystem__directory_tree, mcp__bailiwick-filesystem__search_files, mcp__bailiwick-filesystem__get_file_info, mcp__bailiwick-filesystem__list_allowed_directories
+---
+<!-- tools: read-only INCLUDING the MCP filesystem server's read tools only — the "policy-read-only outward"
+     rule becomes transport-enforced in this stage (the write tools are simply absent), closing part of the
+     ROADMAP item about transport-enforced read-only federation. -->
+
+# Federation — stage (external memory listener)
+
+> **Native subagent context (ADR-010).** You start as a fresh context. The dispatch prompt gives
+> you the registered source(s) and the task's domain tags. Your **final report is the only channel
+> back**: return the ≤2 external facts consulted, each tagged `[external:<id>]`, with provenance.
 
 > **Status: DORMANT by design.** Federation activates only when `.bailiwick-sources.json` registers an
 > `enabled: true` source — none exists yet (no external/company KB is wired). Until then this file
@@ -10,9 +23,9 @@ Consult **external** knowledge sources (a company / central KB, another team's l
 task, and — under a human gate — ingest reusable items into our own knowledge library with full
 provenance. Read-only outward: external sources are never written to, and our KB never flows out.
 
-This extends the Memory Agent. Memory owns *our* library (`knowledge/`); Federation owns the
+This extends the Memory stage. Memory owns *our* library (`knowledge/`); Federation owns the
 *policy-read-only bridge* to libraries we do not control (read-only by the rules below, not by the
-transport — see the note at the end). Both are invoked by the Lead Agent.
+transport — see the note at the end). Both are dispatched by the orchestrator (ADR-010).
 
 ---
 
@@ -38,12 +51,12 @@ read-only per root — read-only is a hard rule below, not a server guarantee.**
 
 ---
 
-## Operation: Consult (invoked by Lead/Memory at task start, after the local Query)
+## Operation: Consult (dispatched by the orchestrator / Memory stage at task start, after the local Query)
 1. Read `.bailiwick-sources.json`; skip if no `enabled` source. Never block the task on federation.
 2. For each enabled source, read its **index only** (`location/index`) — not its whole library.
 3. Judge relevance to the task the same way Memory judges the local index. Load at most **2
    external content files** (on top of Memory's local max-5), and only their pointed sections.
-4. Report to Lead with explicit attribution: every external fact carries `[external:<id>]` and its
+4. Report to the orchestrator with explicit attribution: every external fact carries `[external:<id>]` and its
    source path. Never present external knowledge as ours.
 5. On conflict, apply the **source-authority precedence** (FRAMEWORK.md §11): the local KB wins for our
    conventions/method, but **project decisions, authoritative vendor docs, and legal/contractual/security

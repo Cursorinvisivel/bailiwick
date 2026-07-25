@@ -15,7 +15,7 @@ This is the repository-level privacy layer. Bailiwick gives you two others:
   zero files written. See [FRAMEWORK.md §7.1](FRAMEWORK.md).
 - **Scopes & de-identification** keep client specifics out of shared knowledge (`client:<id>`,
   de-identified `/curate`, `/purge`). See [FRAMEWORK.md §4](FRAMEWORK.md).
-- **Repository topology** (this page) keeps your *whole instance* — private knowledge, agents, config —
+- **Repository topology** (this page) keeps your *whole instance* — private knowledge, roles, config —
   separate from the public OSS you cloned.
 
 ## Tier 1 — just clone and use (nothing leaves your machine)

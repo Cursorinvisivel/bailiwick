@@ -5,7 +5,7 @@ description: Distill pending raw session captures (.bailiwick-outputs/raw/) and 
 
 # /curate — gated knowledge curation
 
-This skill runs the **Memory Agent Collect flow** on demand. It is the human-gated
+This skill runs the **Memory stage Collect flow** on demand. It is the human-gated
 review step that turns enforced raw capture into curated knowledge. Read
 `$BAILIWICK/agents/memory.md` first — it is the source of truth for
 the Collect, dedup, approval-routing, and Periodic Curation logic. Follow it exactly.

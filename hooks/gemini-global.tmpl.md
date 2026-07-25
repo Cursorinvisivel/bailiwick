@@ -54,10 +54,18 @@ framework layer complements them, never overrides them.
 > policies. `excludeTools` is, per Google's own docs, simple string matching that "can be easily
 > bypassed" and "is not a security mechanism" — a best-effort speed-bump only.
 
+## Quality Workflow stages as Gemini subagents (ADR-010)
+The `bailiwick-*` subagents in `~/.gemini/agents/` are the Bailiwick Quality Workflow stages.
+Gemini may **auto-delegate** to them on description match for substantial multi-step work; the
+user (or you) can **force** a stage with `@bailiwick-<stage>` (e.g. `@bailiwick-quality review
+this module`). Run independent stages in parallel, dependent stages in order; each stage's final
+report must carry its outputs and knowledge signals. Mechanics: see the official Gemini CLI
+subagents docs.
+
 ## Capture (manual under Gemini — no session hooks)
 Gemini has no Stop/SessionEnd hook in VS Code, so capture is not automatic. When you finish a
 substantive session, **write a session output file** (a short markdown summary: what changed,
-decisions, pitfalls, follow-ups) per the agent-output template — the Memory Agent reads it during
+decisions, pitfalls, follow-ups) per the agent-output template — the Memory stage reads it during
 `/curate`. Location depends on activation mode:
 - **Seeded repo:** write to `.bailiwick-outputs/` in the repo.
 - **Shadow repo** (repo must stay untouched; FRAMEWORK.md §7.1): write the `.md` at the **top** of a

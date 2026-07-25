@@ -78,7 +78,7 @@ fi
 cat <<'EOF'
 [bailiwick] Framework defaults active for this session:
 - Knowledge library + conventions are always in play. The current knowledge index is included below; use it to judge relevance, then load the topics/patterns it lists on-demand (max 5 files). Do not re-read files already in context.
-- Orchestration is proportional: route substantial or multi-step work through the Lead agent; handle trivial edits and direct questions inline with knowledge loaded. No explicit "Lead:" prefix is required.
+- Orchestration is proportional: the Lead (orchestrator) drives the Quality Workflow — route substantial or multi-step work through it; handle trivial edits and direct questions inline with knowledge loaded. Stating a substantial task IS the invocation; no prefix is required. Say "run the full Quality Workflow" to force it.
 - Capture is enforced via hooks; promotion to the knowledge library stays human-gated via /curate.
 EOF
 

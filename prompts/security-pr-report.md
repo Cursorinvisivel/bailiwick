@@ -1,6 +1,6 @@
 # Prompt: Security PR Report — Terraform / GCP
 
-Invoke the Security Review agent with this prompt to produce a PR-ready security report.
+Invoke the Security Review stage with this prompt to produce a PR-ready security report.
 
 ---
 

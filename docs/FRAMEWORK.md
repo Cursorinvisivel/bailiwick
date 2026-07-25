@@ -85,37 +85,52 @@ Six layers:
 
 ---
 
-## 3. Agents (orchestration model)
+## 3. Orchestration model (Lead + Quality Workflow)
 
-Agents are **Markdown role definitions read on demand** — not native Claude Code subagents and not
-installed anywhere. The agent reads the relevant `.md` and adopts it as instructions. 13 files in
-three tiers (headline roster = 8 invocable agents; 5 domain files are non-executing context).
+The **Lead** is the **orchestrator**: the native Claude Code main session that plans work and
+dispatches **real native subagents** (the Agent/Task mechanism), running them **concurrently where
+the work is independent**. The Lead is not itself a subagent — native subagents cannot spawn further
+subagents, so orchestration lives in the main session. The ordered review pass it drives is the
+**Quality Workflow**; each step is a **stage** that runs as a dispatched subagent or inline for small
+work. "Agent" / "subagent" means the native mechanism; the framework's own executable parts are
+stages. Stage definitions are the frontmattered `agents/*.md` files, installed globally as
+`~/.claude/agents/bailiwick-*.md` symlinks by `bootstrap.sh --install-tools` (never seeded per-repo
+— shadow stays zero-footprint). The same install generates **multi-tool stage adapters** from the
+canonical files — Gemini `~/.gemini/agents/*.md`, Codex `~/.codex/agents/*.toml`, Copilot
+`~/.copilot/agents/*.agent.md` — so all four tools can dispatch the stages natively (ADR-010
+Amendment 1; trigger model per tool in §10). A stage's **final report** is its only channel back
+and the only part the capture hooks record, so outputs and knowledge signals go in it. See
+ADR-010. 13 files in three tiers.
 
 ### Tiers
-- **Orchestration (1):** `lead.md` — entry point for substantial/multi-step work.
+- **Orchestrator (1):** `lead.md` — entry point for substantial/multi-step work; drives the Quality
+  Workflow.
 - **Domain context (5, non-executing):** `gcp.md`, `kubernetes.md`, `serverless.md`, `data.md`,
-  `cicd.md`. Lead *reads* these to extract (a) Memory tags and (b) a generation/review checklist.
+  `cicd.md`. The Lead *reads* these to extract (a) Memory tags and (b) a generation/review checklist.
   They never execute; they encode domain best practice and "what to load".
-- **Execution (7):** `implementer.md` (code/IaC drafts), `quality.md` (technical review),
+- **Stages (7):** `implementer.md` (code/IaC drafts), `quality.md` (technical review),
   `security-review.md` (security + CIS mapping), `docs.md` (ADR/HLD/runbook/workshop),
   `memory.md` (library query + collect), `cloud-research.md` (authoritative external research),
   `federation.md` (external-brain consult + gated ingest).
 
 ### Flow
 1. A task arrives. **Proportional routing:** trivial edits / direct questions are answered inline
-   with knowledge loaded; substantial work routes through **Lead**.
-2. Lead identifies relevant **domain agent(s)**, reads them for Memory tags + checklist.
-3. Lead invokes **Memory (Query)** with those tags — descends the `INDEX.md` tree on-demand,
-   loads ≤5 content files, checks `.bailiwick-outputs/` for prior session outputs. If federation is
-   enabled, **Federation** also consults external indexes read-only (≤2 files, tagged
-   `[external:<id>]`; resolve conflicts by the source-authority precedence, §11 — a tidbit never
-   overrides a project decision or an authoritative doc).
-4. Lead delegates to **execution agents** via a Delegation Matrix (commonly
-   Memory → Implementer → Quality; Security Review / Docs / Cloud Research substituted by task
-   type). Each surfaces knowledge signals back to Lead in real time (no per-agent session files
-   under Claude Code — the capture hooks record the transcript; `.bailiwick-outputs/*.md` is the manual
-   channel for Codex/Gemini/Copilot).
-5. Lead integrates, presents **drafts for human review**, and always closes with **Memory
+   with knowledge loaded; substantial work routes through the **Lead**. Stating a substantial task
+   *is* the invocation; explicit phrasing forces the full Quality Workflow when routing
+   under-evaluates a task.
+2. Lead identifies relevant **domain context file(s)**, reads them for Memory tags + checklist.
+3. Lead dispatches the **Memory stage (Query)** with those tags — it descends the `INDEX.md` tree
+   on-demand, loads ≤5 content files, checks `.bailiwick-outputs/` for prior session outputs.
+   Because each subagent starts as a fresh context, the stage loads this knowledge itself. If
+   federation is enabled, the **Federation stage** also consults external indexes read-only (≤2
+   files, tagged `[external:<id>]`; resolve conflicts by the source-authority precedence, §11 — a
+   tidbit never overrides a project decision or an authoritative doc).
+4. Lead dispatches the **execution stages** via the Stage Matrix (commonly
+   Memory → Implement → Quality; Security Review / Docs / Cloud Research substituted by task type).
+   Independent stages run **concurrently**; dependent stages run in order. Each surfaces knowledge
+   signals back to the Lead in real time — under Claude Code the capture hooks record the transcript;
+   `.bailiwick-outputs/*.md` is the manual channel for Codex/Gemini/Copilot.
+5. Lead integrates, presents **drafts for human review**, and always closes with the **Memory stage
    (Collect)**. Stop/SessionEnd hooks capture the raw transcript as a backstop.
 
 ### Non-negotiables across agents — policy, guardrail, enforcement
@@ -238,7 +253,7 @@ one:
   mutation and/or commit — mechanical, derived by `capture_session.py`) → `used` (curate-judged from
   the reasoning that the tidbit informed the output). `applied` is coarse (every co-loaded id in a
   shipping session is credited); the human-gated `used` tier disambiguates. Surfaced by `/metrics`.
-- Written by the Memory Agent during Collect; committed with a `telemetry:` prefix **without** a
+- Written by the Memory stage during Collect; committed with a `telemetry:` prefix **without** a
   human gate. **Documented single-writer assumption** — concurrent writers lose increments (this is
   the central constraint a team version must redesign; see §10).
 - `/curate` reconciles: every telemetry-tracked `id`-bearing file (topics/patterns/context/clients) must have a row (seed missing; flag orphans).
@@ -536,6 +551,21 @@ All instruction/config files are **filesystem-discovered** (an untracked/gitigno
 loads locally) — **except** the GitHub-hosted **Copilot cloud agent**, which only sees the pushed
 repo, so the hidden complement never reaches it.
 
+**Stage subagents across the adapters (ADR-010 Amendment 1).** All four tools now dispatch the
+Quality Workflow stages natively: canonical `agents/*.md` → Claude Code symlinks
+(`~/.claude/agents/`), generated Gemini Markdown (`~/.gemini/agents/`), generated Codex TOML
+(`~/.codex/agents/`; read-only toolsets map to `sandbox_mode = "read-only"`), generated Copilot
+`*.agent.md` (`~/.copilot/agents/`). All user-scope — never seeded into a repo. **Triggering:**
+Claude Code and Gemini auto-delegate on description match (force by naming the stage /
+`@bailiwick-<stage>`); Codex does **not** auto-delegate — the global operator layer carries the
+delegation rule, and the user forces by asking for an agent by name; Copilot is explicit selection
+(auto only agent-to-agent; the hosted cloud agent never sees user-scope agents). **Surfaces:**
+Codex subagents span the CLI **and the IDE extension** (same `~/.codex/agents/`); Gemini is
+**CLI-verified only** — Code Assist agent mode exposes a subset of the CLI and subagent support
+there is unverified; Copilot's covered surfaces are VS Code + CLI. Guardrail-hook coverage inside
+Codex/Gemini subagent threads is **unverified** — policy posture applies there. Mechanics: each
+tool's official subagent docs.
+
 Key consequences (the four tools do not share one uniform integration):
 - **Codex framework guidance goes in a global layer, not a repo-root file.** Codex loads at most one
   instruction file per directory, so a framework file at the repo root would **suppress** the team's
@@ -723,7 +753,7 @@ An honest self-assessment. Adopt it where the strengths matter to you and the li
 - **Adapter completeness varies.** Full under Claude Code; Codex/Gemini get the guardrail but capture
   is manual; Copilot is policy-only and local-VS-Code-only (§10). Codex hooks need a one-time trust.
 - **The seed content is GCP/Terraform-shaped.** The *machinery* is domain-neutral, but the knowledge
-  tiers, domain agents, templates, and conventions that ship in the box assume cloud/IaC work and
+  tiers, domain context files, templates, and conventions that ship in the box assume cloud/IaC work and
   lean GCP + Terraform. Point it at another domain and you grow a different library, but the box
   starts where the framework grew up.
 

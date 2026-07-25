@@ -14,10 +14,10 @@
 ---
 
 ## Framework (Bailiwick)
-- Agents and the knowledge library live in `$BAILIWICK`
+- Roles and the knowledge library live in `$BAILIWICK`
   (`/path/to/bailiwick`).
-- For agent roles and task delegation, see `AGENTS.md` in this repo.
-- Open agent/knowledge files by path from `$BAILIWICK` on demand — nothing is copied in.
+- For roles and how the orchestrator dispatches stages, see `AGENTS.md` in this repo.
+- Open role and knowledge files by path from `$BAILIWICK` on demand — nothing is copied in.
 
 ## Context and Baseline
 - This repository manages infrastructure as code with Terraform for GCP.

@@ -70,7 +70,7 @@ capture backup and multi-machine central/satellite sync over plain git.
 
 ## Supported tools
 
-One Markdown knowledge base and agent-role set, adapted to four tools of differing completeness:
+One Markdown knowledge base and role set, adapted to four tools of differing completeness:
 
 | Tool | Capture | Dangerous-command control |
 |---|---|---|
@@ -111,7 +111,7 @@ The full, honest self-assessment lives in **[FRAMEWORK.md §14 — Strengths & l
 
 | Doc | What it covers |
 |---|---|
-| **[Framework reference](docs/FRAMEWORK.md)** | The complete design, readable cold — architecture, agents, knowledge model, guardrails, modes, glossary. |
+| **[Framework reference](docs/FRAMEWORK.md)** | The complete design, readable cold — architecture, orchestration, knowledge model, guardrails, modes, glossary. |
 | **[Threat model](docs/threat-model.md)** · **[Compatibility](docs/compatibility.md)** | Security posture and residual risks · per-adapter status + tool versions verified against. |
 | **[Roadmap & non-goals](ROADMAP.md)** · **[Decisions (ADRs)](docs/decisions/)** | What's deliberately out of scope (e.g. a team version) · why the framework is built the way it is. |
 | **[Contributing](CONTRIBUTING.md)** · **[Security](SECURITY.md)** | How to help and get the feel for the codebase · how to report a vulnerability. |
@@ -122,7 +122,7 @@ A map of the whole set is in **[docs/README.md](docs/README.md)**.
 
 ```
 knowledge/   INDEX.md · topics/ patterns/ context/ templates/ · .telemetry.json
-agents/      role definitions (lead + 5 domain-context + 7 execution)
+agents/      role definitions (lead orchestrator + 5 domain-context + 7 Quality Workflow stages)
 hooks/       guardrail + capture + sync + health hooks, and the installers
 skills/      /curate · /enrich · /learn · /metrics · /investigate · /purge  (+ codex-skills/ wrappers)
 scripts/     bootstrap.sh · bootstrap.ps1  (repo onboarding)

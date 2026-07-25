@@ -20,7 +20,7 @@ prompt. This is a thin Codex wrapper; the canonical procedure remains in Bailiwi
 2. Read the canonical instructions completely:
    - `$BAILIWICK/skills/enrich/SKILL.md`
    - `$BAILIWICK/agents/docs.md`
-   - Any domain agent named by the canonical workflow after scanning the repo.
+   - Any domain context file named by the canonical workflow after scanning the repo.
 3. Follow the canonical `/enrich` procedure exactly, with these Codex adaptations:
    - Treat a user request for `/enrich`, `enrich`, `bailiwick enrich`, or instruction-file enrichment as an invocation of this skill.
    - Codex does not run the Claude Code slash-command UI; do the workflow directly in the current turn.

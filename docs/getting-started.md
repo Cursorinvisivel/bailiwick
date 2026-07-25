@@ -61,6 +61,14 @@ This is idempotent (re-run it any time — e.g. after adding a new skill) and in
   Bailiwick-wired.
 - The **global Claude Code skills** as symlinks in `~/.claude/skills/`: `/curate`, `/enrich`,
   `/learn`, `/metrics`, `/investigate`, `/purge`.
+- The **Quality Workflow stages as native Claude Code subagents** — symlinks in `~/.claude/agents/`
+  (`bailiwick-implement`, `bailiwick-quality`, `bailiwick-memory`, `bailiwick-security-review`,
+  `bailiwick-docs`, `bailiwick-cloud-research`, `bailiwick-federation`). This is what lets the Lead
+  dispatch stages as real, concurrent subagents (ADR-010); never seeded per-repo.
+- The **same stages as generated adapters for the other tools** — Gemini (`~/.gemini/agents/`),
+  Codex (`~/.codex/agents/`, TOML) and Copilot (`~/.copilot/agents/`), produced from the canonical
+  files and refreshed on every re-run (ADR-010 Amendment 1). Files you created yourself in those
+  dirs are never overwritten.
 - The **Codex skill wrappers** (`$bailiwick-curate`, `$bailiwick-enrich`, `$bailiwick-learn`,
   `$bailiwick-investigate`, `$bailiwick-purge`) in `~/.codex/skills/`.
 - The **Codex and Gemini operator layers** — managed blocks in `~/.codex/AGENTS.md` and
@@ -151,7 +159,56 @@ paper trail.
 
 ---
 
-## 5. Your first knowledge cycle
+## 5. Your first task
+
+There is **no command to "start a workflow."** Stating a substantial task in Claude Code *is* the
+invocation. The **Lead** is the orchestrator — the native main session — and for substantial or
+multi-step work it drives the **Quality Workflow**: the ordered Memory → Implement → Quality review
+pass, dispatched as native subagents (concurrently where the work is independent). See ADR-010 and
+`agents/lead.md`.
+
+Try it in the wired repo:
+
+```
+Add a Cloud SQL Postgres instance with a private IP and Secret-Manager-managed
+credentials to this module, with tests.
+```
+
+That's multi-step and domain-specific, so it routes through the Lead: it reads the `gcp.md` domain
+context file for retrieval hints + checklist, runs the Memory stage, dispatches the Implement and
+Quality stages, integrates, and closes with a Memory (Collect). Everything comes back as **drafts
+for your review**.
+
+**Proportional routing.** Trivial edits and direct questions are answered **inline** — the Lead does
+*not* spin up the Quality Workflow for a one-line fix or a lookup. That's by design, not a misfire.
+
+**Forcing the Workflow.** If the model under-evaluates a task and handles it inline when you wanted
+the full rigor, say so explicitly:
+
+```
+Run the full Quality Workflow: Memory → Implement → Quality. Don't handle this inline.
+```
+
+Naming the stages is the most reliable form — it pins the steps rather than relying on the model to
+expand "Lead" into the whole pass. (This is a policy directive the session follows, not a
+runtime-enforced switch like the guardrails.)
+
+**Under the other tools** the same stages are installed as native agents (ADR-010 Amendment 1) —
+same names, different trigger conventions (mechanics: each tool's official subagent docs):
+
+| Tool | Automatic? | To force a stage |
+|---|---|---|
+| Claude Code | ✅ on description match, proportional | name the stage / "run the full Quality Workflow" |
+| Gemini CLI¹ | ✅ auto-delegation | `@bailiwick-<stage> <task>` |
+| Codex (CLI + IDE ext.) | ❌ not by default — the operator layer instructs delegation for substantial work | ask by name: "use the bailiwick-quality agent to …" |
+| Copilot (VS Code + CLI) | ❌ explicit selection (auto only agent-to-agent) | pick the agent in VS Code / CLI; cloud agent can't see them |
+
+¹ CLI only for now — Gemini Code Assist agent mode (VS Code) exposes a subset of the CLI, and
+subagent support there is unverified.
+
+---
+
+## 6. Your first knowledge cycle
 
 The point of capture is curation. After a session or two of real work:
 
@@ -187,7 +244,7 @@ Codex users get thin native wrappers: `$bailiwick-curate`, `$bailiwick-enrich`, 
 
 ---
 
-## 6. Next steps
+## 7. Next steps
 
 - **[operations](operations.md)** — day-2 operations: multi-machine sync (central + satellites),
   encrypted dirty-zone backup, federated external memory, and keeping repos current with `--update`.

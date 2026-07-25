@@ -203,10 +203,10 @@ Only `kind: filesystem` (a local read-only path or mounted clone) is implemented
 - **Access** — `bootstrap.sh --update /path/to/repo` adds each enabled source's `location` as an
   extra MCP filesystem root, so the agent can read it.
 - **Read-only is policy, not transport.** The MCP filesystem server is read-write on **every** root.
-  Read-only access to a federated source is enforced by the Federation Agent's rules
+  Read-only access to a federated source is enforced by the Federation stage's rules
   (`agents/federation.md`), **not** by the server — so never point a source at a
   location you cannot afford to have written.
-- **Consult** — after the local Memory query, the Federation Agent reads each source's index, loads
+- **Consult** — after the local Memory query, the Federation stage reads each source's index, loads
   a small number of external content files, and tags every external fact `[external:<id>]`. Conflicts
   resolve by the source-authority precedence (FRAMEWORK.md §11) — external/local reference never
   overrides project decisions or authoritative docs.

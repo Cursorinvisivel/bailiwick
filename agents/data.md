@@ -1,4 +1,4 @@
-# Data Domain Agent
+# Data — domain context
 
 ## Scope
 BigQuery datasets, tables, views, and access control; Dataflow jobs and pipelines;
@@ -7,7 +7,7 @@ NiFi and NiFiKop operator; data ingestion and transformation patterns.
 Not in scope: GKE cluster setup → kubernetes.md | GCP IAM not data-specific → gcp.md
 
 ## Memory Hints
-Pass these tags to Memory Agent based on what the task touches:
+Pass these tags to the Memory stage based on what the task touches:
 
 | Sub-area | Tags to load |
 |---|---|

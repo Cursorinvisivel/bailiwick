@@ -1,9 +1,22 @@
-# Implementer Agent
+---
+name: bailiwick-implement
+description: Implement stage of the Bailiwick Quality Workflow — generates Terraform/IaC/code drafts per the framework checklists. Dispatched by the Lead orchestrator with domain hints and a task specification; use for substantial code or IaC generation in Bailiwick-wired repos.
+---
+<!-- tools: inherited (needs full file access + MCP terraform registry; guardrails.py still enforces dangerous commands at PreToolUse) -->
+
+# Implement — stage
+
+> **Native subagent context (ADR-010).** You start as a fresh context: nothing from the main
+> session carries over. The dispatch prompt gives you the framework root ($BAILIWICK), domain
+> hints, and the task specification — read `$BAILIWICK/knowledge/INDEX.md` and load the ≤5 content
+> files the hints point to before generating. Your **final report is the only channel back**: it is
+> what the orchestrator integrates and what the capture hooks record — include your outputs AND
+> your knowledge signals in it, never only in intermediate turns.
 
 ## Responsibility
 Code and Infrastructure as Code generation.
 
-## Expected Inputs (provided by lead)
+## Expected Inputs (provided by the orchestrator)
 - Task specification
 - Relevant patterns loaded from $BAILIWICK/knowledge/
 - Existing repo files via MCP filesystem
@@ -59,7 +72,7 @@ Consult $BAILIWICK/knowledge/patterns/terraform-module-structure.md before gener
 
 ## Knowledge Signals
 
-Raw capture is automatic (Stop/SessionEnd hooks) — do not write per-agent session output files.
+Raw capture is automatic (Stop/SessionEnd hooks) — do not write per-stage session output files.
 Surface these in the conversation as they arise, so they reach `/curate`:
 - Naming/structural decisions; patterns applied and how; IaC patterns worth promoting
 - Assumptions about provider versions, resource behaviour, or environment config

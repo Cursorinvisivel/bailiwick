@@ -26,7 +26,7 @@ Start with the [project README](../README.md) for the overview, then pick a path
   public-upstream / private-downstream topology (two clones, single-purpose remotes), what never
   crosses upstream, and how contributors send generic improvements back without leaking.
 - **[FRAMEWORK.md](FRAMEWORK.md)** — the single authoritative spec. Architecture and layers, the
-  agent/orchestration model, the knowledge library and index tree, the capture→curate→promote
+  orchestration model, the knowledge library and index tree, the capture→curate→promote
   lifecycle, the runtime guardrail, shadow/seeded modes, multi-tool adapters, scope & non-goals,
   and a strengths-&-limitations self-assessment. Other files and code cross-reference its sections
   (e.g. "§7.1", "§10").

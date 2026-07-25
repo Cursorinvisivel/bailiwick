@@ -1,4 +1,4 @@
-# GCP Domain Agent
+# GCP — domain context
 
 ## Scope
 GCP resource lifecycle, IAM, VPC/networking, Cloud SQL, Storage, Secret Manager,
@@ -7,7 +7,7 @@ Cloud Scheduler, Workflows, service account design, resource labeling.
 Not in scope: GKE workloads → kubernetes.md | Cloud Run/Functions → serverless.md | BigQuery/pipelines → data.md
 
 ## Memory Hints
-Pass these tags to Memory Agent based on what the task touches:
+Pass these tags to the Memory stage based on what the task touches:
 
 | Sub-area | Tags to load |
 |---|---|

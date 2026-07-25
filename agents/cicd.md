@@ -1,4 +1,4 @@
-# CI/CD Domain Agent
+# CI/CD — domain context
 
 ## Scope
 GitHub Actions workflows, Atlantis GitOps server, Terraform CI pipelines,
@@ -7,7 +7,7 @@ WIF-based keyless authentication for CI, OPA/Conftest policy checks.
 Not in scope: GKE Atlantis deployment → kubernetes.md | GCP IAM setup → gcp.md
 
 ## Memory Hints
-Pass these tags to Memory Agent based on what the task touches:
+Pass these tags to the Memory stage based on what the task touches:
 
 | Sub-area | Tags to load |
 |---|---|

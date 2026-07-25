@@ -5,35 +5,48 @@ Central repository of AI-agent tools, roles, and knowledge patterns for cloud an
 Single source of truth — never copy files to other repositories.
 Other repositories reference this via $BAILIWICK.
 
-## Available Agents
+## Orchestrator & Stages
 Location: $BAILIWICK/agents/
 
-| Agent | File | Role |
+The **Lead** is the orchestrator; the **Quality Workflow** is the ordered review pass it drives.
+Each stage runs as a **native Claude Code subagent** (the Agent/Task mechanism) — concurrently
+where the work is independent — or inline for small work. See ADR-010.
+
+| Part | File | Role |
 |---|---|---|
-| Lead | lead.md | Single entry point, orchestration |
-| Implementer | implementer.md | Code and IaC generation |
-| Quality | quality.md | Technical review |
-| Security Review | security-review.md | Security review: IAM, network, CIS benchmark |
-| Docs | docs.md | Documentation, templates, workshops |
-| Memory | memory.md | Knowledge library management |
-| Cloud Research | cloud-research.md | External research from official sources |
-| Federation | federation.md | External/company memory: read-only consult + gated ingest |
+| Lead (orchestrator) | lead.md | Single entry point; dispatches stages, integrates results |
+| Implement stage | implementer.md | Code and IaC generation |
+| Quality stage | quality.md | Technical review |
+| Security Review stage | security-review.md | Security review: IAM, network, CIS benchmark |
+| Docs stage | docs.md | Documentation, templates, workshops |
+| Memory stage | memory.md | Knowledge library management |
+| Cloud Research stage | cloud-research.md | External research from official sources |
+| Federation stage | federation.md | External/company memory: read-only consult + gated ingest |
 
-Orchestration is proportional: route substantial or multi-step work through the Lead agent
-(it delegates by task type); handle trivial edits and direct questions inline with knowledge
-loaded. No `Lead:` prefix is required — the framework is the default.
+Orchestration is proportional: route substantial or multi-step work through the Lead
+(it dispatches stages by task type); handle trivial edits and direct questions inline with knowledge
+loaded. No prefix is required — stating a substantial task *is* the invocation. To force the full
+Quality Workflow when routing under-evaluates a task, say so ("run the full Quality Workflow" or
+name the stages).
 
-**Execution model:** these are Markdown role definitions adopted by one session's context — not
-native Claude Code subagents. "Delegation" means working the phases in order wearing each role;
-there are also 5 non-executing domain-context files (gcp, kubernetes, serverless, data, cicd) the
-Lead reads for retrieval hints + checklists. See lead.md and FRAMEWORK.md §3.
+**Execution model:** the Lead is the native main session; it dispatches real native Claude Code
+subagents (not role-play in one context). Independent stages run **concurrently**; dependent stages
+("Memory → Implement → Quality") run in order. Because each subagent starts as a fresh context, every
+stage loads the knowledge it needs itself. There are also 5 non-executing domain-context files (gcp,
+kubernetes, serverless, data, cicd) the Lead reads for retrieval hints + checklists. Stage
+definitions are the frontmattered `agents/*.md` files, installed globally as
+`~/.claude/agents/bailiwick-*.md` symlinks by `bootstrap.sh --install-tools` (never seeded
+per-repo); the same install generates adapters for Gemini/Codex/Copilot user-scope agent dirs
+(ADR-010 Amendment 1 — trigger model per tool in FRAMEWORK.md §10). A stage's final report is its
+only channel back — outputs and knowledge signals go in it. See lead.md, ADR-010, and
+FRAMEWORK.md §3.
 
 ## Knowledge Library
 Location: $BAILIWICK/knowledge/
 Index: $BAILIWICK/knowledge/INDEX.md
 
 Rules:
-- Memory agent loads files on-demand via INDEX.md
+- Memory stage loads files on-demand via INDEX.md
 - Indexes form a recursive tree: root INDEX.md is injected each session; large domains shard into `indexes/index_<domain>.md` (and deeper). Descend on-demand for the relevant domain.
 - Never load the entire library in a single invocation
 - Maximum 5 *content* files (topics/patterns) per task unless justified — index navigation nodes don't count, but keep the descent shallow (≤2–3 levels)

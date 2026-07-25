@@ -36,6 +36,15 @@ build/test commands, conventions, and security — the framework layer complemen
   secrets, plan-before-apply, drafts for review. Full baseline:
   `__BAILIWICK__/knowledge/context/engineering-defaults.md`
 
+## Quality Workflow stages as Codex custom agents (ADR-010)
+The `bailiwick-*` custom agents in `~/.codex/agents/` are the Bailiwick Quality Workflow stages
+(implement, quality, memory, security-review, docs, cloud-research, federation). Codex does **not**
+auto-delegate — **this instruction is the trigger**: for substantial or multi-step work, delegate
+the matching stage(s) to them (e.g. "use the bailiwick-quality agent to review the draft"),
+running independent stages in parallel and dependent stages in order; each stage's final report
+must carry its outputs and knowledge signals. The user can force a stage the same way by naming
+it. Mechanics (spawning, `/agent`, threads): see the official Codex subagents docs.
+
 ## Non-negotiables (runtime-enforced by the bailiwick PreToolUse guardrail hook once trusted in the `codex` CLI; observe as policy regardless)
 - **High-impact actions never run on your initiative — and even when instructed, re-confirm in the
   moment that this specific execution is really intended**: `terraform`/`terragrunt apply`|`destroy`;

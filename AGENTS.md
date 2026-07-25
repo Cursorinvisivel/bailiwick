@@ -9,16 +9,31 @@ Central repository of AI-agent tools, roles, and knowledge patterns for cloud an
 Single source of truth — never copy files to other repositories.
 Other repositories reference this via `$BAILIWICK`.
 
-## How "agents" work here
-These agents are **markdown role definitions read on demand** — not native
-subagents of any tool. To act as one, open its file under
-`agents/` and adopt it as your instructions for the task.
-Delegation is prompt-driven; the agents share the active context.
+## How orchestration works here
+The **Lead** is the **orchestrator**: it plans work and dispatches the **stages** of the **Quality
+Workflow** — the ordered review pass Memory → Implement → Quality (with Security Review / Docs /
+Cloud Research substituted by task type). The canonical stage definitions live under `agents/`
+(frontmattered Markdown); `--install-tools` installs them as **native subagents on all four
+tools** — Claude Code symlinks (`~/.claude/agents/`), plus generated adapters for Gemini
+(`~/.gemini/agents/`), Codex (`~/.codex/agents/`, TOML) and Copilot (`~/.copilot/agents/`).
+Independent stages run concurrently, dependent stages in order; a stage that can't run as a
+subagent falls back to inline role adoption. See ADR-010 (incl. Amendment 1).
 
-| Agent | File | Role |
+**When stages trigger** (mechanics: each tool's official subagent docs):
+- **Claude Code / Gemini** — auto-delegation on description match for substantial work; **force**
+  by naming the stage ("run the full Quality Workflow", `@bailiwick-<stage>` under Gemini).
+  Gemini: CLI only for now — Code Assist agent mode (VS Code) exposes a subset of the CLI and its
+  subagent support is unverified.
+- **Codex** — **not automatic**: the global operator layer instructs delegation for substantial
+  work; **force** by asking ("use the bailiwick-quality agent to review this"). Covers the CLI
+  **and** the IDE extension (same `~/.codex/agents/`).
+- **Copilot** — explicit selection (agent picker in VS Code / CLI); auto only agent-to-agent. The
+  hosted cloud agent never sees user-scope agents.
+
+| Role / stage | File | Purpose |
 |---|---|---|
-| Lead | agents/lead.md | Single entry point, orchestration |
-| Implementer | agents/implementer.md | Code and IaC generation |
+| Lead (orchestrator) | agents/lead.md | Single entry point, dispatches stages |
+| Implement | agents/implementer.md | Code and IaC generation |
 | Quality | agents/quality.md | Technical review |
 | Security Review | agents/security-review.md | Security review: IAM, network, CIS benchmark |
 | Docs | agents/docs.md | Documentation, templates, workshops |
@@ -27,8 +42,8 @@ Delegation is prompt-driven; the agents share the active context.
 | Federation | agents/federation.md | External/company memory: read-only consult + gated ingest (dormant until a `.bailiwick-sources.json` source is enabled) |
 
 Orchestration is proportional, not mandatory: route substantial or multi-step work through the
-Lead agent (it delegates by task type); handle trivial edits and direct questions inline with
-knowledge loaded. The framework is the default — no trigger phrase required.
+Lead (the orchestrator dispatches stages by task type); handle trivial edits and direct questions
+inline with knowledge loaded. The framework is the default — no trigger phrase required.
 
 ## Knowledge Library
 Index: `knowledge/INDEX.md`
@@ -45,11 +60,11 @@ Rules:
 - **Capture (automatic, Claude Code only).** Claude Code hooks
   (`hooks/`) write raw transcripts of substantial sessions to
   `<project>/.bailiwick-outputs/raw/` and nag when captures are pending. Gemini, Codex, and Copilot do not
-  run those hooks — under those tools, write session outputs to `.bailiwick-outputs/` manually per the agent role.
+  run those hooks — under those tools, write session outputs to `.bailiwick-outputs/` manually per the relevant role definition.
 - **Curation (human-gated).** The `/curate` Claude Code skill distills captures into the
   knowledge library; promotion always requires approval. Under Codex, use the `$bailiwick-curate` Codex
   skill wrapper from `codex-skills/bailiwick-curate/`, which reads the same canonical workflow. Under
-  Gemini/Copilot, run the Memory agent Collect flow (`agents/memory.md`) by hand.
+  Gemini/Copilot, run the Memory stage Collect flow (`agents/memory.md`) by hand.
 - **Cross-machine sync.** The framework is cloned per machine and kept in sync via git: the
   Claude Code SessionStart hook ff-pulls `origin/main`, and approved curations propagate out via
   `hooks/sync_knowledge.sh` (central → `main`; satellite → `sync/<machine>` PR).

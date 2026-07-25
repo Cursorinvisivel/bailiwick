@@ -8,7 +8,7 @@ description: Research a topic or reference and distill the findings into knowled
 Turn a question or a reference into curated knowledge. This is the **ad-hoc** external-intake
 path for knowledge that does NOT come from actual project work (that's what capture + `/curate`
 handle) — one-off tools to evaluate, patterns to find, technology questions to settle.
-(Registered external KBs go through the Federation Agent inside `/curate` —
+(Registered external KBs go through the Federation stage inside `/curate` —
 `agents/federation.md`; do not confuse the two.)
 
 ## Two entry modes

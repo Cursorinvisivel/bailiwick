@@ -1,4 +1,4 @@
-# Kubernetes Domain Agent
+# Kubernetes — domain context
 
 ## Scope
 GKE cluster config, Helm releases, Kubernetes operators, manifests, Gateway API,
@@ -7,7 +7,7 @@ Workload Identity, External Secrets Operator, multi-cluster patterns.
 Not in scope: GCP IAM/networking not tied to workloads → gcp.md | Cloud Run → serverless.md
 
 ## Memory Hints
-Pass these tags to Memory Agent based on what the task touches:
+Pass these tags to the Memory stage based on what the task touches:
 
 | Sub-area | Tags to load |
 |---|---|
