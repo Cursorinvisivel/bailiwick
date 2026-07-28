@@ -36,6 +36,11 @@ jobs:
   snapshot:
     name: Snapshot & accumulate traffic
     runs-on: ubuntu-latest
+    env:
+      # Job-level so the opt-in private-metrics step can gate on them in `if:`
+      # (the secrets context is not available in step-level if conditions).
+      METRICS_REPO: ${{ secrets.PRIVATE_METRICS_REPO }}
+      METRICS_TOKEN: ${{ secrets.PRIVATE_METRICS_TOKEN }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -54,9 +59,9 @@ jobs:
         if: steps.restore.outputs.have-data == 'false'
         run: |
           mkdir -p badges
-          for label in views clones; do
+          for pair in views:views clones:cloners; do
             printf '{"schemaVersion":1,"label":"%s","message":"collecting…","color":"lightgrey","cacheSeconds":300}\n' \
-              "$label" > "badges/$label.json"
+              "${pair#*:}" > "badges/${pair%%:*}.json"
           done
           printf '{"days": {}}\n' > traffic-data.json
       - name: Snapshot traffic API and accumulate
@@ -84,6 +89,27 @@ jobs:
           # Single-commit orphan branch, force-pushed each run: continuity lives in the ledger
           # JSON (restored above), so the branch never accumulates history.
           git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" traffic-data
+      - name: Snapshot top referrers & paths to the private metrics repo
+        # Personal-only metric: top referrers/paths never land on the public traffic-data
+        # branch (on a public repo every Actions output — logs, artifacts, branches — is
+        # world-readable). Opt-in: this step runs only when both secrets exist:
+        #   PRIVATE_METRICS_REPO   e.g. "Cursorinvisivel/bailiwick-private-metrics" (private!)
+        #   PRIVATE_METRICS_TOKEN  fine-grained PAT with "Contents: read and write" on that repo
+        if: steps.snapshot.outcome == 'success' && env.METRICS_REPO != '' && env.METRICS_TOKEN != ''
+        env:
+          TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_PAT }}
+        run: |
+          set -e
+          git clone -q --depth 1 "https://x-access-token:${METRICS_TOKEN}@github.com/${METRICS_REPO}.git" private-metrics
+          python scripts/traffic_counter.py --referrers-data private-metrics/referrers-data.json
+          cd private-metrics
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add referrers-data.json
+          git diff --cached --quiet || {
+            git commit -q -m "traffic: popular snapshot $(date -u +%F)"
+            git push -q
+          }
       - name: Surface a failed snapshot
         if: steps.snapshot.outcome == 'failure'
         run: |

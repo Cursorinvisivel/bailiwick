@@ -14,7 +14,14 @@ with repository permission "Administration: read-only", or classic with the
 
 Note on "unique" figures: GitHub's uniques are deduplicated only within the
 window it reports, so the accumulated unique totals here are sums of per-day
-uniques — an upper bound, not true all-time uniques.
+uniques — an upper bound, not true all-time uniques (hence the "~" on the
+cloners badge).
+
+With --referrers-data it additionally snapshots /traffic/popular/referrers and
+/traffic/popular/paths into a separate ledger. Those endpoints return a whole
+rolling-14-day top-10 (no per-day breakdown), so snapshots are stored raw by
+date rather than summed. The workflow pushes this ledger to a PRIVATE repo —
+it is a personal metric and never lands on the public traffic-data branch.
 """
 
 import argparse
@@ -30,18 +37,33 @@ API_VERSION = "2022-11-28"
 METRICS = ("views", "unique_views", "clones", "unique_clones")
 
 
-def fetch_window(repo: str, token: str, kind: str) -> dict:
-    """Fetch the 14-day daily breakdown for `kind` ("views" or "clones")."""
+def api_get(repo: str, token: str, endpoint: str):
     req = urllib.request.Request(
-        f"https://api.github.com/repos/{repo}/traffic/{kind}?per=day",
+        f"https://api.github.com/repos/{repo}/{endpoint}",
         headers={
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {token}",
             "X-GitHub-Api-Version": API_VERSION,
         },
     )
-    with urllib.request.urlopen(req) as resp:
-        return json.load(resp)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as err:
+        if err.code in (401, 403, 404):
+            sys.exit(
+                f"GitHub traffic API returned {err.code} for {repo}/{endpoint}: the token "
+                "cannot read the traffic endpoints. A fine-grained PAT needs the repository "
+                "permission 'Administration: read-only', must list this repository, and its "
+                "resource owner must be the account/org that owns the repo; a classic PAT "
+                "needs the `repo` scope. Either way the token's owner needs push access."
+            )
+        raise
+
+
+def fetch_window(repo: str, token: str, kind: str) -> dict:
+    """Fetch the 14-day daily breakdown for `kind` ("views" or "clones")."""
+    return api_get(repo, token, f"traffic/{kind}?per=day")
 
 
 def merge_window(days: dict, window: dict, kind: str) -> dict:
@@ -69,21 +91,40 @@ def humanize(n: int) -> str:
     return str(n)
 
 
-def badge(label: str, count: int, color: str) -> dict:
+def badge(label: str, message: str, color: str) -> dict:
     return {
         "schemaVersion": 1,
         "label": label,
-        "message": humanize(count),
+        "message": message,
         "color": color,
         "cacheSeconds": 3600,
     }
 
 
+def record_popular(store: dict, day: str, referrers: list, paths: list) -> dict:
+    """Store one day's top-referrers/top-paths snapshot, overwriting by date.
+
+    Unlike views/clones there is no per-day breakdown — each snapshot is a whole
+    rolling 14-day top-10, so successive days overlap and cannot be summed. The
+    ledger keeps the raw snapshots for later trend analysis instead.
+    """
+    store.setdefault("snapshots", {})[day] = {"referrers": referrers, "paths": paths}
+    return store
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data", required=True, help="path of the JSON ledger (read+write)")
-    parser.add_argument("--badge-dir", required=True, help="directory for badge endpoint JSON")
+    parser.add_argument("--data", help="path of the JSON ledger (read+write)")
+    parser.add_argument("--badge-dir", help="directory for badge endpoint JSON")
+    parser.add_argument(
+        "--referrers-data",
+        help="path of the top-referrers/top-paths snapshot ledger (read+write)",
+    )
     args = parser.parse_args()
+    if bool(args.data) != bool(args.badge_dir):
+        parser.error("--data and --badge-dir must be used together")
+    if not args.data and not args.referrers_data:
+        parser.error("nothing to do: pass --data/--badge-dir and/or --referrers-data")
 
     repo = os.environ["GITHUB_REPOSITORY"]
     token = os.environ.get("TRAFFIC_TOKEN", "")
@@ -94,45 +135,60 @@ def main() -> None:
             "as the Actions secret TRAFFIC_PAT — the default GITHUB_TOKEN cannot read the "
             "traffic API."
         )
+    now = datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
 
-    data_path = Path(args.data)
-    data = json.loads(data_path.read_text()) if data_path.exists() else {"days": {}}
+    if args.data:
+        data_path = Path(args.data)
+        data = json.loads(data_path.read_text()) if data_path.exists() else {"days": {}}
 
-    try:
         for kind in ("views", "clones"):
             merge_window(data["days"], fetch_window(repo, token, kind), kind)
-    except urllib.error.HTTPError as err:
-        if err.code in (401, 403, 404):
-            sys.exit(
-                f"GitHub traffic API returned {err.code} for {repo}: TRAFFIC_TOKEN cannot "
-                "read the traffic endpoints. A fine-grained PAT needs the repository "
-                "permission 'Administration: read-only', must list this repository, and its "
-                "resource owner must be the account/org that owns the repo; a classic PAT "
-                "needs the `repo` scope. Either way the token's owner needs push access."
+
+        data["totals"] = totals(data["days"])
+        data["since"] = min(data["days"], default=today)
+        data["updated"] = now.isoformat(timespec="seconds")
+        data["days"] = dict(sorted(data["days"].items()))
+        data_path.write_text(json.dumps(data, indent=2) + "\n")
+
+        badge_dir = Path(args.badge_dir)
+        badge_dir.mkdir(parents=True, exist_ok=True)
+        (badge_dir / "views.json").write_text(
+            json.dumps(badge("views", humanize(data["totals"]["views"]), "blue")) + "\n"
+        )
+        # "~" because summed per-day uniques are an upper bound, not true all-time uniques.
+        (badge_dir / "clones.json").write_text(
+            json.dumps(
+                badge("cloners", "~" + humanize(data["totals"]["unique_clones"]), "brightgreen")
             )
-        raise
+            + "\n"
+        )
 
-    data["totals"] = totals(data["days"])
-    data["since"] = min(data["days"], default=datetime.now(timezone.utc).strftime("%Y-%m-%d"))
-    data["updated"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    data["days"] = dict(sorted(data["days"].items()))
-    data_path.write_text(json.dumps(data, indent=2) + "\n")
+        t = data["totals"]
+        print(
+            f"since {data['since']}: {t['views']} views ({t['unique_views']} unique/day-sum), "
+            f"{t['clones']} clones ({t['unique_clones']} unique/day-sum) "
+            f"across {len(data['days'])} days"
+        )
 
-    badge_dir = Path(args.badge_dir)
-    badge_dir.mkdir(parents=True, exist_ok=True)
-    (badge_dir / "views.json").write_text(
-        json.dumps(badge("views", data["totals"]["views"], "blue")) + "\n"
-    )
-    (badge_dir / "clones.json").write_text(
-        json.dumps(badge("clones", data["totals"]["clones"], "brightgreen")) + "\n"
-    )
+    if args.referrers_data:
+        ref_path = Path(args.referrers_data)
+        store = json.loads(ref_path.read_text()) if ref_path.exists() else {}
+        record_popular(
+            store,
+            today,
+            api_get(repo, token, "traffic/popular/referrers"),
+            api_get(repo, token, "traffic/popular/paths"),
+        )
+        store["updated"] = now.isoformat(timespec="seconds")
+        store["snapshots"] = dict(sorted(store["snapshots"].items()))
+        ref_path.write_text(json.dumps(store, indent=2) + "\n")
 
-    t = data["totals"]
-    print(
-        f"since {data['since']}: {t['views']} views ({t['unique_views']} unique/day-sum), "
-        f"{t['clones']} clones ({t['unique_clones']} unique/day-sum) "
-        f"across {len(data['days'])} days"
-    )
+        snap = store["snapshots"][today]
+        print(
+            f"popular snapshot {today}: {len(snap['referrers'])} referrers, "
+            f"{len(snap['paths'])} paths ({len(store['snapshots'])} snapshots total)"
+        )
 
 
 if __name__ == "__main__":

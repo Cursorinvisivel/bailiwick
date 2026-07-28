@@ -1,7 +1,8 @@
 # Bailiwick
 
+[![CI](https://img.shields.io/github/actions/workflow/status/Cursorinvisivel/bailiwick/ci.yml?branch=main&label=CI)](https://github.com/Cursorinvisivel/bailiwick/actions/workflows/ci.yml)
 [![Views](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCursorinvisivel%2Fbailiwick%2Ftraffic-data%2Fviews.json)](https://github.com/Cursorinvisivel/bailiwick/graphs/traffic)
-[![Clones](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCursorinvisivel%2Fbailiwick%2Ftraffic-data%2Fclones.json)](https://github.com/Cursorinvisivel/bailiwick/graphs/traffic)
+[![Cloners](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCursorinvisivel%2Fbailiwick%2Ftraffic-data%2Fclones.json)](https://github.com/Cursorinvisivel/bailiwick/graphs/traffic)
 
 **Curated engineering context and runtime guardrails for AI coding agents.**
 

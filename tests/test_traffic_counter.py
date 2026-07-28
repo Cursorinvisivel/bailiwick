@@ -64,11 +64,24 @@ def test_totals_sum_all_metrics_and_tolerate_missing_keys():
 
 
 def test_badge_matches_shields_endpoint_schema():
-    b = tc.badge("views", 12345, "blue")
+    b = tc.badge("views", tc.humanize(12345), "blue")
     assert b["schemaVersion"] == 1
     assert b["label"] == "views"
     assert b["message"] == "12.3k"
     assert b["color"] == "blue"
+
+
+def test_record_popular_overwrites_by_day_and_keeps_older_days():
+    store = {}
+    tc.record_popular(store, "2026-07-27", [{"referrer": "news.ycombinator.com"}], [])
+    tc.record_popular(store, "2026-07-28", [{"referrer": "github.com"}], [{"path": "/x"}])
+    # Re-snapshotting the same day overwrites it (later runs carry the fuller window).
+    tc.record_popular(store, "2026-07-28", [{"referrer": "reddit.com"}], [{"path": "/y"}])
+    assert store["snapshots"]["2026-07-27"]["referrers"] == [{"referrer": "news.ycombinator.com"}]
+    assert store["snapshots"]["2026-07-28"] == {
+        "referrers": [{"referrer": "reddit.com"}],
+        "paths": [{"path": "/y"}],
+    }
 
 
 def test_humanize_thresholds():
