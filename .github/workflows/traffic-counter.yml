@@ -6,6 +6,11 @@ name: Traffic counter
 # single-commit data-only `traffic-data` branch that the README badges read through the
 # shields.io endpoint. A missed run loses nothing as long as the gap stays under 14 days.
 #
+# The push trigger (on this workflow and its script) makes the first push after setup run
+# immediately instead of waiting for the next cron slot. Until the first successful snapshot,
+# grey "collecting…" placeholder badges are published so the README never shows shields.io's
+# "resource not found" error.
+#
 # One-time setup: the Actions-issued GITHUB_TOKEN cannot read the traffic API, so create a
 # fine-grained PAT for this repository with permission "Administration: read-only" (or a
 # classic PAT with `repo` scope) and store it as the Actions secret TRAFFIC_PAT.
@@ -14,6 +19,11 @@ on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/traffic-counter.yml"
+      - "scripts/traffic_counter.py"
 
 permissions:
   contents: write
@@ -32,14 +42,33 @@ jobs:
         with:
           python-version: "3.12"
       - name: Restore accumulated ledger
+        id: restore
         run: |
-          git fetch origin traffic-data && git show FETCH_HEAD:traffic-data.json > traffic-data.json \
-            || echo "no traffic-data branch yet — starting a fresh ledger"
+          if git fetch origin traffic-data && git show FETCH_HEAD:traffic-data.json > traffic-data.json; then
+            echo "have-data=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have-data=false" >> "$GITHUB_OUTPUT"
+            echo "no traffic-data branch yet — starting a fresh ledger"
+          fi
+      - name: Seed "collecting" placeholder badges (first run only)
+        if: steps.restore.outputs.have-data == 'false'
+        run: |
+          mkdir -p badges
+          for label in views clones; do
+            printf '{"schemaVersion":1,"label":"%s","message":"collecting…","color":"lightgrey","cacheSeconds":300}\n' \
+              "$label" > "badges/$label.json"
+          done
+          printf '{"days": {}}\n' > traffic-data.json
       - name: Snapshot traffic API and accumulate
+        id: snapshot
+        # First run publishes the placeholders even if the snapshot fails (bad PAT, API
+        # outage); the final step still fails the run so the problem stays visible.
+        continue-on-error: true
         env:
           TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_PAT }}
         run: python scripts/traffic_counter.py --data traffic-data.json --badge-dir badges
       - name: Publish traffic-data branch
+        if: steps.snapshot.outcome == 'success' || steps.restore.outputs.have-data == 'false'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -55,3 +84,8 @@ jobs:
           # Single-commit orphan branch, force-pushed each run: continuity lives in the ledger
           # JSON (restored above), so the branch never accumulates history.
           git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" traffic-data
+      - name: Surface a failed snapshot
+        if: steps.snapshot.outcome == 'failure'
+        run: |
+          echo "::error::Traffic snapshot failed — see the 'Snapshot traffic API and accumulate' step."
+          exit 1

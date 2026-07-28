@@ -21,6 +21,7 @@ import argparse
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -97,8 +98,19 @@ def main() -> None:
     data_path = Path(args.data)
     data = json.loads(data_path.read_text()) if data_path.exists() else {"days": {}}
 
-    for kind in ("views", "clones"):
-        merge_window(data["days"], fetch_window(repo, token, kind), kind)
+    try:
+        for kind in ("views", "clones"):
+            merge_window(data["days"], fetch_window(repo, token, kind), kind)
+    except urllib.error.HTTPError as err:
+        if err.code in (401, 403, 404):
+            sys.exit(
+                f"GitHub traffic API returned {err.code} for {repo}: TRAFFIC_TOKEN cannot "
+                "read the traffic endpoints. A fine-grained PAT needs the repository "
+                "permission 'Administration: read-only', must list this repository, and its "
+                "resource owner must be the account/org that owns the repo; a classic PAT "
+                "needs the `repo` scope. Either way the token's owner needs push access."
+            )
+        raise
 
     data["totals"] = totals(data["days"])
     data["since"] = min(data["days"], default=datetime.now(timezone.utc).strftime("%Y-%m-%d"))
