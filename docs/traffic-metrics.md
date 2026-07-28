@@ -8,7 +8,7 @@ How the repository's usage metrics work, and where to read the ones that don't e
 |---|---|---|
 | CI status | README badge | shields.io reading the `ci.yml` workflow status |
 | All-time views | README badge | accumulated ledger (below) |
-| Unique cloners (~) | README badge | accumulated ledger (below) |
+| Unique clones (~) | README badge | accumulated ledger (below) |
 | Top referrers & top content | [traffic report](https://github.com/Cursorinvisivel/bailiwick/blob/traffic-data/traffic-report.md) | daily snapshots (below) |
 
 GitHub's traffic API (and the Insights → Traffic page) only keeps a **rolling 14-day window**, so
@@ -31,7 +31,7 @@ successful snapshot, grey "collecting…" placeholders are published instead of 
 
 ## Caveats
 
-- **"~" on unique cloners:** GitHub dedupes uniques only within each reported day, so the
+- **"~" on unique clones:** GitHub dedupes uniques only within each reported day, so the
   accumulated figure is a sum of per-day uniques — an upper bound, not true all-time uniques.
 - Raw clone counts inflate easily (CI, mirrors, your own machines); unique cloners is the more
   honest adoption signal, which is why it gets the badge instead of raw clones.

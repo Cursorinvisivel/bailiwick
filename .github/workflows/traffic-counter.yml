@@ -56,10 +56,9 @@ jobs:
         if: steps.restore.outputs.have-data == 'false'
         run: |
           mkdir -p badges
-          for pair in views:views clones:cloners; do
-            printf '{"schemaVersion":1,"label":"%s","message":"collecting…","color":"lightgrey","cacheSeconds":300}\n' \
-              "${pair#*:}" > "badges/${pair%%:*}.json"
-          done
+          placeholder='{"schemaVersion":1,"label":"%s","message":"collecting…","color":"lightgrey","cacheSeconds":300}\n'
+          printf "$placeholder" "views" > badges/views.json
+          printf "$placeholder" "unique clones" > badges/clones.json
           printf '{"days": {}}\n' > traffic-data.json
       - name: Snapshot traffic API and accumulate
         id: snapshot

@@ -208,7 +208,7 @@ def main() -> None:
         # "~" because summed per-day uniques are an upper bound, not true all-time uniques.
         (badge_dir / "clones.json").write_text(
             json.dumps(
-                badge("cloners", "~" + humanize(data["totals"]["unique_clones"]), "brightgreen")
+                badge("unique clones", "~" + humanize(data["totals"]["unique_clones"]), "brightgreen")
             )
             + "\n"
         )
