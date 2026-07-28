@@ -20,8 +20,10 @@ cloners badge).
 With --referrers-data it additionally snapshots /traffic/popular/referrers and
 /traffic/popular/paths into a separate ledger. Those endpoints return a whole
 rolling-14-day top-10 (no per-day breakdown), so snapshots are stored raw by
-date rather than summed. The workflow pushes this ledger to a PRIVATE repo —
-it is a personal metric and never lands on the public traffic-data branch.
+date rather than summed. --report renders the latest snapshot plus the
+all-time totals as a small markdown page; both are published on the
+traffic-data branch — deliberately off the README (no badge), linked only
+from docs/traffic-metrics.md.
 """
 
 import argparse
@@ -112,6 +114,49 @@ def record_popular(store: dict, day: str, referrers: list, paths: list) -> dict:
     return store
 
 
+def render_report(data: dict | None, store: dict) -> str:
+    """Render the markdown traffic report: all-time totals + the latest top-10s."""
+
+    def table(rows: list, field: str, header: str) -> str:
+        if not rows:
+            return "_Nothing in the current window._"
+        lines = [f"| {header} | Views | Unique visitors |", "|---|---:|---:|"]
+        for r in rows:
+            name = str(r.get(field, "")).replace("|", "\\|")
+            lines.append(f"| {name} | {r['count']} | {r['uniques']} |")
+        return "\n".join(lines)
+
+    day, snap = max(store.get("snapshots", {"—": {"referrers": [], "paths": []}}).items())
+    parts = [
+        "# Traffic report",
+        "",
+        "_Auto-generated daily by the Traffic counter workflow — do not edit._",
+        "",
+    ]
+    if data:
+        t = data["totals"]
+        parts += [
+            f"**All-time since {data['since']}:** {t['views']} views · "
+            f"{t['clones']} clones · ~{t['unique_clones']} unique cloners "
+            f"(day-sum upper bound) · {len(data['days'])} days recorded.",
+            "",
+        ]
+    parts += [
+        f"## Top referrers (14 days ending {day})",
+        "",
+        table(snap["referrers"], "referrer", "Referrer"),
+        "",
+        f"## Top content (14 days ending {day})",
+        "",
+        table(snap["paths"], "path", "Path"),
+        "",
+        "Historical snapshots: [referrers-data.json](referrers-data.json) · "
+        "per-day ledger: [traffic-data.json](traffic-data.json)",
+        "",
+    ]
+    return "\n".join(parts)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", help="path of the JSON ledger (read+write)")
@@ -120,11 +165,14 @@ def main() -> None:
         "--referrers-data",
         help="path of the top-referrers/top-paths snapshot ledger (read+write)",
     )
+    parser.add_argument("--report", help="path of the markdown traffic report (write)")
     args = parser.parse_args()
     if bool(args.data) != bool(args.badge_dir):
         parser.error("--data and --badge-dir must be used together")
     if not args.data and not args.referrers_data:
         parser.error("nothing to do: pass --data/--badge-dir and/or --referrers-data")
+    if args.report and not args.referrers_data:
+        parser.error("--report needs --referrers-data")
 
     repo = os.environ["GITHUB_REPOSITORY"]
     token = os.environ.get("TRAFFIC_TOKEN", "")
@@ -137,6 +185,7 @@ def main() -> None:
         )
     now = datetime.now(timezone.utc)
     today = now.strftime("%Y-%m-%d")
+    data = None
 
     if args.data:
         data_path = Path(args.data)
@@ -189,6 +238,9 @@ def main() -> None:
             f"popular snapshot {today}: {len(snap['referrers'])} referrers, "
             f"{len(snap['paths'])} paths ({len(store['snapshots'])} snapshots total)"
         )
+
+        if args.report:
+            Path(args.report).write_text(render_report(data, store))
 
 
 if __name__ == "__main__":

@@ -39,6 +39,9 @@ Start with the [project README](../README.md) for the overview, then pick a path
   verified against (the guardrail/hook surfaces are fast-moving; revalidate on CLI upgrades).
 - **[telemetry-validation-protocol.md](telemetry-validation-protocol.md)** — a lightweight protocol
   for checking that the usage-telemetry signal is trustworthy before letting it drive any decisions.
+- **[traffic-metrics.md](traffic-metrics.md)** — how the repo's views/cloners badges accumulate
+  beyond GitHub's 14-day window, and where the maintainer-facing top-referrers/top-content report
+  lives (the `traffic-data` branch — deliberately not a badge).
 
 ## Conventions in these docs
 

@@ -84,6 +84,35 @@ def test_record_popular_overwrites_by_day_and_keeps_older_days():
     }
 
 
+def test_render_report_shows_totals_and_latest_snapshot_only():
+    data = {
+        "totals": {"views": 140, "unique_views": 13, "clones": 196, "unique_clones": 93},
+        "since": "2026-07-14",
+        "days": {"2026-07-14": {}, "2026-07-15": {}},
+    }
+    store = {
+        "snapshots": {
+            "2026-07-27": {"referrers": [{"referrer": "old.example", "count": 1, "uniques": 1}], "paths": []},
+            "2026-07-28": {
+                "referrers": [{"referrer": "news.ycombinator.com", "count": 40, "uniques": 30}],
+                "paths": [{"path": "/Cursorinvisivel/bailiwick", "count": 90, "uniques": 40}],
+            },
+        }
+    }
+    report = tc.render_report(data, store)
+    assert "~93 unique cloners" in report
+    assert "14 days ending 2026-07-28" in report
+    assert "| news.ycombinator.com | 40 | 30 |" in report
+    assert "| /Cursorinvisivel/bailiwick | 90 | 40 |" in report
+    assert "old.example" not in report  # only the latest snapshot is rendered
+
+
+def test_render_report_tolerates_empty_state():
+    report = tc.render_report(None, {})
+    assert "# Traffic report" in report
+    assert "Nothing in the current window" in report
+
+
 def test_humanize_thresholds():
     assert tc.humanize(9999) == "9999"
     assert tc.humanize(10_000) == "10.0k"
