@@ -1,0 +1,57 @@
+name: Traffic counter
+
+# GitHub only keeps the last 14 days of clone/view traffic (the Insights page and the traffic
+# API expose the same rolling window). This workflow snapshots that window daily via
+# scripts/traffic_counter.py and accumulates an all-time per-day ledger, published as a
+# single-commit data-only `traffic-data` branch that the README badges read through the
+# shields.io endpoint. A missed run loses nothing as long as the gap stays under 14 days.
+#
+# One-time setup: the Actions-issued GITHUB_TOKEN cannot read the traffic API, so create a
+# fine-grained PAT for this repository with permission "Administration: read-only" (or a
+# classic PAT with `repo` scope) and store it as the Actions secret TRAFFIC_PAT.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: traffic-counter
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    name: Snapshot & accumulate traffic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Restore accumulated ledger
+        run: |
+          git fetch origin traffic-data && git show FETCH_HEAD:traffic-data.json > traffic-data.json \
+            || echo "no traffic-data branch yet — starting a fresh ledger"
+      - name: Snapshot traffic API and accumulate
+        env:
+          TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_PAT }}
+        run: python scripts/traffic_counter.py --data traffic-data.json --badge-dir badges
+      - name: Publish traffic-data branch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mkdir publish
+          cp traffic-data.json badges/views.json badges/clones.json publish/
+          cd publish
+          git init -q -b traffic-data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "traffic: snapshot $(date -u +%F)"
+          # Single-commit orphan branch, force-pushed each run: continuity lives in the ledger
+          # JSON (restored above), so the branch never accumulates history.
+          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" traffic-data
