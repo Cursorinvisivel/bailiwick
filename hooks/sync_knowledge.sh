@@ -46,10 +46,22 @@ if [ "$ahead" -eq 0 ]; then
   exit 0
 fi
 
-# TODO(ADR-009): refuse to propagate when `git remote get-url origin` resolves to the public OSS repo
-# (canonical slug, host-agnostic) — and, when `gh` is available, to ANY public GitHub origin — unless
-# `allow_public_push: true` in .bailiwick-sync.json. This stops a /curate push from publishing private
-# knowledge to a public-origin (contribute-only) clone. Not yet implemented — see docs/decisions/adr-009.
+# ADR-009: a public-origin clone is contribute-only — refuse to propagate, commits stay local.
+# Checked AFTER the ahead-count so a no-op sync on a contribute-only clone stays quiet, and BEFORE
+# either role's push so neither path can publish.
+. "$BAILIWICK_ROOT/hooks/public_origin.sh" 2>/dev/null || true
+if command -v bw_public_origin_block >/dev/null 2>&1; then
+  if reason="$(bw_public_origin_block "$BAILIWICK_ROOT")"; then
+    bw_public_origin_notice "$reason"
+    bw_health sync_knowledge error "propagation refused: $reason ($ahead commit(s) stay local)"
+    echo "[sync] REFUSED — $ahead commit(s) stay local (ADR-009 contribute-only)." >&2
+    exit 1
+  fi
+else
+  bw_health sync_knowledge warn "public-origin check unavailable (hooks/public_origin.sh missing)"
+  echo "[sync] WARNING: ADR-009 public-origin check unavailable — verify 'origin' before pushing." >&2
+fi
+
 if [ "$role" = "central" ]; then
   echo "[sync] central: pushing $ahead commit(s) to origin/main…"
   git push origin HEAD:main || { bw_health sync_knowledge error "central push to origin/main failed ($ahead commit(s) local)"; echo "[sync] push FAILED — commits stay local." >&2; exit 1; }

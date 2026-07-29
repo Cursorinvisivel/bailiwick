@@ -61,7 +61,7 @@
   Your captures/health/audit data and go-installed MCP binaries are left in place. Preview it with -DryRun.
   -PurgeCaptures (only with '-Uninstall <repo>') also deletes that repo's .bailiwick-outputs/ INCLUDING
   any uncurated captures (default is to preserve + warn). Irreversible.
-  -WithDesktop (only with -InstallTools): wire a READ-ONLY 'bailiwick-knowledge' MCP filesystem server -
+  -WithDesktop (only with -InstallTools): wire a knowledge-SCOPED 'bailiwick-knowledge' MCP filesystem server -
   rooted at knowledge/ ONLY, never the rest of the framework, never writable - into Claude Desktop and
   ChatGPT Desktop's own MCP config, so either app can CONSULT the knowledge library outside a coding
   session. Both apps sit OUTSIDE the four hook-adapters (no hook system, so no capture/curation/guardrails).
@@ -320,7 +320,9 @@ function Remove-SeededFile([string]$abs, [string]$rel, [string]$fingerprint) {
 }
 
 function Clear-RepoExclude([string]$abs) {
-  $gitdir = (git -C $abs rev-parse --git-dir 2>$null)
+  # --git-common-dir, NOT --git-dir: in a linked worktree the latter returns .git/worktrees/<name>,
+  # but git reads info/exclude from the COMMON dir.
+  $gitdir = (git -C $abs rev-parse --git-common-dir 2>$null)
   if (-not $gitdir) { $gitdir = '.git' }
   if (-not [System.IO.Path]::IsPathRooted($gitdir)) { $gitdir = Join-Path $abs $gitdir }
   $excl = Join-Path $gitdir 'info/exclude'
@@ -502,8 +504,48 @@ function Resolve-GhAccount {
 }
 
 # and skip ALL per-repo wiring. Shadow mode makes this global-first setup the norm.
-# TODO(ADR-009): warn at -InstallTools time when this clone's `origin` is the public OSS repo
-# (contribute-only); the clone can validate/develop but must not ingest. Not yet implemented.
+
+# ADR-009: mirror of hooks/public_origin.sh. Warn (never fatal) when this clone's origin is the
+# public OSS repo or any public GitHub fork of it — developing/validating here is legitimate,
+# ingesting knowledge is not. Override: "allow_public_push": true in .bailiwick-sync.json.
+$script:CanonicalSlug = 'Cursorinvisivel/bailiwick'
+function Get-OriginSlug([string]$root) {
+  $url = (git -C $root remote get-url origin 2>$null)
+  if (-not $url) { return '' }
+  $url = $url -replace '\.git$', '' -replace '/$', ''
+  $parts = $url -split '[/:]' | Where-Object { $_ -ne '' }
+  if ($parts.Count -lt 2) { return '' }
+  return "$($parts[-2])/$($parts[-1])"
+}
+function Test-PublicOrigin([string]$root) {
+  $slug = Get-OriginSlug $root
+  if (-not $slug) { return $null }
+  $cfg = Join-Path $root '.bailiwick-sync.json'
+  if (Test-Path -LiteralPath $cfg) {
+    try {
+      if ((Get-Content -Raw -LiteralPath $cfg | ConvertFrom-Json).allow_public_push -eq $true) { return $null }
+    } catch { }
+  }
+  if ($slug.ToLower() -eq $script:CanonicalSlug.ToLower()) { return "origin is the public OSS repo ($slug)" }
+  if (Get-Command gh -ErrorAction SilentlyContinue) {
+    $private = (gh api "repos/$slug" --jq '.private' 2>$null)
+    if ($private -eq 'false') { return "origin ($slug) is a PUBLIC GitHub repository" }
+  }
+  return $null
+}
+function Warn-PublicOrigin {
+  $root = Split-Path -Parent $PSScriptRoot
+  $reason = Test-PublicOrigin $root
+  if ($reason) {
+    Write-Host ""
+    Write-Host "  WARNING (ADR-009): $reason."
+    Write-Host "  This clone is CONTRIBUTE-ONLY: develop and validate freely, but /curate will not promote"
+    Write-Host "  and sync_knowledge.sh will refuse to push - knowledge/ is tracked, so it would publish."
+    Write-Host "  For your own instance, point 'origin' at a private repo you own (docs/staying-private.md)."
+    Write-Host ""
+  }
+}
+
 $GlobalOnly = ($InstallTools -and -not $Target)
 if ($Help -or (-not $Target -and -not $GlobalOnly -and -not $Uninstall)) {
   Get-Help $PSCommandPath -Detailed 2>$null
@@ -1038,7 +1080,9 @@ if ($WithStandards) { Invoke-SeedStandards }
 if (Dry) { Plan "create capture staging .bailiwick-outputs/raw/" } else { New-Item -ItemType Directory -Force -Path (Join-Path $Target '.bailiwick-outputs/raw') | Out-Null }
 
 # --- hide locally via .git/info/exclude (never the tracked .gitignore) ---
-$gitDir = (git -C $Target rev-parse --git-dir 2>$null)
+# --git-common-dir, NOT --git-dir: git resolves info/exclude from the common dir, so in a linked
+# worktree the rules would be written where git never reads them, leaving captures git-visible.
+$gitDir = (git -C $Target rev-parse --git-common-dir 2>$null)
 if (-not $gitDir) { $gitDir = '.git' }
 if (-not [System.IO.Path]::IsPathRooted($gitDir)) { $gitDir = Join-Path $Target $gitDir }
 $exclude = Join-Path $gitDir 'info/exclude'
@@ -1070,6 +1114,9 @@ if (-not $Visible) {
 
 }  # ===== end per-repo wiring (global-only mode resumes here) =====
 
+# ADR-009: surface a contribute-only origin before the prerequisites report, not buried under it.
+if ($InstallTools) { Warn-PublicOrigin }
+
 # --- validate (and with -InstallTools, install) the once-per-machine prerequisites ---
 # Under -DryRun, describe what -InstallTools would mutate globally, then neutralize it so the status
 # block below reports CURRENT state without touching anything.
@@ -1083,7 +1130,7 @@ if ($DryRun -and $InstallTools) {
   Write-Host "    - symlink Quality Workflow stages into ~/.claude/agents/ (native subagents, ADR-010)"
   Write-Host "    - generate multi-tool stage adapters: ~/.gemini/agents/, ~/.codex/agents/ (TOML), ~/.copilot/agents/"
   Write-Host "    - install operator layers into ~/.codex/AGENTS.md + ~/.gemini/GEMINI.md"
-  if ($WithDesktop) { Write-Host "    - wire the read-only bailiwick-knowledge MCP into Claude/ChatGPT Desktop configs (install_desktop_mcp.py)" }
+  if ($WithDesktop) { Write-Host "    - wire the knowledge-scoped bailiwick-knowledge MCP into Claude/ChatGPT Desktop configs (install_desktop_mcp.py)" }
   Write-Host "  [dry-run] nothing installed; the status lines below reflect the CURRENT state."
   $InstallTools = $false
 }
@@ -1327,7 +1374,9 @@ if (Test-GlobalLayer $geminiAgents) {
   $geminiStatus = "MISSING Gemini operator layer - re-run with -InstallTools. Only needed if you use Gemini."
 }
 
-# --- Optional READ-ONLY knowledge reference for Claude Desktop / ChatGPT Desktop (-WithDesktop) ---
+# --- Optional knowledge-SCOPED reference for Claude Desktop / ChatGPT Desktop (-WithDesktop) ---
+# Scoped to knowledge/ only, but the filesystem server is read-WRITE within that root and Desktop
+# has no hooks - so it can modify the library outside every gate. Not a read-only channel.
 # Neither app has a hook system, so this is deliberately OUTSIDE capture/curation/guardrails (those only
 # cover the four sanctioned adapters). A single bailiwick-knowledge MCP filesystem server rooted at
 # knowledge/ ONLY, never the rest of the framework, and never writable from either app. Opt-in and
@@ -1341,14 +1390,14 @@ function Invoke-DesktopWire([string]$label, [string]$cfg) {
   & $pyExe.Source (Join-Path $BailiwickRoot 'hooks/install_desktop_mcp.py') $cfg (Join-Path $BailiwickRoot 'knowledge') 2>&1 | ForEach-Object { "    $_" }
 }
 if ($WithDesktop -and $InstallTools -and $pyExe) {
-  Write-Host "  -WithDesktop: wiring the read-only knowledge-reference MCP server..."
+  Write-Host "  -WithDesktop: wiring the knowledge-scoped reference MCP server (read-write within knowledge/)..."
   Invoke-DesktopWire 'Claude Desktop' $script:ClaudeDesktopCfg
   Invoke-DesktopWire 'ChatGPT Desktop' $script:ChatgptDesktopCfg
 } elseif ($WithDesktop -and $InstallTools -and -not $pyExe) {
   Write-Host "  -WithDesktop: SKIPPED - python3/python not found (needed to merge the MCP config safely)."
 }
 if (Test-DesktopWired $script:ClaudeDesktopCfg) {
-  $claudeDtStatus = "OK Claude Desktop wired to knowledge/ (read-only) - $($script:ClaudeDesktopCfg) - paste $desktopInstr into its Project instructions"
+  $claudeDtStatus = "OK Claude Desktop wired to knowledge/ (scoped; read-write within it, no hooks) - $($script:ClaudeDesktopCfg) - paste $desktopInstr into its Project instructions"
 } elseif ($script:ClaudeDesktopCfg) {
   $claudeDtStatus = "-- Claude Desktop not wired ($($script:ClaudeDesktopCfg)) - re-run with -InstallTools -WithDesktop, or wire manually if you don't use Claude Desktop"
 } else {

@@ -31,7 +31,9 @@ instead of mere instructions:
 Validation-only commands (terraform plan/validate/fmt, kubectl get/describe or --dry-run,
 read-only gcloud/aws/az, git status/diff/log, ...) match no pattern and run untouched.
 Shell line-continuations (backslash-newline) are folded before matching, so splitting a
-verb across continued lines does not evade the patterns.
+verb across continued lines does not evade the patterns; whole-token quoting is unwrapped, so
+`terraform "apply"` does not either. Tiers are evaluated PER SEGMENT (`;` `&&` `||` `|`, comments
+dropped), so a --dry-run flag or an EXEMPT match in one segment never speaks for a chained one.
 
 Self-gating: the hook is installed once at user level and fires in every project, so it
 stays inert unless the repo is bailiwick-wired (a framework complement file carries the
@@ -44,7 +46,10 @@ pre-filter trips, fail OPEN otherwise, so a bug never wedges the harness on a ha
 
 Scope & limits — NOT a complete security boundary. This is a DIRECT-command guardrail for the
 supported patterns only. It does NOT see destructive operations reached via `make apply`, wrapper /
-task-runner scripts, shell aliases/functions, or Terraform-MCP tool actions — those bypass it. On an
+task-runner scripts, shell aliases/functions, or Terraform-MCP tool actions — those bypass it.
+Known residual evasion: quoting only PART of a token (`terraform ap"ply"`) still slips the patterns —
+the transformation that would catch it is indistinguishable from the quoted-argument false positive
+(`gcloud logging read 'methodName:"delete"'`) the tiers deliberately ignore. On an
 internal evaluation error it fails CLOSED (deny) for commands that trip the destructive pre-filter and
 fails OPEN otherwise (ADR-005) — never wedging the harness on a harmless command. A malformed payload
 (nothing to evaluate) still fails open. Treat it as a high-value safety rail for direct commands, not
@@ -75,14 +80,34 @@ import sys
 
 # EXEMPT: dirty-zone capture plumbing — always passes, ahead of every other tier. Capture exists
 # to guarantee no data loss; blocking its commits/pushes would defeat the framework's own backstop.
+# Anchored to COMMAND position, never free text: an unanchored substring meant that any command
+# merely mentioning the mirror (a `# capture-mirror` comment, a capture-mirror.tfvars argument,
+# a chained `echo capture_backup.sh`) disarmed every tier. Exemption is also evaluated per segment
+# (see segments()), so `capture_backup.sh push && terraform destroy` cannot ride it.
 EXEMPT_PATTERNS = [
-    r"capture_backup\.sh",
-    r"capture-mirror",
+    # the backup script invoked as a command word, optionally through an interpreter
+    r"(?:^|[;&|]\s*)(?:(?:bash|sh|zsh)\s+)?\S*capture_backup\.sh\b",
+    # git against the CANONICAL mirror only (capture_backup.sh: $XDG_CACHE_HOME|~/.cache/bailiwick/
+    # capture-mirror), with -C immediately after `git` and the path ending the token. Matching any
+    # path merely containing "capture-mirror" turned the exemption into an unconfirmed push channel:
+    # an agent-created /tmp/capture-mirror, or a decoy -C path while --git-dir pointed git at the
+    # client repo, both rode it to `git push <arbitrary-url>` with no confirmation.
+    r"(?:^|[;&|]\s*)git\s+-C\s+\S*/bailiwick/capture-mirror/?(?=\s|$)",
 ]
+
+# An exemption claim is void if the segment redirects git at another repository (--git-dir and
+# --work-tree override -C) or names an explicit remote URL — the mirror only ever pushes to the
+# `origin` its own plumbing configured, never to a URL spelled out on the command line.
+EXEMPT_DISQUALIFIERS = re.compile(r"--git-dir|--work-tree|--exec-path|://|\S+@\S+:")
 
 # Segment separator: patterns must not read a verb from the NEXT chained command as belonging to
 # this tool ("terraform plan && kubectl apply" is not "terraform ... apply").
 SEG = r"[^;&|\n]*"
+
+# The dry-run exemption must be a standalone flag in the SAME segment that matched — a bare
+# `"--dry-run" in command` let `kubectl delete ns prod --dry-run=client; kubectl delete ns prod`
+# (and a trailing `# --dry-run` comment) suppress the live mutation.
+DRY_RUN_RE = re.compile(r"(?:^|\s)--dry-run(?:=\S+)?(?=\s|$)")
 
 # ASK-IMPACT: real-world impact — forced reconfirmation even when the user instructed the action.
 # Tuples: (pattern, dry_run_exempt, what). dry_run_exempt=True lets a --dry-run form pass as
@@ -145,15 +170,39 @@ def normalize(command):
     return re.sub(r"\\\r?\n", "", command)
 
 
+# A quoted run that spans a WHOLE token and holds no whitespace, separator, or nested quote:
+# `terraform "apply"`, `rm '-rf'`, `kubectl "delete"`. The shell executes these exactly as the
+# unquoted form, so they are command tokens and must be unwrapped before quoted ARGUMENTS are
+# blanked — otherwise quoting the verb erased it from the string the tiers match against.
+_QUOTED_TOKEN = re.compile(r"(?<![^\s;&|])(['\"])([^'\"\s;&|]*)\1(?![^\s;&|])")
+
+
+def unwrap_token_quotes(command):
+    """Unquote whole-token quoted words, leaving genuine quoted arguments intact for strip_quoted().
+    The two cases are distinguished by content: `echo "terraform apply"` holds whitespace and
+    `'protoPayload.methodName:"delete"'` holds a nested quote, so neither is unwrapped."""
+    return _QUOTED_TOKEN.sub(lambda m: m.group(2), command)
+
+
 def strip_quoted(command):
-    """Blank out single/double-quoted substrings. The destructive verbs in ASK-IMPACT and the
-    commit/push verbs in ASK-GO-AHEAD are always shell *command tokens*, never inside quotes — so a
-    verb appearing inside a quoted ARGUMENT (e.g. `gcloud logging read '... methodName:"delete" ...'`,
-    a read-only query) is a false positive. Matching those tiers against the quote-stripped command
-    removes that class. The SIGNATURE tier is the exception (its match lives inside the quoted commit
-    message), so it keeps the raw command. Observed live: a `gcloud logging read` with "delete" in the
-    filter was flagged ask-impact under the Codex adapter."""
+    """Blank out single/double-quoted substrings that survive unwrap_token_quotes() — i.e. genuine
+    quoted ARGUMENTS. A verb inside one (e.g. `gcloud logging read '... methodName:"delete" ...'`,
+    a read-only query) is a false positive; matching the command-token tiers against the stripped
+    form removes that class. Observed live: a `gcloud logging read` with "delete" in the filter was
+    flagged ask-impact under the Codex adapter. Order matters — unwrap first, blank second: blanking
+    alone treated `terraform "apply"` as a quoted argument and let it through. The SIGNATURE tier is
+    the exception (its match lives inside the quoted commit message) and keeps the raw command."""
     return re.sub(r"'[^']*'|\"[^\"]*\"", " ", command)
+
+
+def segments(command):
+    """Split a quote-blanked command into the segments the shell executes separately, dropping
+    `#` comments. Tier decisions are made per segment: a --dry-run flag, or an EXEMPT match, in
+    one segment must never speak for another (`kubectl delete x --dry-run=client; kubectl delete x`).
+    Safe to run after strip_quoted only — a `#`, `;` or `&&` inside quotes is already blanked, so it
+    can never be misread here as a comment or a separator."""
+    no_comments = re.sub(r"(?:^|\s)#[^\n]*", " ", command)
+    return [seg for seg in re.split(r"[;&|\n]+", no_comments) if seg.strip()]
 
 COMPLEMENT_FILES = (
     ".bailiwick.local.md",
@@ -329,8 +378,10 @@ def main(adapter="claude"):
         return 0
     command = normalize(raw_command)
     # Command-token tiers (impact / go-ahead) match against the quote-stripped form so a verb inside
-    # a quoted argument isn't a false positive; the signature tier keeps `command` (needs the quotes).
-    cmd_tokens = strip_quoted(command)
+    # a quoted argument isn't a false positive — but whole-token quoting is unwrapped first, since
+    # `terraform "apply"` is a command token the shell runs verbatim. The signature tier keeps
+    # `command` (needs the quotes).
+    cmd_tokens = strip_quoted(unwrap_token_quotes(command))
 
     # Gemini exports CLAUDE_PROJECT_DIR as a compat alias; Codex carries only payload cwd.
     project_dir = (
@@ -345,18 +396,23 @@ def main(adapter="claude"):
     # failure, fail CLOSED if the command trips the destructive pre-filter, else fail open — never
     # wedge the harness on a harmless command (ADR-005).
     try:
-        for pattern in EXEMPT_PATTERNS:
-            if re.search(pattern, cmd_tokens, re.IGNORECASE):
-                return 0  # dirty-zone capture plumbing — never blocked (data-loss prevention)
-        dry_run = "--dry-run" in command
-        for pattern, dry_exempt, what in ASK_IMPACT_PATTERNS:
-            if dry_exempt and dry_run:
-                continue  # validation-only form — no real impact
-            if re.search(pattern, cmd_tokens, re.IGNORECASE):
-                _respond(adapter, "impact", "HIGH-IMPACT: " + what
-                         + " — blocked from agent initiative; re-confirm this is really the intent.",
-                         raw_command, project_dir)
-                return 0
+        # Per-segment evaluation (ADR-006 amendment): EXEMPT clears only its own segment, and the
+        # dry-run exemption only the segment that matched — neither speaks for a chained command.
+        segs = [seg for seg in segments(cmd_tokens)
+                if not (any(re.search(p, seg, re.IGNORECASE) for p in EXEMPT_PATTERNS)
+                        and not EXEMPT_DISQUALIFIERS.search(seg))]
+        if not segs:
+            return 0  # dirty-zone capture plumbing only — never blocked (data-loss prevention)
+        for seg in segs:
+            seg_dry_run = DRY_RUN_RE.search(seg) is not None
+            for pattern, dry_exempt, what in ASK_IMPACT_PATTERNS:
+                if dry_exempt and seg_dry_run:
+                    continue  # validation-only form in THIS segment — no real impact
+                if re.search(pattern, seg, re.IGNORECASE):
+                    _respond(adapter, "impact", "HIGH-IMPACT: " + what
+                             + " — blocked from agent initiative; re-confirm this is really the intent.",
+                             raw_command, project_dir)
+                    return 0
         if GIT_MESSAGE_RE.search(command) and SIGNATURE_RE.search(command):
             _respond(adapter, "signature",
                      "the commit/PR message carries an AI attribution signature "
@@ -364,14 +420,17 @@ def main(adapter="claude"):
                      "or strip it before proceeding.",
                      raw_command, project_dir)
             return 0
-        for pattern, reason in ASK_GOAHEAD_PATTERNS:
-            if re.search(pattern, cmd_tokens, re.IGNORECASE):
-                _respond(adapter, "goahead", reason, raw_command, project_dir)
-                return 0
+        for seg in segs:
+            for pattern, reason in ASK_GOAHEAD_PATTERNS:
+                if re.search(pattern, seg, re.IGNORECASE):
+                    _respond(adapter, "goahead", reason, raw_command, project_dir)
+                    return 0
     except Exception as e:
         _health("error", "pattern engine failure ({}): {!r}".format(adapter, e)[:200])
         try:
-            if DANGER_PREFILTER.search(strip_quoted(normalize(raw_command))):
+            # ADR-005: the pre-filter runs on the RAW command. Feeding it the quote-stripped form
+            # let the same quoting trick that evades the tiers also blind the fail-closed path.
+            if DANGER_PREFILTER.search(normalize(raw_command)):
                 _decide_deny(
                     adapter,
                     "guardrail evaluation failed on a potentially destructive command — denied "

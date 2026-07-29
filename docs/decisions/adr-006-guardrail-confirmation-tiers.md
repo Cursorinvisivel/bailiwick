@@ -72,3 +72,52 @@ apply`, wrappers, aliases, MCP actions remain out of scope).
   confirmations are accepted as annoyance-cost (e.g. `git log --grep=merge`); deny false-positives
   no longer exist in normal operation.
 - Gemini/Codex adapters (BACKLOG §2) should reproduce the same tier semantics when wired.
+
+## Amendment 1 (2026-07-28) — per-segment tier evaluation
+
+A security review of the engine found three evasions, all the same root cause: tier decisions were
+matched against the **whole command string** rather than the tokens actually executed in one
+segment — the discipline this ADR already promised ("patterns stop at command separators"). Each
+produced *no decision at all*, so the forced reconfirmation never fired.
+
+1. **Quoted command token.** `strip_quoted()` blanked every quoted span on the premise that
+   destructive verbs are "always command tokens, never inside quotes". Quoting a whole token is
+   ordinary shell that executes identically, so `terraform "apply"`, `rm '-rf' /x`,
+   `kubectl 'delete' ns prod`, and `git 'push'` all reduced to a non-matching string.
+2. **Unanchored EXEMPT substring.** `capture_backup\.sh` / `capture-mirror` were searched as free
+   text anywhere in the command, ahead of every other tier, so a 14-character trailing comment
+   (`terraform apply # capture-mirror`) or a `capture-mirror.tfvars` argument disarmed the engine
+   entirely.
+3. **Leaking dry-run exemption.** `dry_run = "--dry-run" in command` was computed once over the
+   whole line, so `kubectl delete ns prod --dry-run=client; kubectl delete ns prod` — an idiomatic
+   validate-then-apply one-liner — suppressed the live mutation, as did a `# --dry-run` comment.
+
+**Decision:** evaluate tiers per executed segment. The command is normalised, whole-token quoting is
+unwrapped (`unwrap_token_quotes()`) *before* genuine quoted arguments are blanked, `#` comments are
+dropped, and the result is split on `;` `&&` `||` `|` and newline (`segments()`). EXEMPT clears only
+its own segment and is anchored to command position (the backup script as a command word; the mirror
+only as a `git -C` target), and the dry-run exemption applies only within the segment that matched.
+Separately, the ADR-005 fail-closed pre-filter now reads the **raw** command as that ADR specifies —
+it had been fed the quote-stripped form, so evasion #1 blinded the fail-closed path too.
+
+**Consequence:** the quoted-argument false positive this ADR accepted (`gcloud logging read
+'methodName:"delete"'`, `echo "terraform apply"`) stays suppressed — those are distinguished by
+content, holding whitespace or a nested quote. On the error path, a quoted destructive verb now
+fails closed where it previously fell through; that is the direction ADR-005 intends and only
+applies once the engine has already errored.
+
+**Follow-on (same amendment):** anchoring alone left the mirror clause too broad — `git -C <any path
+containing capture-mirror>` granted an unconfirmed push to an arbitrary remote, and because
+`--git-dir`/`--work-tree` override `-C`, a decoy mirror path could be presented while git operated on
+the client repo. The clause is now scoped to the canonical mirror (`…/bailiwick/capture-mirror`, per
+`capture_backup.sh`) with `-C` immediately after `git`, and any segment carrying `--git-dir`,
+`--work-tree`, `--exec-path`, or an explicit remote URL is disqualified from exemption entirely. Note
+this is a capability grant, not a pattern: it is deliberately narrower than the plumbing needs, since
+`capture_backup.sh` is invoked by the Stop/SessionEnd hook rather than through the agent's Bash tool,
+so the guardrail never sees the mirror's own git calls. A bare relative `git -C capture-mirror push`
+is no longer exempt.
+
+**Residual, documented in the module's scope statement:** quoting only *part* of a token
+(`terraform ap"ply"`) still evades. The transformation that would catch it is indistinguishable from
+the quoted-argument false positive above, so it joins `make apply`, wrappers, aliases, and MCP
+actions on the known-bypass list rather than being silently assumed covered.

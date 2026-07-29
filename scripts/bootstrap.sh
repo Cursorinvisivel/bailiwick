@@ -51,7 +51,7 @@ Options:
                    ~/.gemini/GEMINI.md layer (installed by --install-tools); the team's own GEMINI.md
                    is never shadowed. A team-tracked .gemini/settings.json is left untouched.
   --all-tools      Shorthand for --with-agents --with-copilot --with-gemini.
-  --with-desktop   Only with '--install-tools': wire a READ-ONLY 'bailiwick-knowledge' MCP
+  --with-desktop   Only with '--install-tools': wire a knowledge-SCOPED 'bailiwick-knowledge' MCP
                    filesystem server (rooted at knowledge/ only, never the rest of the framework)
                    into Claude Desktop and ChatGPT Desktop's own MCP config — so either app can
                    consult the knowledge library for reference outside a coding session. Neither
@@ -170,8 +170,24 @@ fi
 # --install-tools with NO target = global-only: install/validate the once-per-machine prerequisites
 # (hooks, skills, Codex skills, operator layers, terraform-mcp) and skip ALL per-repo wiring. Shadow
 # mode makes this global-first setup the norm — no throwaway repo needed just to run --install-tools.
-# TODO(ADR-009): warn at --install-tools time when this clone's `origin` is the public OSS repo
-# (contribute-only); the clone can validate/develop but must not ingest. Not yet implemented.
+# ADR-009: warn (never fatal) when this clone's origin is the public OSS repo — validating or
+# developing in the OSS clone is legitimate; ingesting knowledge into it is not.
+warn_public_origin() {
+  local root reason
+  root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+  # shellcheck source=../hooks/public_origin.sh
+  . "$root/hooks/public_origin.sh" 2>/dev/null || return 0
+  command -v bw_public_origin_block >/dev/null 2>&1 || return 0
+  if reason="$(bw_public_origin_block "$root")"; then
+    echo
+    echo "  WARNING (ADR-009): $reason."
+    echo "  This clone is CONTRIBUTE-ONLY: develop and validate freely, but /curate will not promote"
+    echo "  and sync_knowledge.sh will refuse to push — knowledge/ is tracked, so it would publish."
+    echo "  For your own instance, point 'origin' at a private repo you own (docs/staying-private.md)."
+    echo
+  fi
+}
+
 GLOBAL_ONLY=0
 if [ "$INSTALL_TOOLS" -eq 1 ] && [ -z "$TARGET_ARG" ]; then GLOBAL_ONLY=1; fi
 if [ "$GLOBAL_ONLY" -ne 1 ] && [ "$UNINSTALL" -ne 1 ] && [ -z "$TARGET_ARG" ]; then
@@ -409,27 +425,39 @@ rm_seeded_file() {  # <repo-abs> <relpath> <fingerprint-or-empty>
   if DRY; then plan "remove seeded $rel"; else rm -f "$f" && echo "  removed: $rel"; fi
 }
 
-strip_repo_exclude() {  # <repo-abs> — remove only the framework's own lines from .git/info/exclude
-  local abs="$1" gitdir excl
-  gitdir="$(git -C "$abs" rev-parse --git-dir 2>/dev/null || echo "$abs/.git")"
+strip_repo_exclude() {  # <repo-abs> [keep-capture-rule] — remove only the framework's own lines
+  local abs="$1" keep="${2:-0}" gitdir excl
+  # --git-common-dir, NOT --git-dir: in a linked worktree the latter returns .git/worktrees/<name>,
+  # but git reads info/exclude from the COMMON dir — writing there silently excludes nothing.
+  gitdir="$(git -C "$abs" rev-parse --git-common-dir 2>/dev/null || echo "$abs/.git")"
   case "$gitdir" in /*) : ;; *) gitdir="$abs/$gitdir" ;; esac
   excl="$gitdir/info/exclude"
   [ -f "$excl" ] && grep -qF "bailiwick framework wiring" "$excl" 2>/dev/null || return 0
   if DRY; then plan "strip the framework block from $excl (your own exclude rules preserved)"; return 0; fi
-  python3 - "$excl" <<'PY'
+  python3 - "$excl" "$keep" <<'PY'
 import sys
-f = sys.argv[1]
+f, keep = sys.argv[1], sys.argv[2] == "1"
 mark = "# bailiwick framework wiring (local-only — never shared)"
 ours = {".bailiwick-outputs/", ".mcp.json", ".vscode/mcp.json", "CLAUDE.local.md",
         ".bailiwick.local.md", ".codex/config.toml", ".gemini/settings.json",
         ".github/instructions/bailiwick.instructions.md"}
+keep_note = "# bailiwick: kept — uncurated plaintext captures still present (see --purge-captures)"
+if keep:  # captures survive the uninstall, so their ignore rule must survive with them
+    ours.discard(".bailiwick-outputs/")
 lines = open(f, encoding="utf-8").read().splitlines()
-out = [ln for ln in lines if ln.strip() != mark and ln.strip() not in ours]
+out = [ln for ln in lines if ln.strip() != mark and ln.strip() not in ours and ln.strip() != keep_note]
+if keep and ".bailiwick-outputs/" in (ln.strip() for ln in out):
+    i = next(i for i, ln in enumerate(out) if ln.strip() == ".bailiwick-outputs/")
+    out.insert(i, keep_note)
 while out and out[-1].strip() == "":  # drop a trailing blank the block left behind
     out.pop()
 open(f, "w", encoding="utf-8").write("\n".join(out) + ("\n" if out else ""))
 PY
-  echo "  removed: framework block from $excl (your own exclude rules preserved)"
+  if [ "$keep" = "1" ]; then
+    echo "  removed: framework block from $excl — KEPT '.bailiwick-outputs/' (captures still present)"
+  else
+    echo "  removed: framework block from $excl (your own exclude rules preserved)"
+  fi
 }
 
 rm_allowlist_entry() {  # <repo-abs> — remove just this repo's shadow-allowlist line
@@ -445,21 +473,25 @@ PY
   echo "  removed: this repo's shadow-allowlist entry"
 }
 
-warn_repo_captures() {  # <repo-abs>
+warn_repo_captures() {  # <repo-abs> — returns 0 when .bailiwick-outputs/ SURVIVES (keep its ignore rule)
   local abs="$1" out="$1/.bailiwick-outputs" n
-  [ -d "$out" ] || return 0
+  [ -d "$out" ] || return 1     # nothing staged here — the ignore rule can go
   if [ "$PURGE_CAPTURES" -eq 1 ]; then
-    if DRY; then plan "delete $out INCLUDING any captures (--purge-captures)"
-    else rm -rf "$out" && echo "  removed: .bailiwick-outputs/ (--purge-captures — captures deleted)"; fi
-    return 0
+    if DRY; then plan "delete $out INCLUDING any captures (--purge-captures)"; return 1; fi
+    rm -rf "$out" && echo "  removed: .bailiwick-outputs/ (--purge-captures — captures deleted)"
+    return 1                    # directory is gone — the ignore rule goes with it
   fi
   n="$(find "$out/raw" -type f \( -name '*.jsonl' -o -name '*.md' \) 2>/dev/null | grep -vc '/\.curated/' || true)"
   if [ "${n:-0}" -gt 0 ]; then
-    echo "  PRESERVED: .bailiwick-outputs/ holds ~$n uncurated capture file(s) — left in place."
+    echo "  PRESERVED: .bailiwick-outputs/ holds ~$n uncurated capture file(s) — left in place,"
+    echo "             and its .git/info/exclude rule is KEPT so they stay untracked. These are"
+    echo "             PLAINTEXT session transcripts: do not commit them."
     echo "             Promote them with /curate, or delete via: --uninstall --purge-captures '$abs'"
   else
-    echo "  note: .bailiwick-outputs/ left in place (no uncurated captures) — remove by hand if unwanted."
+    echo "  note: .bailiwick-outputs/ left in place (no uncurated captures); its exclude rule is kept"
+    echo "        while the directory exists — remove both by hand if unwanted."
   fi
+  return 0
 }
 
 uninstall_repo() {  # <target>
@@ -480,9 +512,12 @@ uninstall_repo() {  # <target>
   if ! DRY; then  # prune dirs we may have emptied (never forced; ignored if non-empty or absent)
     for d in ".vscode" ".codex" ".github/instructions" ".github"; do rmdir "$abs/$d" 2>/dev/null || true; done
   fi
-  strip_repo_exclude "$abs"
+  # Captures FIRST: uninstalling must never un-hide plaintext transcripts it deliberately preserves.
+  # warn_repo_captures returns 0 when .bailiwick-outputs/ survives, and strip_repo_exclude then keeps
+  # that one ignore rule behind — otherwise the next `git add -A` stages client session transcripts.
+  if warn_repo_captures "$abs"; then keep_capture_rule=1; else keep_capture_rule=0; fi
+  strip_repo_exclude "$abs" "$keep_capture_rule"
   rm_allowlist_entry "$abs"
-  warn_repo_captures "$abs"
   echo
   echo "  This only un-wires the repo. The once-per-machine GLOBAL wiring (hooks, operator layers,"
   echo "  skills, user MCP) stays — remove that with '--uninstall' (no target). The clone and your"
@@ -1116,7 +1151,10 @@ fi
 if DRY; then plan "create capture staging .bailiwick-outputs/raw/"; else mkdir -p "$TARGET/.bailiwick-outputs/raw"; fi
 
 # --- hide locally via .git/info/exclude (never the tracked .gitignore) ---
-GITDIR="$(git -C "$TARGET" rev-parse --git-dir 2>/dev/null || echo .git)"
+# --git-common-dir, NOT --git-dir: git resolves info/exclude from the common dir, so in a linked
+# worktree (--git-dir => .git/worktrees/<name>) the rules would be written where git never reads
+# them — leaving plaintext captures visible to `git status` and stageable by `git add -A`.
+GITDIR="$(git -C "$TARGET" rev-parse --git-common-dir 2>/dev/null || echo .git)"
 case "$GITDIR" in /*) : ;; *) GITDIR="$TARGET/$GITDIR" ;; esac
 EXCLUDE="$GITDIR/info/exclude"
 DRY || { mkdir -p "$(dirname "$EXCLUDE")"; touch "$EXCLUDE"; }
@@ -1147,6 +1185,10 @@ fi
 fi  # ===== end seeded-mode wiring (shadow mode with --install-tools resumes here) =====
 
 fi  # ===== end per-repo wiring (global-only mode resumes here) =====
+
+# ADR-009: surface a contribute-only origin before the prerequisites report, so the warning is not
+# buried under the install output. Advisory only — this clone may still be developed and validated in.
+if [ "$INSTALL_TOOLS" -eq 1 ]; then warn_public_origin; fi
 
 # --- validate (and with --install-tools, install) the once-per-machine prerequisites ---
 # Under --dry-run, describe what --install-tools would mutate globally, then neutralize it so the
