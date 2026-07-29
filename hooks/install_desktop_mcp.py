@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safely merge a read-only bailiwick-knowledge MCP filesystem server into a
+"""Safely merge the bailiwick-knowledge MCP filesystem server into a
 Claude Desktop / ChatGPT Desktop config file.
 
 Usage: install_desktop_mcp.py <config.json> <knowledge-root>
@@ -11,10 +11,16 @@ preserving every other key and every other MCP server already configured
 there. Refuses to touch the file on invalid/non-object JSON (exits 1, changes
 nothing) rather than risk clobbering a hand-edited config.
 
-Scope is deliberately narrow: the root passed in should be $BAILIWICK/knowledge
-only (not the whole framework) — this is a read-only reference channel for
-desktop apps that have no hook system, so no capture/curation/guardrails apply
-here (see CLAUDE.md "Non-Negotiable Rules"). Least-privilege by design.
+SCOPE, stated precisely — least privilege applies to the ROOT, not the verbs.
+The root passed in should be $BAILIWICK/knowledge only (never the whole
+framework), so the desktop apps cannot reach hooks, skills, or captures. But
+`@modelcontextprotocol/server-filesystem` is READ-WRITE within whatever root it
+is given: it exposes write_file/edit_file/move_file/create_directory. Combined
+with the fact that desktop apps have no hook system — no capture, no curation
+gate, no guardrails (see CLAUDE.md "Non-Negotiable Rules") — this wiring is a
+surface that CAN modify the knowledge library outside every gate the framework
+otherwise enforces. Treat it as a reference channel by convention, not by
+permission, and do not describe it as read-only.
 
 Prints exactly one of: INSTALLED | PRESENT | ERROR: <msg>
 Exit 0 on INSTALLED/PRESENT; non-zero on ERROR.

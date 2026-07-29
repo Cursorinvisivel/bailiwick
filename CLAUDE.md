@@ -105,7 +105,7 @@ See $BAILIWICK/hooks/README.md.
 - github: access to repos, PRs, issues
 - terraform: HashiCorp provider docs and registry
 
-### Desktop reference (optional, read-only)
+### Desktop reference (optional, knowledge-scoped)
 Claude Desktop and ChatGPT Desktop have no hook system, so they sit **outside** the four adapters
 above and outside capture/curation/guardrails entirely. `bootstrap.sh --install-tools --with-desktop`
 optionally wires a single narrowly-scoped `bailiwick-knowledge` MCP filesystem server — rooted at
@@ -113,8 +113,11 @@ optionally wires a single narrowly-scoped `bailiwick-knowledge` MCP filesystem s
 (and `bootstrap.ps1`) auto-detects the macOS/Windows/WSL config paths and delegates the idempotent,
 non-destructive merge to `hooks/install_desktop_mcp.py` (scoped to the single `bailiwick-knowledge`
 server). This lets
-either app **consult** the knowledge library for reference outside a coding session; it can never
-write back into it. Pair it with `knowledge/templates/desktop-reference-instructions.md`, pasted into
+either app **consult** the knowledge library for reference outside a coding session. Least privilege
+here applies to the **root, not the verbs**: the filesystem server is read-**write** within
+`knowledge/`, and Desktop has no hooks, so it is a surface that *can* modify the library outside every
+gate — treat it as reference-by-convention and keep it off machines holding client-derived knowledge
+if that matters to you. Pair it with `knowledge/templates/desktop-reference-instructions.md`, pasted into
 the app's Project/custom instructions, since the retrieval discipline below isn't auto-injected there.
 
 ## Non-Negotiable Rules
@@ -125,7 +128,8 @@ installed globally by `bootstrap.sh --install-tools`, self-gating to wired repos
 runs silently or on agent initiative. **Copilot** has no hook equivalent (policy only); the Gemini
 **VS Code agent's** hook support is unverified (policy there — keep YOLO mode off). **Claude Desktop /
 ChatGPT Desktop** are outside all three enforcement layers (no hook system at all) — the optional
-`--with-desktop` wiring above is deliberately read-only and scoped to `knowledge/` only for this reason.
+`--with-desktop` wiring above is deliberately scoped to `knowledge/` only for this reason — but that is a
+scope limit, not a write block (see above).
 - **High-impact actions re-confirm even when instructed** — terraform/terragrunt apply & destroy;
   kubectl/helm mutations (apply/delete/patch/scale/drain/rollout, install/upgrade/uninstall);
   gcloud/gsutil/az/aws mutating verbs (delete/destroy/update/patch/rm); recursive/forced `rm`;

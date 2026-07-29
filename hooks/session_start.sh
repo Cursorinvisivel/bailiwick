@@ -82,9 +82,15 @@ cat <<'EOF'
 - Capture is enforced via hooks; promotion to the knowledge library stays human-gated via /curate.
 EOF
 
-# TODO(ADR-009): when this clone's `origin` is the public OSS repo (contribute-only), print a
-# contribute-only notice here so user and agent know ingestion (/curate, sync) is blocked on this
-# instance. Not yet implemented — see docs/decisions/adr-009.
+# ADR-009: on a public-origin (contribute-only) clone, tell BOTH user and agent up front that
+# ingestion is blocked — so /curate is not attempted and its refusal is not a surprise.
+if . "$BAILIWICK_ROOT/hooks/public_origin.sh" 2>/dev/null \
+   && command -v bw_public_origin_block >/dev/null 2>&1 \
+   && co_reason="$(bw_public_origin_block "$BAILIWICK_ROOT")"; then
+  cat <<EOF
+- CONTRIBUTE-ONLY instance ($co_reason): knowledge ingestion is blocked here. /curate must not promote and hooks/sync_knowledge.sh will refuse to push — knowledge/ is tracked, so propagating would publish it. Generic contributions are fine; move private work to a clone whose origin is a private repo you own (docs/staying-private.md).
+EOF
+fi
 
 # --- Inbound knowledge sync: keep the Bailiwick clone current (ff-only, throttled, non-fatal) ---
 sync_inbound() {

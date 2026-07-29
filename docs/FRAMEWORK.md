@@ -501,10 +501,13 @@ repo is a place to *contribute from*, never to *ingest into*: the documented def
 downstream (`origin` → your own private repo, `upstream` → the public OSS with its push URL disabled)
 so a `/curate` push can never land private knowledge in public. See `staying-private.md` and
 threat-model **T9**.
-> **Status:** the private-first *topology* is documented and in effect; the *mechanical* ingestion
-> block ADR-009 specifies (sync/curate refusal on a public-origin remote plus the `allow_public_push`
-> override) is **not yet implemented** — tracked as a `TODO(ADR-009)` at the enforcement points
-> (`sync_knowledge.sh`, `session_start.sh`, `skills/curate/SKILL.md`, `bootstrap.sh`/`.ps1`).
+> **Status:** implemented. Detection lives in `hooks/public_origin.sh` (canonical-slug match, host-
+> and protocol-agnostic; optional `gh` visibility check to catch public forks; `allow_public_push`
+> override in the gitignored `.bailiwick-sync.json`). `sync_knowledge.sh` refuses to propagate and
+> exits 1 with the commits left local, `/curate` aborts at Step 0 before extracting anything,
+> `session_start.sh` injects a contribute-only notice, and `bootstrap.sh`/`.ps1 --install-tools`
+> warn without failing. Raw `git push` by hand remains outside the framework's control, and without
+> an authenticated `gh` the fork check degrades to the canonical-slug match.
 
 ---
 

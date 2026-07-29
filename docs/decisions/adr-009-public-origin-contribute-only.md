@@ -12,15 +12,18 @@ scope:         generic
 
 # ADR-009 — Public-origin instances are contribute-only (ingestion blocked)
 
-> **Implementation status (as of 2026-07-23): the decision stands, but the *mechanical* enforcement
-> in Decision §2 is NOT yet implemented.** The private-first **topology** (Decision §1, documented in
-> [staying-private.md](../staying-private.md)) is in effect as *convention* — rename `origin`,
-> disable the `upstream` push URL, keep a separate contribute-only clone. The layered **code**
-> enforcement — `sync_knowledge.sh` refusing to propagate on a public-origin remote, the `/curate`
-> Step 0 abort, the `session_start.sh` notice, the `--install-tools` warning, and the
-> `allow_public_push` override — does **not exist in the scripts yet**; it is tracked as
-> `TODO(ADR-009)` at each enforcement point. Until it lands, protection is documentation + convention
-> only, not a mechanical guarantee.
+> **Implementation status (as of 2026-07-29): IMPLEMENTED.** Detection lives in
+> `hooks/public_origin.sh` (canonical-slug match, host- and protocol-agnostic; optional `gh`
+> visibility check for forks; `allow_public_push` override), and all four enforcement points call it:
+> `sync_knowledge.sh` refuses to propagate and exits 1 (commits stay local), `/curate` aborts at
+> Step 0 before extracting anything, `session_start.sh` injects the contribute-only notice, and
+> `bootstrap.sh --install-tools` warns (never fatal). The private-first **topology** (Decision §1,
+> [staying-private.md](../staying-private.md)) remains the documented default and is still
+> convention — the mechanism now backs it rather than standing in for it.
+>
+> Two limits worth stating plainly, both unchanged from the Consequences below: `sync_knowledge.sh`
+> is the framework's *own* automation, so a raw `git push` by hand is still uncontrolled; and the
+> `gh` layer needs an authenticated `gh`, without which coverage falls back to the canonical slug.
 
 ## Context
 

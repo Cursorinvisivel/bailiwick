@@ -57,6 +57,17 @@ first.
      rel-paths (`<machine>/<repo-key>/<file>.gpg`) for Step 5; blobs are per-machine, so a client used
      on more than one machine has blobs under several `<machine>/` subtrees.
    - The `org-shorthands.md` registry row.
+   - **Machine-local operational logs** — these are outside `knowledge/` and are easy to miss, but
+     both hold client identifiers in plaintext and an attestation that omits them is false:
+     - `$BAILIWICK_HOME/guardrail-audit.log` (default `~/.bailiwick/guardrail-audit.log`) — every
+       ask/deny line carries the **absolute project path** and the first 500 chars of the raw
+       command, so project names, bucket URIs, and hostnames appear verbatim.
+     - `$BAILIWICK_HOME/health/*.jsonl` **and** `health/remote/*` — health detail strings embed repo
+       keys and push targets. Remote shards are re-materialised by `capture_backup.sh pull`, so
+       purge the local shard *and* note that the encrypted `health/<machine>.jsonl.gpg` blobs on the
+       backup branch carry the same identifiers until the branch history is rewritten (`--history`).
+   - `$BAILIWICK_ROOT/.bailiwick-inbox/` — decrypted plaintext captures from the cross-machine pool,
+     left behind if a previous `/curate` did not clear them. Gitignored, but still on disk.
    - (with `--history`) commits whose message or diff contains a token.
 
 3. **Classify each hit:**
@@ -129,10 +140,13 @@ first.
    happened, *without re-creating the identity you just removed*. This is an **engineering record of
    what was mechanically done — not a legal or compliance assurance**; it must never assert legal
    sufficiency. Run it only after the purge (and any Step 6 history rewrite) so the tier reflects reality.
-   1. **Verification re-scan.** Re-run the Step-2 token scan across **every** surface — library, `INDEX`,
-      `## Related`, telemetry, local + central captures, and the backup branch (decrypt + grep). Record
-      residual hits per surface. A credible attestation shows **0 residual hits** for every token; if any
-      surface is non-zero, **STOP and report — do not attest**.
+   1. **Verification re-scan.** Re-run the Step-2 token scan across **every** surface enumerated
+      there — library, `INDEX`, `## Related`, telemetry, local + central captures, the backup branch
+      (decrypt + grep), **the guardrail audit log, the health shards (local and `health/remote/`), and
+      `.bailiwick-inbox/`**. The scan is only as honest as that list: if you skip a surface, say so in
+      the attestation rather than reporting a clean scan. Record residual hits per surface. A credible
+      attestation shows **0 residual hits** for every token; if any surface is non-zero, **STOP and
+      report — do not attest**.
    2. **Derive the erasure tier from verified state (Step 6 tiers) — never assert it.** `de-identified`
       when working trees + current backup tree are clean but the backup repo's **history** still holds
       the client's blobs; `fully erased` only when the backup-history rewrite has been run on all remotes

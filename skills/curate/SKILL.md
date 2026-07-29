@@ -21,9 +21,14 @@ gpg private key, so full centralized curation runs on the machine that holds it.
 - `.telemetry.json` is the ONLY knowledge file written without approval (commit with `telemetry:` prefix).
 - Never duplicate: check INDEX.md tags AND read candidate files before any write (NEW / EXPAND / IMPROVE / SKIP).
 - Raw captures in `.bailiwick-outputs/raw/` are unsanitised and may contain client IAM, project IDs, or secrets. Abstract to generic before promoting; route client-identifying detail to `clients/<id>/`. Never commit raw captures.
-- **TODO(ADR-009):** a planned Step 0 will abort curation — before extracting anything — when this clone's `origin` is the public OSS repo (contribute-only), unless `allow_public_push` is set. Not yet implemented: until it lands, run `/curate` only on a **private-downstream** clone, never on a public-origin one (see [staying-private.md](../../docs/staying-private.md)).
+- **Step 0 is mandatory and comes before everything else** (ADR-009): run `bash $BAILIWICK/hooks/public_origin.sh check`. **Exit 3 = contribute-only clone — ABORT immediately**, before gathering or extracting anything. Report the reason to the user and stop; captures stay staged and curate normally once the instance is private (see [staying-private.md](../../docs/staying-private.md)). Do not work around this by writing knowledge files directly — the block exists because `knowledge/` is tracked, so promoting here would publish it.
 
 ## Procedure
+
+0. **Public-origin gate (ADR-009) — run this first, always**
+   - `bash $BAILIWICK/hooks/public_origin.sh check`
+   - Exit 0: proceed. Exit 3: **STOP.** Show the printed reason, tell the user their captures remain
+     staged and nothing was extracted, and end the session. Never fall through to Step 1.
 
 1. **Gather inputs**
    - List `.bailiwick-outputs/raw/*.jsonl` (enforced transcript captures) and their `.md` headers.
