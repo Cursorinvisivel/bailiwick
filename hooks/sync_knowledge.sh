@@ -12,6 +12,12 @@
 #
 # Invoked by /curate after an approved knowledge: commit, or run manually.
 # Safe to re-run: idempotent (force-with-lease on a machine-owned branch; PR reused).
+#
+# Exit codes: 0 = synced (or nothing to do); 1 = push refused/failed (commits stay local);
+# 2 = satellite push succeeded but PR creation failed — the knowledge is durably on
+# sync/<machine> yet STRANDED until a PR to main exists (other machines only ever
+# fast-forward from origin/main). The no-`gh` path stays exit 0: opening the PR manually
+# is the documented flow there, not a failure.
 set -euo pipefail
 
 BAILIWICK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
@@ -80,20 +86,51 @@ git branch -f main origin/main                    # reset main ref (not checked 
 git push -u origin "$branch" --force-with-lease || { bw_health sync_knowledge error "satellite push of $branch failed ($ahead commit(s) parked locally)"; echo "[sync] push of ${branch} FAILED — commits parked locally." >&2; exit 1; }
 
 if command -v gh >/dev/null 2>&1; then
+  # Multi-account machines: bare `gh` talks to the API as the globally ACTIVE account, which may
+  # not even see this repo (the push above rode the SSH alias; the API call does not). Resolve the
+  # right account and target the repo explicitly so PR creation cannot silently 404 while the push
+  # succeeds — the failure mode that strands satellite knowledge for weeks.
+  . "$BAILIWICK_ROOT/hooks/gh_account.sh" 2>/dev/null || true
+  repo_args=""
+  if command -v bw_resolve_gh_account >/dev/null 2>&1; then
+    bw_resolve_gh_account "$BAILIWICK_ROOT"
+    [ -n "${BW_GH_REPO:-}" ] && repo_args="--repo ${BW_GH_HOST}/${BW_GH_REPO}"
+    [ -n "${BW_GH_USER:-}" ] && echo "[sync] gh: acting as '${BW_GH_USER}' on ${BW_GH_HOST} (${BW_GH_DECIDED})"
+    [ -n "${BW_GH_WARN:-}" ] && echo "[sync] ⚠ gh: ${BW_GH_WARN}" >&2
+  else
+    bw_health sync_knowledge warn "hooks/gh_account.sh missing — gh runs as the active account"
+    bw_gh() { gh "$@"; }
+  fi
   # Reuse the PR only if one is actually OPEN for this branch. The branch name is reused across
   # syncs, so a previous PR may be MERGED/CLOSED — checking mere existence (gh pr view) would treat
   # a merged PR as still-open and skip creation, stranding the new commits with no route to main.
-  open_num="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+  # shellcheck disable=SC2086  # repo_args is intentionally word-split; owner/repo has no spaces
+  open_num="$(bw_gh pr list $repo_args --head "$branch" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
   if [ -n "$open_num" ]; then
     echo "[sync] PR #${open_num} already open for ${branch} (updated by the push)."
   else
-    gh pr create --base main --head "$branch" \
+    # shellcheck disable=SC2086
+    bw_gh pr create $repo_args --base main --head "$branch" \
       --title "knowledge: sync from ${machine}" \
       --body "Automated knowledge sync from \`${machine}\`. Curated + human-approved on the satellite. Telemetry is central-owned and intentionally excluded — central reconciles rows on merge." \
       && echo "[sync] opened a new PR for ${branch}." \
-      || { bw_health sync_knowledge warn "gh pr create failed for $branch (push succeeded)"; echo "[sync] push succeeded; 'gh pr create' failed — open the PR for ${branch} manually."; }
+      || {
+        bw_health sync_knowledge error "gh pr create failed for $branch (push succeeded — knowledge STRANDED until a PR to main exists)"
+        {
+          echo "[sync] ✗ push succeeded but PR creation FAILED — the new knowledge is STRANDED on ${branch}."
+          echo "[sync]   Other machines fast-forward from origin/main only; until a PR to main exists and is"
+          echo "[sync]   merged on central, nothing else will ever see these commits. Open it now:"
+          echo "[sync]     gh pr create ${repo_args:+$repo_args }--base main --head ${branch} --title 'knowledge: sync from ${machine}'"
+          if [ -z "${BW_GH_USER:-}" ]; then
+            echo "[sync]   No logged-in gh account could read ${BW_GH_REPO:-the repo} — check 'gh auth status',"
+            echo "[sync]   or pin an account in .bailiwick-sync.json (\"github_account\" or \"github_account_map\")."
+          fi
+        } >&2
+        exit 2
+      }
   fi
 else
+  bw_health sync_knowledge warn "gh not installed — PR for $branch must be opened manually"
   echo "[sync] pushed ${branch}. 'gh' not installed — open a PR to main manually."
 fi
 echo "[sync] done. You remain on ${branch}; local main mirrors origin/main."

@@ -122,8 +122,28 @@ resolve conflicts; central-owned telemetry removes its conflict class entirely.
 
 - Each satellite needs SSH push access to the Bailiwick repo, and `gh` authenticated for PR creation
   (without `gh` the branch still pushes — open the PR manually).
+- On multi-account machines (client laptop + personal account), the sync script resolves the gh
+  account that can actually reach the repo via `hooks/gh_account.sh` (override
+  `github_account` / `github_account_map` in `.bailiwick-sync.json` > access probe) and targets the
+  repo explicitly — bare `gh` would act as the globally *active* account, whose PR creation can 404
+  while the SSH push succeeds, stranding the knowledge. If PR creation still fails, the script
+  exits non-zero with the exact manual command; don't ignore it — until the PR is merged on
+  central, no other machine will ever see those commits.
 - Confirm that pushing client-*derived* (sanitised) knowledge to the shared repo is acceptable for
   the engagement before enabling a client machine.
+
+### Preflight — `scripts/doctor.sh`
+
+The wiring above rests on invariants that break *silently*: hooks keep executing from an old clone
+after a migration, a fresh clone has no `.bailiwick-sync.json` (backup off, role defaulted), the gpg
+secret key isn't where `role: central` says it is, or a `sync/<machine>` branch sits pushed-but-
+PR-less for weeks. `scripts/doctor.sh` is a read-only preflight that checks them loudly: hook
+paths point at *this* clone, per-machine config present and parseable, encrypt/decrypt keys match
+the role, satellites carry no telemetry delta, the resolved gh account can reach the repo, and no
+parked `sync/*` branch lacks an open PR (central sweeps **all** of them — it is the merge
+authority; a satellite checks its own). Run it after cloning/moving the framework, changing
+machines or accounts, or whenever sync behaviour looks off. Exit 0 = healthy; exit 1 = something
+is broken enough to lose captures or strand knowledge.
 
 ---
 

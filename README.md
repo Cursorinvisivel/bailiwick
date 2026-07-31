@@ -129,7 +129,7 @@ knowledge/   INDEX.md · topics/ patterns/ context/ templates/ · .telemetry.jso
 agents/      role definitions (lead orchestrator + 5 domain-context + 7 Quality Workflow stages)
 hooks/       guardrail + capture + sync + health hooks, and the installers
 skills/      /curate · /enrich · /learn · /metrics · /investigate · /purge  (+ codex-skills/ wrappers)
-scripts/     bootstrap.sh · bootstrap.ps1  (repo onboarding)
+scripts/     bootstrap.sh · bootstrap.ps1  (repo onboarding) · doctor.sh (wiring preflight)
 docs/        this documentation set · decisions/ (framework ADRs)
 ```
 

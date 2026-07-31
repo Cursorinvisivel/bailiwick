@@ -696,100 +696,25 @@ fi
 # The github MCP server needs an API token for the account that owns the FRAMEWORK
 # (this Bailiwick's own git remote) — NOT necessarily gh's *active* account, which on a
 # company-managed laptop is usually the company identity and cannot see your personal
-# repos. We derive the owner from the framework remote, find a logged-in gh account that
-# can actually reach it, and pin the MCP server to THAT account's token via
-# `gh auth token --user`. The token is resolved lazily at spawn (read from gh's keychain
-# each launch), so it never lands in a dotfile or the exported environment, and the pin
-# survives `gh auth switch` back to the company account for daily work.
+# repos. Resolution (override > github_account_map > access probe, lazy spawn-time token)
+# lives in hooks/gh_account.sh — the SAME helper hooks/sync_knowledge.sh uses for PR
+# creation, so MCP wiring and outbound sync can never disagree on the account again.
 # Falls back to the ${GITHUB_TOKEN} env var when gh can't provide a usable token
 # (CI / token-only setups, or the personal account simply isn't logged into gh yet).
 # Wrapped as a function so BOTH paths use it: the shadow block (global bailiwick-github MCP) and the
-# seeded path (per-repo github MCP). Sets globals: GH_USER/GH_HOST/gh_decided/gh_warn.
+# seeded path (per-repo github MCP). Sets globals: GH_USER/GH_HOST/gh_decided/gh_warn
+# (+ gh_owner_repo/gh_real_host/gh_alias for status messages).
 resolve_gh_account() {
-  GH_USER=""; GH_HOST=""; gh_owner_repo=""; gh_real_host=""; gh_alias=""
-  bailiwick_remote="$(git -C "$BAILIWICK_ROOT" remote get-url origin 2>/dev/null || true)"
-  if [ "$NO_GH_AUTH" -ne 1 ] && [ -n "$bailiwick_remote" ]; then
-    _u="${bailiwick_remote%.git}"
-    case "$_u" in
-      *://*)  _hp="${_u#*://}"; _hp="${_hp##*@}"; gh_alias="${_hp%%/*}"; gh_owner_repo="${_hp#*/}" ;;
-      *@*:*)  _rest="${_u#*@}"; gh_alias="${_rest%%:*}"; gh_owner_repo="${_rest#*:}" ;;
-    esac
-    # An SSH host alias (e.g. github-personal) is not a real hostname — resolve it for the API.
-    [ -n "$gh_alias" ] && gh_real_host="$(ssh -G "$gh_alias" 2>/dev/null | awk '/^hostname /{print $2; exit}' || true)"
-    case "$gh_real_host" in *.*) : ;; *) gh_real_host="github.com" ;; esac
-  fi
-
-  # Account selection (priority): (1) explicit override in $BAILIWICK_ROOT/.bailiwick-sync.json
-  # ("github_account" + optional "github_host"); (2) owner->account map ("github_account_map") —
-  # the deterministic, machine-readable form of the gitconfig rewrite-rule intent (gitconfig maps an
-  # owner to an SSH *alias*, not a gh *login*, so the bridge is declared here); (3) the access probe.
-  # The probe collects ALL logged-in accounts that can read the repo: exactly one wins silently;
-  # more than one is AMBIGUOUS — it defaults to the active account, warns, and points at
-  # github_account_map. Disambiguation only bites on multi-account machines (client laptops / VMs).
-  _cfg="$BAILIWICK_ROOT/.bailiwick-sync.json"
-  _cfg_get() {  # top-level string value for key $1, or empty
-    [ -f "$_cfg" ] || return 0
-    if command -v python3 >/dev/null 2>&1; then
-      python3 -c 'import json,sys
-try: d=json.load(open(sys.argv[1]))
-except Exception: d={}
-v=d.get(sys.argv[2]); print(v if isinstance(v,str) else "")' "$_cfg" "$1" 2>/dev/null
-    else
-      grep -oE "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]+\"" "$_cfg" 2>/dev/null | head -1 | sed -E 's/.*"([^"]+)"$/\1/'
-    fi
-  }
-  _cfg_map_get() {  # github_account_map[$1] (python only; degrades to the probe without python3)
-    [ -f "$_cfg" ] || return 0
-    command -v python3 >/dev/null 2>&1 || return 0
-    python3 -c 'import json,sys
-try: d=json.load(open(sys.argv[1]))
-except Exception: d={}
-m=d.get("github_account_map") or {}
-v=m.get(sys.argv[2]) if isinstance(m,dict) else None
-print(v if isinstance(v,str) else "")' "$_cfg" "$1" 2>/dev/null
-  }
-
-  gh_owner="${gh_owner_repo%%/*}"; gh_decided=""; gh_warn=""
-  if command -v gh >/dev/null 2>&1 && [ -n "$gh_owner_repo" ]; then
-    _ovr_acct="$(_cfg_get github_account)"; _ovr_host="$(_cfg_get github_host)"
-    _map_acct="$(_cfg_map_get "$gh_owner")"
-    _pick=""; _pick_host="$gh_real_host"
-    if [ -n "$_ovr_acct" ]; then
-      _pick="$_ovr_acct"; [ -n "$_ovr_host" ] && _pick_host="$_ovr_host"; gh_decided="override"
-    elif [ -n "$_map_acct" ]; then
-      _pick="$_map_acct"; gh_decided="account-map"
-    fi
-    if [ -n "$_pick" ]; then
-      # Honour the declared choice — it only needs a usable token (no access probe).
-      if [ -n "$(gh auth token --hostname "$_pick_host" --user "$_pick" 2>/dev/null || true)" ]; then
-        GH_USER="$_pick"; GH_HOST="$_pick_host"
-      else
-        gh_warn="configured gh account '$_pick' has no token on $_pick_host (run 'gh auth login' for it) — fell back to the access probe"
-        gh_decided=""
-      fi
-    fi
-    if [ -z "$GH_USER" ]; then
-      # Access probe — collect EVERY account that can read the repo, not just the first.
-      # Access test (not name match) — the owner may be an org whose login differs from your handle.
-      _cands="$(gh auth status 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="account") print $(i+1)}' || true)"
-      _active_tok="$(gh auth token --hostname "$gh_real_host" 2>/dev/null || true)"
-      _matches=""; _active_match=""
-      for _acct in $_cands; do
-        _tok="$(gh auth token --hostname "$gh_real_host" --user "$_acct" 2>/dev/null || true)"
-        [ -n "$_tok" ] || continue
-        if GH_TOKEN="$_tok" gh api --hostname "$gh_real_host" "repos/$gh_owner_repo" >/dev/null 2>&1; then
-          _matches="${_matches:+$_matches }$_acct"
-          [ -n "$_active_tok" ] && [ "$_tok" = "$_active_tok" ] && _active_match="$_acct"
-        fi
-      done
-      _n=0; for _m in $_matches; do _n=$((_n+1)); done
-      if [ "$_n" -eq 1 ]; then
-        GH_USER="$_matches"; GH_HOST="$gh_real_host"; gh_decided="probe"
-      elif [ "$_n" -gt 1 ]; then
-        GH_USER="${_active_match:-${_matches%% *}}"; GH_HOST="$gh_real_host"; gh_decided="ambiguous"
-        gh_warn="multiple gh accounts can read ${gh_owner_repo} (${_matches}) — defaulted to '${GH_USER}' (remote uses SSH profile '${gh_alias:-n/a}'). Pin it deterministically by adding to ${_cfg}: \"github_account_map\": { \"${gh_owner}\": \"<account>\" }"
-      fi
-    fi
+  GH_USER=""; GH_HOST=""; gh_owner_repo=""; gh_real_host=""; gh_alias=""; gh_decided=""; gh_warn=""
+  . "$BAILIWICK_ROOT/hooks/gh_account.sh" 2>/dev/null || true
+  if command -v bw_resolve_gh_account >/dev/null 2>&1; then
+    BW_NO_GH_AUTH="$NO_GH_AUTH"
+    bw_resolve_gh_account "$BAILIWICK_ROOT"
+    GH_USER="$BW_GH_USER"; GH_HOST="$BW_GH_HOST"; gh_decided="$BW_GH_DECIDED"; gh_warn="$BW_GH_WARN"
+    gh_owner_repo="$BW_GH_REPO"; gh_real_host="$BW_GH_HOST"; gh_alias="$BW_GH_ALIAS"
+    gh_owner="${gh_owner_repo%%/*}"
+  else
+    gh_warn="hooks/gh_account.sh missing — gh account resolution skipped (github MCP falls back to \${GITHUB_TOKEN})"
   fi
 }
 

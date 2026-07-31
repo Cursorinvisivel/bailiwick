@@ -3,7 +3,7 @@
   "role": "satellite",
   "machine": "laptop-01",
 
-  "//github_account": "OPTIONAL. Multi-account machines (client laptops / VMs) only. Pins which logged-in 'gh' account bootstrap wires into the github MCP server, overriding the access probe. 'github_account' = a blanket gh login; 'github_host' optionally overrides the API host. Use 'github_account_map' instead to pin per repo owner (owner -> gh login) — the deterministic form of your git URL-rewrite intent. All three are ignored unless more than one logged-in account can reach the repo; leave empty/{} to disable.",
+  "//github_account": "OPTIONAL. Multi-account machines (client laptops / VMs) only. Pins which logged-in 'gh' account the framework acts as — bootstrap's github MCP wiring AND sync_knowledge.sh's PR creation, both via hooks/gh_account.sh — overriding the access probe. 'github_account' = a blanket gh login; 'github_host' optionally overrides the API host. Use 'github_account_map' instead to pin per repo owner (owner -> gh login) — the deterministic form of your git URL-rewrite intent. The probe alone suffices when exactly one logged-in account can reach the repo; pin here when several can (or the probe warns 'ambiguous'). Leave empty/{} to disable.",
   "github_account": "",
   "github_host": "",
   "github_account_map": {},
