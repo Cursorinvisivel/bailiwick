@@ -82,4 +82,30 @@ assert_exit "public-origin propagation refused with exit 1" 1 "$rc"
 assert_contains "refusal is explicit" "REFUSED" "$out"
 assert_eq "origin/main NOT advanced (knowledge never published)" "$before" "$(git -C "$I" ls-remote "file://$I.origin.git" main | cut -f1)"
 
+echo "== ADR-009 layer 2: a public FORK origin (not the canonical slug) is refused"
+I="$(new_inst 6)"
+echo '{ "role": "central", "machine": "ctest" }' > "$I/.bailiwick-sync.json"
+commit_knowledge "$I" topic-f
+before="$(git -C "$I" ls-remote "file://$I.origin.git" main | cut -f1)"
+out="$(GH_STUB_API_JSON=false bash "$I/hooks/sync_knowledge.sh" 2>&1)"; rc=$?
+assert_exit "public fork origin refused with exit 1" 1 "$rc"
+assert_contains "names the public-repo reason" "PUBLIC GitHub repository" "$out"
+assert_eq "origin/main NOT advanced" "$before" "$(git -C "$I" ls-remote "file://$I.origin.git" main | cut -f1)"
+
+echo "== ADR-009 override: allow_public_push permits the maintainer seed-update path"
+I="$(new_inst 7)"
+echo '{ "role": "central", "machine": "ctest", "allow_public_push": true }' > "$I/.bailiwick-sync.json"
+commit_knowledge "$I" topic-g
+out="$(GH_STUB_API_JSON=false bash "$I/hooks/sync_knowledge.sh" 2>&1)"; rc=$?
+assert_exit "override lets central push" 0 "$rc"
+assert_eq "origin/main advanced under the override" "$(git -C "$I" rev-parse HEAD)" "$(git -C "$I" ls-remote "file://$I.origin.git" main | cut -f1)"
+
+echo "== public_origin.sh standalone check: exit 3 on a canonical-slug clone"
+I="$(new_inst 8)"
+slug="$(cd "$I" && . hooks/public_origin.sh && bw_origin_slug .)"
+BW_CANONICAL_SLUG="$slug" bash "$I/hooks/public_origin.sh" check >/dev/null 2>&1
+assert_exit "check exits 3 (contribute-only)" 3 "$?"
+bash "$I/hooks/public_origin.sh" check >/dev/null 2>&1
+assert_exit "check exits 0 on a private-origin clone" 0 "$?"
+
 t_summary
