@@ -1167,7 +1167,18 @@ if (Get-Command github-mcp-server -ErrorAction SilentlyContinue) {
 # capture/curation hooks are installed once-globally; detect/merge in ~/.claude/settings.json.
 $userSettings = Join-Path $HOME ".claude/settings.json"
 $hookTmpl = Join-Path $BailiwickRoot "hooks/settings.template.json"
-function Test-HooksPresent { (Test-Path $userSettings) -and (Select-String -Path $userSettings -Pattern "capture_session.py" -Quiet) }
+# Scoped to THIS clone's path, not the bare filename: a hook left behind by another clone (a
+# renamed/retired predecessor) also contains "capture_session.py", and matching that made
+# -InstallTools skip the merge and report OK while the OLD clone's code stayed live (doctor.sh's
+# "hooks execute a DIFFERENT clone"). install_hooks.py migrates such an install to here.
+function Test-HooksPresent {
+  if (-not (Test-Path $userSettings)) { return $false }
+  # Separators vary (JSON-escaped '\\', native '\', or '/' left by the template rewrite) — collapse
+  # every run of backslashes to '/' on both sides so the comparison is about the PATH, not its spelling.
+  $needle = ((Join-Path $BailiwickRoot "hooks/capture_session.py") -replace '\\+', '/').ToLower()
+  $text = ((Get-Content -Raw -Path $userSettings) -replace '\\+', '/').ToLower()
+  return $text.Contains($needle)
+}
 # Windows PowerShell 5.1 has no '??' null-coalescing operator — use a plain fallback.
 $pyExe = Get-Command python3 -ErrorAction SilentlyContinue
 if (-not $pyExe) { $pyExe = Get-Command python -ErrorAction SilentlyContinue }
