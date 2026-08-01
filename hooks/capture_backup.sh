@@ -152,7 +152,17 @@ except Exception: print("")' 2>/dev/null || true)"
       sha="$(sha256sum "$f" | awk '{print $1}')"
       shaf="$destdir/$base.gpg.sha256"
       [ -f "$shaf" ] && [ "$(cat "$shaf")" = "$sha" ] && continue
-      gpg --batch --yes --no-tty --trust-model always "${enc_args[@]}" --encrypt --output "$destdir/$base.gpg" "$f"
+      # Guarded: an unusable recipient key (missing, expired, sign-only) must not kill the hook
+      # silently mid-loop under `set -e` — log it, keep the SOURCE capture untouched, and carry on
+      # so the other files still get their durable copy. The sha sidecar is only written on
+      # success, so a later run (after the key is fixed) retries this file automatically.
+      if ! gpg --batch --yes --no-tty --trust-model always "${enc_args[@]}" --encrypt \
+           --output "$destdir/$base.gpg" "$f" 2>/dev/null; then
+        rm -f "$destdir/$base.gpg"
+        bw_health capture_backup error "encrypt FAILED for $base (recipient key unusable/missing?) — capture stays local-only until fixed"
+        echo "[backup] encrypt FAILED for $base — source capture kept; fix the recipient key (scripts/doctor.sh checks it)" >&2
+        continue
+      fi
       printf '%s\n' "$sha" > "$shaf"
       changed=1
     done
