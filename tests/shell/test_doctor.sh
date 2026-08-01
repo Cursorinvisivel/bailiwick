@@ -68,7 +68,7 @@ EOC
   assert_exit "sign-only key -> exit 1" 1 "$rc"
   assert_contains "flagged UNUSABLE (present, cannot encrypt), not missing" "UNUSABLE" "$out"
 else
-  echo "  SKIP sign-only probe case — this gpg cannot generate the fixture: $(printf '%s' "$gen_err" | head -1)"
+  echo "  SKIP sign-only probe case — this gpg cannot generate the fixture: $(printf '%s' "$gen_err" | tail -1)"
 fi
 echo '{ "role": "satellite", "machine": "doctest" }' > "$INST/.bailiwick-sync.json"
 
