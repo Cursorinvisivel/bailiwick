@@ -51,6 +51,23 @@ out="$(GNUPGHOME="$GNUPG" doctor)"; rc=$?
 assert_exit "bad recipient key -> exit 1" 1 "$rc"
 assert_contains "the failure names capture backup" "capture backup pushes will fail" "$out"
 
+echo "== a present but sign-only recipient key is BROKEN (the encrypt probe's quiet case)"
+SGN="$T_SANDBOX/gnupg-signonly"; mkdir -p "$SGN" && chmod 700 "$SGN"
+GNUPGHOME="$SGN" gpg --batch --quiet --passphrase '' --quick-generate-key doctor-signonly ed25519 sign never 2>/dev/null
+SFPR="$(GNUPGHOME="$SGN" gpg --list-keys --with-colons 2>/dev/null | awk -F: '/^fpr/{print $10; exit}')"
+if [ -n "$SFPR" ]; then
+  cat > "$INST/.bailiwick-sync.json" <<EOC
+{ "role": "satellite", "machine": "doctest",
+  "capture_backup": { "enabled": true, "gpg_recipients": ["$SFPR"] } }
+EOC
+  out="$(GNUPGHOME="$SGN" doctor)"; rc=$?
+  assert_exit "sign-only key -> exit 1" 1 "$rc"
+  assert_contains "flagged UNUSABLE (present, cannot encrypt), not missing" "UNUSABLE" "$out"
+else
+  t_fail "could not generate a sign-only test key"
+fi
+echo '{ "role": "satellite", "machine": "doctest" }' > "$INST/.bailiwick-sync.json"
+
 echo "== satellite telemetry delta is BROKEN (telemetry is central-owned)"
 echo '{ "role": "satellite", "machine": "doctest" }' > "$INST/.bailiwick-sync.json"
 echo '{}' > "$INST/.telemetry.json"
