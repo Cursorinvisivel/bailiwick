@@ -1176,7 +1176,11 @@ fi
 # capture/curation hooks are installed once-globally; detect/merge in ~/.claude/settings.json.
 USER_SETTINGS="${HOME}/.claude/settings.json"
 HOOK_TMPL="$BAILIWICK_ROOT/hooks/settings.template.json"
-hooks_present() { [ -f "$USER_SETTINGS" ] && grep -q "capture_session.py" "$USER_SETTINGS" 2>/dev/null; }
+# Scoped to THIS clone's path, not the bare filename: a hook left behind by another clone (a
+# renamed/retired predecessor) also contains "capture_session.py", and matching that made
+# --install-tools skip the merge and report ✓ while the OLD clone's code stayed live (doctor.sh's
+# "hooks execute a DIFFERENT clone" ✗). install_hooks.py migrates such an install to here.
+hooks_present() { [ -f "$USER_SETTINGS" ] && grep -qF "$BAILIWICK_ROOT/hooks/capture_session.py" "$USER_SETTINGS" 2>/dev/null; }
 if ! hooks_present && [ "$INSTALL_TOOLS" -eq 1 ] && command -v python3 >/dev/null 2>&1 && [ -f "$HOOK_TMPL" ]; then
   echo "  --install-tools: merging capture/curation hooks into ~/.claude/settings.json…"
   python3 "$BAILIWICK_ROOT/hooks/install_hooks.py" "$USER_SETTINGS" "$HOOK_TMPL" 2>&1 | sed 's/^/    /' || true
