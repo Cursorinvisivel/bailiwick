@@ -152,7 +152,17 @@ except Exception: print("")' 2>/dev/null || true)"
       sha="$(sha256sum "$f" | awk '{print $1}')"
       shaf="$destdir/$base.gpg.sha256"
       [ -f "$shaf" ] && [ "$(cat "$shaf")" = "$sha" ] && continue
-      gpg --batch --yes --no-tty --trust-model always "${enc_args[@]}" --encrypt --output "$destdir/$base.gpg" "$f"
+      # Guarded: an unusable recipient key (missing, expired, sign-only) must not kill the hook
+      # silently mid-loop under `set -e` — log it, keep the SOURCE capture untouched, and carry on
+      # so the other files still get their durable copy. The sha sidecar is only written on
+      # success, so a later run (after the key is fixed) retries this file automatically.
+      if ! gpg --batch --yes --no-tty --trust-model always "${enc_args[@]}" --encrypt \
+           --output "$destdir/$base.gpg" "$f" 2>/dev/null; then
+        rm -f "$destdir/$base.gpg"
+        bw_health capture_backup error "encrypt FAILED for $base (recipient key unusable/missing?) — capture stays local-only until fixed"
+        echo "[backup] encrypt FAILED for $base — source capture kept; fix the recipient key (scripts/doctor.sh checks it)" >&2
+        continue
+      fi
       printf '%s\n' "$sha" > "$shaf"
       changed=1
     done
@@ -209,12 +219,14 @@ except Exception: print("")' 2>/dev/null || true)"
       echo "           • prime gpg-agent once in a terminal, then re-run within the cache window" >&2
       echo "         See hooks/README.md → Encrypted dirty-zone backup." >&2
     fi
-    shopt -s globstar nullglob
+    # find, not a ** glob: globstar is bash 4+, and `shopt -s globstar` under `set -e` kills the
+    # whole pull on macOS's system bash 3.2 before a single blob is decrypted.
+    shopt -s nullglob
     n=0; fail=0
-    for blob in "$MIRROR"/**/*.gpg; do
+    while IFS= read -r blob; do
       [ -f "$blob" ] || continue
       rel="${blob#"$MIRROR"/}"
-      case "$rel" in health/*) continue;; esac   # health shards handled separately below
+      case "$rel" in health/*|.git/*) continue;; esac   # health shards handled separately below
       out="$DEST/${rel%.gpg}"
       mkdir -p "$(dirname "$out")"
       [ -f "$out" ] && continue
@@ -224,7 +236,7 @@ except Exception: print("")' 2>/dev/null || true)"
         fail=$((fail+1)); rm -f "$out"   # drop any partial/empty output so a later run retries cleanly
         echo "[backup] decrypt failed for $rel" >&2
       fi
-    done
+    done < <(find "$MIRROR" -type f -name '*.gpg' 2>/dev/null)
     # Fleet health shards: always re-decrypt (they grow over time, unlike immutable capture blobs)
     # into $BW_HOME/health/remote/ for /metrics aggregation. Own machine's shard is skipped —
     # its local plaintext is authoritative.
@@ -235,7 +247,7 @@ except Exception: print("")' 2>/dev/null || true)"
       hout="$BW_HOME/health/remote/$(basename "${blob%.gpg}")"
       gpg --yes --quiet --decrypt --output "$hout" "$blob" 2>/dev/null || rm -f "$hout"
     done
-    shopt -u globstar nullglob
+    shopt -u nullglob
     if [ "$fail" -gt 0 ]; then
       echo "[backup] decrypted $n new blob(s) into $DEST ($fail failed — see the passphrase note above)"
     else

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Test stub for the GitHub CLI. Deterministic, offline, driven entirely by env vars:
+#   GH_STUB_ACCOUNTS      space-separated logged-in account names (first = active)
+#   GH_STUB_NOTOKEN       accounts that must report NO token (auth token exits 1)
+#   GH_STUB_CANREAD       tokens allowed to read repos via `gh api repos/...` (space list)
+#   GH_STUB_PR_LIST       literal stdout for `gh pr list` (default: empty)
+#   GH_STUB_PR_CREATE_RC  exit code for `gh pr create` (default: 0)
+#   GH_STUB_LOG           file to append every invocation to, as: "GH_TOKEN=<v> :: <args>"
+# Token format: "tok_<account>". Everything else exits 0 quietly.
+[ -n "${GH_STUB_LOG:-}" ] && printf 'GH_TOKEN=%s :: %s\n' "${GH_TOKEN:-}" "$*" >> "$GH_STUB_LOG"
+
+has_word() { case " $2 " in *" $1 "*) return 0;; *) return 1;; esac; }
+
+case "$1 ${2:-}" in
+  "auth status")
+    [ -n "${GH_STUB_ACCOUNTS:-}" ] || exit 1
+    for a in $GH_STUB_ACCOUNTS; do
+      echo "  Logged in to github.com account $a (keyring)"
+    done
+    exit 0
+    ;;
+  "auth token")
+    user=""; shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in --user) user="$2"; shift 2;; *) shift;; esac
+    done
+    [ -n "$user" ] || user="${GH_STUB_ACCOUNTS%% *}"   # no --user => active account
+    [ -n "$user" ] || exit 1
+    has_word "$user" "${GH_STUB_NOTOKEN:-}" && exit 1
+    has_word "$user" "${GH_STUB_ACCOUNTS:-}" || exit 1
+    echo "tok_$user"
+    ;;
+  "api "*|"api")
+    has_word "${GH_TOKEN:-}" "${GH_STUB_CANREAD:-}" && exit 0
+    exit 1
+    ;;
+  "pr list")
+    printf '%s' "${GH_STUB_PR_LIST:-}"
+    exit 0
+    ;;
+  "pr create")
+    exit "${GH_STUB_PR_CREATE_RC:-0}"
+    ;;
+  *)
+    exit 0
+    ;;
+esac

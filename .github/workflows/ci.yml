@@ -93,3 +93,59 @@ jobs:
               sys.exit(1)
           print(f"all markdown relative links resolve ({len(files)} md files)")
           PY
+
+  shell-contract-tests:
+    name: Shell contracts + E2E (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install gnupg (macOS)
+        if: runner.os == 'macOS'
+        run: command -v gpg >/dev/null 2>&1 || brew install --quiet gnupg
+      - name: Shell contract suites + E2E lifecycle
+        # macOS deliberately uses /bin/bash 3.2 — the framework claims 3.2 portability and the
+        # hooks run under the system bash on user machines; this is where that claim is executed,
+        # not just reviewed. ($BASH propagates into run.sh so every suite runs under it.)
+        run: |
+          SH=bash
+          [ "$RUNNER_OS" = "macOS" ] && SH=/bin/bash
+          "$SH" tests/shell/run.sh
+          "$SH" tests/e2e/lifecycle.sh
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: shellcheck (error severity) on all tracked shell scripts
+        run: |
+          set -e
+          # shellcheck disable=SC2046
+          shellcheck -S error $(git ls-files '*.sh')
+          echo "shellcheck clean at error severity"
+
+  windows-checks:
+    name: Windows (bootstrap.ps1 + python)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: PowerShell scripts parse
+        shell: pwsh
+        run: |
+          $errs = $null
+          Get-ChildItem scripts/*.ps1 | ForEach-Object {
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errs) | Out-Null
+            if ($errs) { $errs | ForEach-Object { Write-Error $_.Message }; exit 1 }
+            Write-Host "parsed ok: $($_.Name)"
+          }
+      - name: Python contract tests under Windows path semantics
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pytest tests/test_capture_session.py -q
