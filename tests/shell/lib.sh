@@ -32,6 +32,9 @@ assert_no_file() { if [ -f "$2" ]; then t_fail "$1 (unexpected file $2)"; else t
 
 t_sandbox() {  # sets T_SANDBOX, sandboxed HOME, stub gh on PATH; cleans up on exit
   T_SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/bw-test.XXXXXX")"
+  # Physical, normalized path: macOS TMPDIR ends in '/' and sits behind the /var -> /private/var
+  # symlink, so string comparisons against paths the tools normalize would spuriously fail.
+  T_SANDBOX="$(cd "$T_SANDBOX" && pwd -P)"
   export HOME="$T_SANDBOX/home"
   mkdir -p "$HOME"
   export XDG_CACHE_HOME="$T_SANDBOX/cache"
