@@ -65,14 +65,18 @@ BW_HOME="${BAILIWICK_HOME:-$HOME/.bailiwick}"
 # session_start.sh gate so this backup can find them.
 is_shadow_repo() {  # $1 = repo dir
   [ "${BAILIWICK_SHADOW:-}" = "1" ] && return 0
-  local list="$BW_HOME/allowlist" here line
+  local list="$BW_HOME/allowlist" here line entry
   [ -f "$list" ] || return 1
   here="$(cd "$1" 2>/dev/null && pwd -P || echo "$1")"
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%%#*}"
     line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
     line="${line%/}"
-    if [ -n "$line" ] && [ "$here" = "$line" ]; then return 0; fi
+    # Realpath BOTH sides, like capture_session.py:is_shadow_repo — comparing the entry verbatim
+    # made a symlinked allowlist path activate the python hooks but not the bash ones.
+    [ -n "$line" ] || continue
+    entry="$( (cd "$line" 2>/dev/null && pwd -P) || echo "$line" )"
+    if [ "$here" = "$entry" ]; then return 0; fi
   done < "$list"
   return 1
 }

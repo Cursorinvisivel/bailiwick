@@ -137,3 +137,31 @@ def test_malformed_payload_never_blocks_the_harness(tmp_path):
         input="not json at all", text=True, capture_output=True,
     )
     assert r.returncode == 0
+
+
+@pytest.mark.parametrize("payload", ["[]", '"x"', "3", "null"])
+def test_valid_json_non_object_payload_never_blocks(payload):
+    # Valid JSON that is not an object passes the parse but has no .get() — the never-block
+    # contract must hold for it too (this crashed with AttributeError before the guard).
+    r = subprocess.run(
+        [sys.executable, os.path.join(HOOKS, "capture_session.py")],
+        input=payload, text=True, capture_output=True,
+    )
+    assert r.returncode == 0, r.stderr
+
+
+@pytest.mark.parametrize("name", [
+    "Morax", "MyMac Pro!", "host_1.local", "café:host", "A B  C", "UPPER-lower_9",
+])
+def test_machine_normalization_matches_bash_pipeline(name):
+    # The python normalization in capture_session._health / guardrails._health must stay
+    # byte-identical to the bash pipeline in health_common.sh — a divergence splits one
+    # machine's health shard across two filenames and the backup only transports one.
+    bash_out = subprocess.run(
+        ["bash", "-c", "printf '%s' \"$1\" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-'",
+         "_", name],
+        capture_output=True, text=True,
+    ).stdout
+    import re as _re
+    py_out = _re.sub(r"[^a-z0-9._-]", "", name.lower().replace(" ", "-"))
+    assert py_out == bash_out

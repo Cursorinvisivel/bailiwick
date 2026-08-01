@@ -539,15 +539,24 @@ fi
 if [ "$GLOBAL_ONLY" -ne 1 ]; then
 
 if [ ! -d "$TARGET_ARG" ]; then
-  if [ "$DO_INIT" -eq 1 ]; then mkdir -p "$TARGET_ARG"; else
+  if [ "$DO_INIT" -eq 1 ]; then
+    # --dry-run must not create the directory either — resolve TARGET textually below.
+    if DRY; then plan "mkdir -p $TARGET_ARG"; else mkdir -p "$TARGET_ARG"; fi
+  else
     echo "error: '$TARGET_ARG' does not exist (use --init to create it)" >&2; exit 2
   fi
 fi
-TARGET="$(cd "$TARGET_ARG" && pwd)"
+if [ -d "$TARGET_ARG" ]; then
+  TARGET="$(cd "$TARGET_ARG" && pwd)"
+else  # dry-run --init on a not-yet-existing dir
+  case "$TARGET_ARG" in /*) TARGET="$TARGET_ARG";; *) TARGET="$PWD/$TARGET_ARG";; esac
+fi
 REPO_NAME="$(basename "$TARGET")"
 
 if [ ! -e "$TARGET/.git" ]; then
-  if [ "$DO_INIT" -eq 1 ]; then git -C "$TARGET" init -q && echo "• git init: $TARGET"; else
+  if [ "$DO_INIT" -eq 1 ]; then
+    if DRY; then plan "git init $TARGET"; else git -C "$TARGET" init -q && echo "• git init: $TARGET"; fi
+  else
     echo "error: '$TARGET' is not a git repo (use --init to create one)" >&2; exit 2
   fi
 fi
@@ -597,7 +606,9 @@ copy_seeded() {  # $1 src-abs ; $2 rel-dest — seeded once, then hand-edited. N
     fi
     # --update (or any re-run): preserve edits; only correct a drifted Bailiwick path.
     if [ "$CANON_PATH" != "$BAILIWICK_ROOT" ] && grep -qF "$CANON_PATH" "$dest" 2>/dev/null; then
-      sed -i "s#${CANON_PATH}#${BAILIWICK_ROOT}#g" "$dest"; echo "  path-fixed: $2"
+      # portable (BSD sed has no argument-less -i): read-transform-write, like every other sed here
+      sed -e "s#${CANON_PATH}#${BAILIWICK_ROOT}#g" "$dest" > "$dest.tmp" && mv "$dest.tmp" "$dest"
+      echo "  path-fixed: $2"
     else
       echo "  keep (edited): $2"
     fi
@@ -612,6 +623,10 @@ copy_standard() {  # $1 src-abs ; $2 rel-dest — agnostic baseline, TRACKED (sh
   local dest="$TARGET/$2"
   local existed=0; [ -e "$dest" ] && existed=1
   if [ "$existed" -eq 1 ] && [ "$CLOBBER" -ne 1 ]; then echo "  keep (exists, not overwritten): $2"; return 0; fi
+  if DRY; then  # tracked, SHARED files — the highest-blast-radius writes this script makes
+    if [ "$existed" -eq 1 ]; then plan "CLOBBER tracked baseline $2 (reset to template)"; else plan "write tracked baseline $2"; fi
+    return 0
+  fi
   mkdir -p "$(dirname "$dest")"
   sed -e "s#\[Project / Repo Name\]#${REPO_NAME}#g" "$1" > "$dest"
   if [ "$existed" -eq 1 ]; then echo "  CLOBBERED (baseline reset — recover via git): $2";
@@ -635,6 +650,7 @@ refresh_standard_section() {  # $1 rel-dest ; $2 canonical-block-file — patch 
   # Idempotency: skip when the target's section already matches the canonical block.
   if [ "$(extract_reuse_block "$dest")" = "$(cat "$2")" ]; then
     echo "  reuse rule already current: $1"; return 0; fi
+  if DRY; then plan "refresh the reuse section in $1 (tracked file)"; return 0; fi
   local tmp; tmp="$(mktemp)"
   awk -v hdr="$STD_SECTION_HDR" -v blockfile="$2" '
     BEGIN{ while((getline l < blockfile)>0) blk[++n]=l }
@@ -724,16 +740,20 @@ resolve_gh_account() {
 if [ "$SHADOW" -eq 1 ]; then
   BW_HOME="${BAILIWICK_HOME:-$HOME/.bailiwick}"
   ALLOW="$BW_HOME/allowlist"
-  HERE="$(cd "$TARGET" && pwd -P)"
-  mkdir -p "$BW_HOME"
+  HERE="$( (cd "$TARGET" && pwd -P) 2>/dev/null || echo "$TARGET" )"
 
   # 1. Allowlist entry (idempotent) — the gate (hooks + tool layers) activates on this.
-  if [ ! -f "$ALLOW" ]; then
-    printf '# bailiwick shadow allowlist — one absolute repo root per line (# comments).\n# Listed repos activate the framework with NO files written into them (FRAMEWORK.md §7.1).\n' > "$ALLOW"
-  fi
+  # Guarded: adding the entry ACTIVATES the framework for the repo, which is exactly the kind of
+  # state change --dry-run promises not to make.
   if grep -qxF "$HERE" "$ALLOW" 2>/dev/null; then
     echo "  allowlist: already present — $HERE"
+  elif DRY; then
+    plan "add $HERE to $ALLOW (shadow activation)"
   else
+    mkdir -p "$BW_HOME"
+    if [ ! -f "$ALLOW" ]; then
+      printf '# bailiwick shadow allowlist — one absolute repo root per line (# comments).\n# Listed repos activate the framework with NO files written into them (FRAMEWORK.md §7.1).\n' > "$ALLOW"
+    fi
     printf '%s\n' "$HERE" >> "$ALLOW"
     echo "  allowlist: added — $HERE"
   fi
