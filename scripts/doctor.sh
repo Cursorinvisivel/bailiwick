@@ -117,8 +117,16 @@ if [ "$cb_enabled" = "1" ]; then
     fail "capture_backup enabled but gpg_recipients is empty — nothing to encrypt to"
   else
     for fpr in $cb_recipients; do
-      if gpg --list-keys "$fpr" >/dev/null 2>&1; then
-        ok "gpg public key present for recipient $fpr (can encrypt)"
+      # Real encrypt probe, with the SAME flags capture_backup.sh uses — presence alone lies:
+      # --list-keys succeeds for expired, revoked, and sign-only keys, every one of which makes
+      # the push fail while doctor stays green. --trust-model always is load-bearing: a freshly
+      # imported recipient key has [unknown] validity (the normal satellite state) and gpg would
+      # refuse without it — a false alarm the hook itself never raises.
+      if printf 'x' | gpg --batch --yes --no-tty --trust-model always \
+           --encrypt -r "$fpr" -o /dev/null 2>/dev/null; then
+        ok "gpg encrypt probe OK for recipient $fpr"
+      elif gpg --list-keys "$fpr" >/dev/null 2>&1; then
+        fail "gpg key for $fpr is present but UNUSABLE for encryption (expired, revoked, or no encryption subkey) — capture backup pushes will fail (re-key or extend it)"
       else
         fail "gpg public key MISSING for recipient $fpr — capture backup pushes will fail (gpg --import it)"
       fi
