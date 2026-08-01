@@ -150,6 +150,9 @@ def test_valid_json_non_object_payload_never_blocks(payload):
     assert r.returncode == 0, r.stderr
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="the bash mirror only runs on POSIX machines; on the Windows runner "
+                           "'bash' resolves to the WSL shim, which has no distribution")
 @pytest.mark.parametrize("name", [
     "Morax", "MyMac Pro!", "host_1.local", "café:host", "A B  C", "UPPER-lower_9",
 ])
