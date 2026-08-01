@@ -53,7 +53,9 @@ assert_contains "the failure names capture backup" "capture backup pushes will f
 
 echo "== a present but sign-only recipient key is BROKEN (the encrypt probe's quiet case)"
 SGN="$T_SANDBOX/gnupg-signonly"; mkdir -p "$SGN" && chmod 700 "$SGN"
-GNUPGHOME="$SGN" gpg --batch --quiet --passphrase '' --quick-generate-key doctor-signonly ed25519 sign never 2>/dev/null
+# algo 'default' (not ed25519) — macOS's gpg build rejects the named curve here; usage 'sign'
+# is what matters: a primary with no [E] subkey, which --list-keys still reports as fine
+GNUPGHOME="$SGN" gpg --batch --quiet --passphrase '' --quick-generate-key doctor-signonly default sign never 2>/dev/null
 SFPR="$(GNUPGHOME="$SGN" gpg --list-keys --with-colons 2>/dev/null | awk -F: '/^fpr/{print $10; exit}')"
 if [ -n "$SFPR" ]; then
   cat > "$INST/.bailiwick-sync.json" <<EOC
