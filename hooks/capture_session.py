@@ -11,6 +11,7 @@ knowledge library happens only via /curate, under a human gate. This script
 performs NO intelligence and NO promotion — it only guarantees nothing is lost.
 """
 import datetime
+import functools
 import json
 import os
 import re
@@ -48,78 +49,16 @@ def knowledge_ids(text):
 COMMIT_RE = re.compile(r"\bgit\b[^\n]*\bcommit\b")
 
 
-def is_bailiwick_repo(project_dir):
-    """Self-gating guard: only act in bailiwick-wired repos.
-
-    The hooks are installed once at user level (~/.claude/settings.json) and fire
-    in every project. This keeps them inert in unrelated repos: a wired project carries
-    Bailiwick marker ($BAILIWICK) in a framework complement file — the team's own
-    shared CLAUDE.md/AGENTS.md are never touched.
-    """
-    for name in (
-        ".bailiwick.local.md",
-        "CLAUDE.local.md",
-        ".github/instructions/bailiwick.instructions.md",
-    ):
-        try:
-            with open(os.path.join(project_dir, name), "r", encoding="utf-8", errors="ignore") as fh:
-                text = fh.read()
-            if "BAILIWICK" in text:
-                return True
-        except Exception:
-            continue
-    return False
-
-
-def bw_home():
-    """Per-machine global-state root for shadow mode (allowlist + central captures)."""
-    return os.environ.get("BAILIWICK_HOME") or os.path.join(os.path.expanduser("~"), ".bailiwick")
+# Self-gating, shadow gate, home resolution, and health logging live in the shared
+# hooks/bw_common.py substrate (one implementation for this hook and guardrails.py).
+# Re-exported by name here because bash callers and the tests address them via this module.
+from bw_common import bw_home, is_bailiwick_repo, is_shadow_repo  # noqa: F401
+import bw_common
 
 
 def _health(event, detail):
-    """Append a framework-health line to this machine's per-source shard (best-effort, never
-    raises). Aggregated fleet-wide by /metrics; transported by capture_backup.sh (encrypted)."""
-    try:
-        import socket
-        machine = ""
-        try:
-            bailiwick_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            with open(os.path.join(bailiwick_root, ".bailiwick-sync.json"), encoding="utf-8") as fh:
-                machine = (json.load(fh).get("machine") or "").strip()
-        except Exception:
-            pass
-        # Mirror of the bash pipeline in hooks/health_common.sh (tr '[:upper:] ' '[:lower:]-' |
-        # tr -cd 'a-z0-9._-'): lowercase, space -> '-', DELETE everything else. Must stay
-        # byte-identical or the two writers split one machine's health shard across two filenames
-        # (tests/test_capture_session.py pins the equivalence).
-        machine = re.sub(r"[^a-z0-9._-]", "", (machine or socket.gethostname()).lower().replace(" ", "-"))
-        hdir = os.path.join(bw_home(), "health")
-        os.makedirs(hdir, exist_ok=True)
-        with open(os.path.join(hdir, machine + ".jsonl"), "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({
-                "ts": datetime.datetime.now().isoformat(timespec="seconds"),
-                "machine": machine, "component": "capture_session", "event": event,
-                "detail": str(detail)[:300]}) + "\n")
-    except Exception:
-        pass
-
-
-def is_shadow_repo(project_dir):
-    """Shadow activation — no in-repo marker (FRAMEWORK.md §7.1). True when
-    BAILIWICK_SHADOW=1 (per-shell) or this repo root is listed in
-    ~/.bailiwick/allowlist (one absolute path per line; # comments)."""
-    if os.environ.get("BAILIWICK_SHADOW") == "1":
-        return True
-    try:
-        here = os.path.realpath(project_dir)
-        with open(os.path.join(bw_home(), "allowlist"), "r", encoding="utf-8", errors="ignore") as fh:
-            for line in fh:
-                entry = line.split("#", 1)[0].strip().rstrip("/")
-                if entry and os.path.realpath(entry) == here:
-                    return True
-    except Exception:
-        pass
-    return False
+    """Health line for this component (shared writer — see bw_common.health)."""
+    bw_common.health("capture_session", event, detail)
 
 
 def repo_key(project_dir):
@@ -146,6 +85,7 @@ def repo_key(project_dir):
     return "{}-{}".format(base, hashlib.sha256(src.encode("utf-8", "ignore")).hexdigest()[:8])
 
 
+@functools.lru_cache(maxsize=8)
 def origin_remote(project_dir):
     """Best-effort git remote for provenance stamping (scope routing happens at /curate)."""
     try:
@@ -172,11 +112,7 @@ def main():
     transcript = payload.get("transcript_path")
     session_id = payload.get("session_id") or "unknown-session"
     event = payload.get("hook_event_name", "")
-    project_dir = (
-        os.environ.get("CLAUDE_PROJECT_DIR")
-        or payload.get("cwd")
-        or os.getcwd()
-    )
+    project_dir = bw_common.resolve_project_dir(payload)
 
     if not transcript or not os.path.isfile(transcript):
         return 0

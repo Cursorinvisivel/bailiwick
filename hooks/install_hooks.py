@@ -151,7 +151,8 @@ def main():
     settings_path, template_path = sys.argv[1], sys.argv[2]
 
     try:
-        tmpl_hooks = json.load(open(template_path)).get("hooks", {})
+        with open(template_path, encoding="utf-8") as fh:
+            tmpl_hooks = json.load(fh).get("hooks", {})
     except Exception as e:
         print(f"ERROR: cannot read template: {e}")
         return 2
@@ -170,7 +171,8 @@ def main():
 
     if os.path.exists(settings_path):
         try:
-            cfg = json.load(open(settings_path))
+            with open(settings_path, encoding="utf-8") as fh:
+                cfg = json.load(fh)
         except Exception as e:
             print(f"ERROR: existing settings.json is invalid JSON ({e}); not modifying")
             return 3

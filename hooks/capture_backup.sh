@@ -25,7 +25,12 @@ command -v bw_health >/dev/null 2>&1 || bw_health() { :; }
 command -v python3 >/dev/null 2>&1 || exit 0
 [ -f "$CFG" ] || exit 0
 
-ENABLED=0; ACK=0; REPO=""; BRANCH=""; THROTTLE=5; MACHINE="unknown"; RCPTS=()
+# One python3 spawn per run: this heredoc parses the config AND (in push mode) the hook payload
+# from stdin — the payload used to cost 1-2 additional interpreter startups on EVERY Stop event,
+# including throttled no-ops. pull/purge must not touch stdin (they may run interactively).
+PAYLOAD_JSON=""
+if [ "$MODE" = "push" ]; then PAYLOAD_JSON="$(cat 2>/dev/null || true)"; fi
+ENABLED=0; ACK=0; REPO=""; BRANCH=""; THROTTLE=5; MACHINE="unknown"; EVENT=""; PAYLOAD_CWD=""; RCPTS=()
 while IFS= read -r line; do
   case "$line" in
     ENABLED=*) ENABLED="${line#ENABLED=}";;
@@ -34,9 +39,11 @@ while IFS= read -r line; do
     BRANCH=*) BRANCH="${line#BRANCH=}";;
     THROTTLE=*) THROTTLE="${line#THROTTLE=}";;
     MACHINE=*) MACHINE="${line#MACHINE=}";;
+    EVENT=*) EVENT="${line#EVENT=}";;
+    CWD=*) PAYLOAD_CWD="${line#CWD=}";;
     RCPT=*) RCPTS+=("${line#RCPT=}");;
   esac
-done < <(python3 - "$CFG" <<'PY' 2>/dev/null || true
+done < <(printf '%s' "$PAYLOAD_JSON" | python3 -c '
 import json,sys
 try: d=json.load(open(sys.argv[1]))
 except Exception: sys.exit(0)
@@ -48,38 +55,31 @@ print("BRANCH="+(b.get("branch") or ""))
 print("THROTTLE="+str(b.get("throttle_minutes",5)))
 print("MACHINE="+(d.get("machine") or "unknown"))
 for r in (b.get("gpg_recipients") or []): print("RCPT="+str(r))
-PY
-)
+try:
+    p=json.load(sys.stdin)
+    if isinstance(p, dict):
+        print("EVENT="+str(p.get("hook_event_name") or ""))
+        print("CWD="+str(p.get("cwd") or ""))
+except Exception:
+    pass
+' "$CFG" 2>/dev/null || true)
 
 [ "$ENABLED" = "1" ] || exit 0
 [ -n "$REPO" ] || { echo "[backup] enabled but no repo configured" >&2; exit 0; }
 [ "${#RCPTS[@]}" -gt 0 ] || { echo "[backup] enabled but no gpg_recipients configured" >&2; exit 0; }
 command -v gpg >/dev/null 2>&1 || { echo "[backup] gpg not installed" >&2; exit 0; }
 
-mtoken="$(printf '%s' "$MACHINE" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-')"
+# Shared primitives: machine token + shadow gate (hooks/config_common.sh — single bash
+# implementation; without it the shadow-staged path is simply skipped, in-repo backup still runs).
+. "$BAILIWICK_ROOT/hooks/config_common.sh" 2>/dev/null || true
+if command -v bw_machine_token >/dev/null 2>&1; then
+  mtoken="$(bw_machine_token "$MACHINE")"
+else
+  mtoken="$(printf '%s' "$MACHINE" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-')"
+fi
 [ -n "$BRANCH" ] || BRANCH="capture/$mtoken"
 MIRROR="${XDG_CACHE_HOME:-$HOME/.cache}/bailiwick/capture-mirror"
 BW_HOME="${BAILIWICK_HOME:-$HOME/.bailiwick}"
-
-# Shadow-mode repos stage captures centrally, not in-repo (FRAMEWORK.md §7.1). Mirror the
-# session_start.sh gate so this backup can find them.
-is_shadow_repo() {  # $1 = repo dir
-  [ "${BAILIWICK_SHADOW:-}" = "1" ] && return 0
-  local list="$BW_HOME/allowlist" here line entry
-  [ -f "$list" ] || return 1
-  here="$(cd "$1" 2>/dev/null && pwd -P || echo "$1")"
-  while IFS= read -r line || [ -n "$line" ]; do
-    line="${line%%#*}"
-    line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
-    line="${line%/}"
-    # Realpath BOTH sides, like capture_session.py:is_shadow_repo — comparing the entry verbatim
-    # made a symlinked allowlist path activate the python hooks but not the bash ones.
-    [ -n "$line" ] || continue
-    entry="$( (cd "$line" 2>/dev/null && pwd -P) || echo "$line" )"
-    if [ "$here" = "$entry" ]; then return 0; fi
-  done < "$list"
-  return 1
-}
 
 ensure_mirror() {
   if [ ! -d "$MIRROR/.git" ]; then
@@ -110,19 +110,15 @@ git_id() { git -C "$MIRROR" -c user.name=bailiwick -c user.email=backup@local "$
 
 case "$MODE" in
   push)
-    payload="$(cat 2>/dev/null || true)"
-    event="$(printf '%s' "$payload" | python3 -c 'import json,sys
-try: print(json.load(sys.stdin).get("hook_event_name",""))
-except Exception: print("")' 2>/dev/null || true)"
+    # Payload was parsed alongside the config in the single spawn above.
+    event="$EVENT"
     PROJECT_DIR="${CLAUDE_PROJECT_DIR:-}"
-    [ -n "$PROJECT_DIR" ] || PROJECT_DIR="$(printf '%s' "$payload" | python3 -c 'import json,sys
-try: print(json.load(sys.stdin).get("cwd",""))
-except Exception: print("")' 2>/dev/null || true)"
+    [ -n "$PROJECT_DIR" ] || PROJECT_DIR="$PAYLOAD_CWD"
     [ -n "$PROJECT_DIR" ] || PROJECT_DIR="$PWD"
     RAW="$PROJECT_DIR/.bailiwick-outputs/raw"
     STAMP="$PROJECT_DIR/.bailiwick-outputs/.backup-last"
     # Shadow-only repos stage captures centrally (repo untouched; FRAMEWORK.md §7.1) — back those up.
-    if [ ! -d "$RAW" ] && is_shadow_repo "$PROJECT_DIR"; then
+    if [ ! -d "$RAW" ] && command -v bw_is_shadow_repo >/dev/null 2>&1 && bw_is_shadow_repo "$PROJECT_DIR"; then
       # Same key as the writer/nag (capture_session.py repo_key) — else we'd back up the wrong dir.
       skey="$(PYTHONPATH="$BAILIWICK_ROOT/hooks" python3 -c 'import sys, capture_session; sys.stdout.write(capture_session.repo_key(sys.argv[1]))' "$PROJECT_DIR" 2>/dev/null || true)"
       [ -n "$skey" ] || skey="$(basename "$PROJECT_DIR")"

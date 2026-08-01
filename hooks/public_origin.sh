@@ -35,12 +35,11 @@ bw_origin_slug() {
 bw_allow_public_push() {
   local cfg="${1:-}"
   [ -f "$cfg" ] || return 1
-  if command -v python3 >/dev/null 2>&1; then
-    [ "$(python3 -c 'import json,sys;print(str(json.load(open(sys.argv[1])).get("allow_public_push",False)).lower())' \
-        "$cfg" 2>/dev/null || echo false)" = "true" ]
-  else
-    grep -qE '"allow_public_push"[[:space:]]*:[[:space:]]*true' "$cfg"
-  fi
+  # Delegates to the shared bool read; a missing helper fails CLOSED (no override honoured) —
+  # the safe direction for a publish-prevention control.
+  . "$(dirname "${BASH_SOURCE[0]:-$0}")/config_common.sh" 2>/dev/null || true
+  command -v bw_cfg_bool >/dev/null 2>&1 || return 1
+  BW_CFG_FILE="$cfg" bw_cfg_bool allow_public_push
 }
 
 # 0 (blocked) when this clone is contribute-only; prints the reason. 1 when propagation is safe.

@@ -100,10 +100,15 @@ else
   role="${role:-satellite}"
   ok ".bailiwick-sync.json present (role: ${role}; full validation needs python3)"
 fi
-# Fallback MUST match hooks/sync_knowledge.sh exactly (full `hostname`, not -s) — a divergent
-# derivation makes the stranding check look at a branch the sync script never pushes.
-[ -n "$machine" ] || machine="$(hostname 2>/dev/null || echo unknown)"
-machine="$(printf '%s' "$machine" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-')"
+# Same derivation as hooks/sync_knowledge.sh — both call the shared bw_machine_token, so the
+# stranding check always looks at the branch the sync script actually pushes.
+. "$BAILIWICK_ROOT/hooks/config_common.sh" 2>/dev/null || true
+if command -v bw_machine_token >/dev/null 2>&1; then
+  machine="$(bw_machine_token "${machine:-}")"
+else
+  [ -n "$machine" ] || machine="$(hostname 2>/dev/null || echo unknown)"
+  machine="$(printf '%s' "$machine" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-')"
+fi
 
 # ---- 3. Capture backup keys --------------------------------------------------------------------
 # enabled + no public key  => every encrypt (so every off-machine push) fails: captures pile up
@@ -176,7 +181,7 @@ elif ! command -v bw_resolve_gh_account >/dev/null 2>&1; then
 else
   bw_resolve_gh_account "$BAILIWICK_ROOT"
   if [ -n "${BW_GH_REPO:-}" ]; then
-    repo_args="--repo ${BW_GH_HOST}/${BW_GH_REPO}"
+    repo_args="$(bw_gh_repo_args)"
     if bw_gh api --hostname "${BW_GH_HOST:-github.com}" "repos/${BW_GH_REPO}" >/dev/null 2>&1; then
       HAVE_GH=1
       ok "gh can reach ${BW_GH_REPO} as '${BW_GH_USER:-<active account>}'${BW_GH_DECIDED:+ (${BW_GH_DECIDED})}"
@@ -206,8 +211,7 @@ check_parked() {
   _pb_days=""
   [ -n "$_pb_oldest" ] && _pb_days=$(( ( $(date +%s) - _pb_oldest ) / 86400 ))
   if [ "$HAVE_GH" -eq 1 ]; then
-    # shellcheck disable=SC2086  # repo_args intentionally word-split; owner/repo has no spaces
-    _pb_pr="$(bw_gh pr list $repo_args --head "$_pb" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+    _pb_pr="$(bw_gh_open_pr "$_pb")"
     if [ -n "$_pb_pr" ]; then
       ok "origin/${_pb} is $_pb_ahead commit(s) ahead with PR #${_pb_pr} open (waiting on central merge${_pb_days:+; oldest commit ${_pb_days}d old})"
     else

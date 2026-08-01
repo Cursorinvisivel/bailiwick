@@ -204,55 +204,16 @@ def segments(command):
     no_comments = re.sub(r"(?:^|\s)#[^\n]*", " ", command)
     return [seg for seg in re.split(r"[;&|\n]+", no_comments) if seg.strip()]
 
-COMPLEMENT_FILES = (
-    ".bailiwick.local.md",
-    "CLAUDE.local.md",
-    ".github/instructions/bailiwick.instructions.md",
-)
-
-
-def is_bailiwick_repo(project_dir):
-    """Only act in bailiwick-wired repos (mirrors capture_session.py)."""
-    for name in COMPLEMENT_FILES:
-        try:
-            with open(os.path.join(project_dir, name), "r", encoding="utf-8", errors="ignore") as fh:
-                text = fh.read()
-            if "BAILIWICK" in text:
-                return True
-        except Exception:
-            continue
-    return False
-
-
-def _bw_home():
-    return os.environ.get("BAILIWICK_HOME") or os.path.join(os.path.expanduser("~"), ".bailiwick")
+# Self-gating, shadow gate, home resolution, and health logging live in the shared
+# hooks/bw_common.py substrate (one implementation for this hook and capture_session.py).
+from bw_common import is_bailiwick_repo, is_shadow_repo  # noqa: F401
+from bw_common import bw_home as _bw_home
+import bw_common
 
 
 def _health(event, detail):
-    """Append a framework-health line to this machine's per-source shard (best-effort, never
-    raises). Aggregated fleet-wide by /metrics; transported by capture_backup.sh (encrypted)."""
-    try:
-        import datetime
-        import socket
-        machine = ""
-        try:
-            bailiwick_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            with open(os.path.join(bailiwick_root, ".bailiwick-sync.json"), encoding="utf-8") as fh:
-                machine = (json.load(fh).get("machine") or "").strip()
-        except Exception:
-            pass
-        # Mirror of the bash pipeline in hooks/health_common.sh — lowercase, space -> '-',
-        # DELETE everything else (see capture_session.py for the shared rationale).
-        machine = re.sub(r"[^a-z0-9._-]", "", (machine or socket.gethostname()).lower().replace(" ", "-"))
-        hdir = os.path.join(_bw_home(), "health")
-        os.makedirs(hdir, exist_ok=True)
-        with open(os.path.join(hdir, machine + ".jsonl"), "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({
-                "ts": datetime.datetime.now().isoformat(timespec="seconds"),
-                "machine": machine, "component": "guardrails", "event": event,
-                "detail": str(detail)[:300]}) + "\n")
-    except Exception:
-        pass
+    """Health line for this component (shared writer — see bw_common.health)."""
+    bw_common.health("guardrails", event, detail)
 
 
 def _audit(event, command, project_dir):
@@ -267,23 +228,6 @@ def _audit(event, command, project_dir):
                 event, project_dir, " ".join(command.split())[:500]))
     except Exception:
         pass
-
-
-def is_shadow_repo(project_dir):
-    """Shadow activation — no in-repo marker (FRAMEWORK.md §7.1): BAILIWICK_SHADOW=1 or an
-    allowlist match. Enforcement must apply in shadow repos exactly as in seeded ones."""
-    if os.environ.get("BAILIWICK_SHADOW") == "1":
-        return True
-    try:
-        here = os.path.realpath(project_dir)
-        with open(os.path.join(_bw_home(), "allowlist"), "r", encoding="utf-8", errors="ignore") as fh:
-            for line in fh:
-                entry = line.split("#", 1)[0].strip().rstrip("/")
-                if entry and os.path.realpath(entry) == here:
-                    return True
-    except Exception:
-        pass
-    return False
 
 
 def emit(decision, reason):
@@ -386,11 +330,7 @@ def main(adapter="claude"):
     cmd_tokens = strip_quoted(unwrap_token_quotes(command))
 
     # Gemini exports CLAUDE_PROJECT_DIR as a compat alias; Codex carries only payload cwd.
-    project_dir = (
-        os.environ.get("CLAUDE_PROJECT_DIR")
-        or payload.get("cwd")
-        or os.getcwd()
-    )
+    project_dir = bw_common.resolve_project_dir(payload)
     if not (is_bailiwick_repo(project_dir) or is_shadow_repo(project_dir)):
         return 0  # Inert outside bailiwick-wired repos (seeded or shadow-activated).
 
