@@ -94,3 +94,26 @@ because history rewrite breaks the multi-machine sync model and must be a delibe
 - `skills/curate/SKILL.md` (De-identified mode) · `agents/memory.md` (scopes, `clients/<id>/`, telemetry)
 - `knowledge/context/org-shorthands.md` (the `<id>` registry) · `hooks/capture_backup.sh` (`purge`)
 - `adr-002-dirty-zone-backup-confidentiality.md` · `docs/threat-model.md`
+
+## Amendment 1 (2026-08-02) — verification tooling and the deep-removal runbook
+
+The output-not-execute stance is unchanged. What changed: the *residual* left by a tree-only purge
+is now **measured, gated, and documented** instead of merely named.
+
+- **`scripts/purge_verify.sh residual`** measures what still exists for a set of identifiers —
+  working tree, git history (`git log -S`), the backup repo's current trees AND history (by path;
+  ciphertext cannot be grepped), and the host's `refs/pull/*` pins. Erasure tiers are now derived
+  from this verifiable state, never from operator assertion.
+- **`scripts/purge_verify.sh preflight`** gates deep removal: it blocks while un-curated captures
+  exist anywhere it can see (local staging, allowlisted repos, every `capture/*` branch of the
+  backup repo) and lists every health-shard machine whose local-only staging must be confirmed
+  drained by hand. History rewrite and key destruction are unrecoverable; pending knowledge is
+  drained first, always.
+- **`docs/history-purge.md`** is the operator runbook for the thorough case: surgical
+  `filter-repo` vs **orphan-squash** (drop ALL older commits — the strongest and simplest path for
+  the knowledge repo), the fleet choreography (freeze → preflight → rewrite → force-push →
+  satellites RE-CLONE, never pull → verify → unfreeze), **crypto-erasure as the recommended path
+  for the ciphertext** (a rewrite cannot chase copies you don't control; destroying the old key
+  erases them all at once), and the host-side residuals a force-push does not remove (SHA-fetchable
+  objects until server GC; `refs/pull/*` pinned permanently; support request for guaranteed
+  removal).
