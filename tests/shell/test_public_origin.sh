@@ -74,7 +74,13 @@ out="$(cd "$INST" && . hooks/health_common.sh && . hooks/public_origin.sh \
   && GH_STUB_SLEEP=3 BW_PO_TIMEOUT=1 BW_PO_HEALTH_COMPONENT=sync_knowledge bw_public_origin_block "$INST"; echo "rc=$?")"
 assert_contains "timeout fails open (no block)" "rc=1" "$out"
 assert_eq "timeout result never cached" "" "$(find "$CACHE_DIR" -name 'public-origin-*' 2>/dev/null | head -1)"
-assert_contains "degradation visible in the health log" "probe timed out" \
-  "$(cat "$BAILIWICK_HOME"/health/*.jsonl 2>/dev/null)"
+if command -v timeout >/dev/null 2>&1; then
+  assert_contains "degradation visible in the health log" "probe timed out" \
+    "$(cat "$BAILIWICK_HOME"/health/*.jsonl 2>/dev/null)"
+else
+  # Stock macOS has no coreutils `timeout`; the code falls back to an untimed probe (the
+  # ruling's accepted portability caveat), so the timeout branch — and its warn — cannot fire.
+  echo "  SKIP health-warn assert — no 'timeout' binary on this platform (untimed-probe fallback in effect)"
+fi
 
 t_summary
