@@ -1,10 +1,14 @@
 # Getting Started with Bailiwick
 
-Welcome. **Bailiwick** is a prompt-and-convention framework that gives your AI coding agents
-(Claude Code first-class; also Codex CLI, Gemini CLI, and GitHub Copilot) a curated, always-on
-knowledge library, enforced session capture with human-gated curation, runtime guardrails on
-high-impact commands, and zero-footprint repo wiring. It's plain Markdown, Python, and shell —
-there is no service to run and nothing to host.
+Welcome. **Bailiwick** is a personal knowledge layer for your AI coding agents (Claude Code
+first-class; also Codex CLI, Gemini CLI, and GitHub Copilot): a curated, always-on knowledge
+library of your conventions and hard-won context, fed by enforced session capture with human-gated
+curation, and paired with runtime guardrails on high-impact commands so a knowledge-loaded agent
+stays within your rules. It is **single-practitioner by design** and wires into repos with zero
+footprint by default — it layers alongside a team's existing instruction files as hidden
+complements, touching shared files only through explicit actions you take (see
+[Intent & scope](../README.md#intent--scope)). It's plain Markdown, Python, and shell — there is no
+service to run and nothing to host.
 
 This guide walks you from a fresh clone to your first completed knowledge cycle. It's the
 happy path; for day-2 operations (multi-machine sync, encrypted backup, federation) see

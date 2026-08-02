@@ -724,8 +724,9 @@ An honest self-assessment. Adopt it where the strengths matter to you and the li
 
 ### Where it's strong
 - **Context economy.** The injected index + on-demand loading + a hard content-file budget keep
-  per-session token cost flat regardless of how big the library grows — the vendor-endorsed
-  "progressive disclosure" pattern, applied throughout.
+  per-session token cost bounded as the library grows — the injected map grows far more slowly than
+  the content it indexes (sharding keeps it lean), so cost tracks the index, never the library —
+  the vendor-endorsed "progressive disclosure" pattern, applied throughout.
 - **Enforcement is real, not advice.** The guardrail is a runtime PreToolUse hook across three tools
   (Claude Code, Codex, Gemini CLI), not a prompt the model can ignore — high-impact actions require
   an in-the-moment confirmation, and nothing dangerous runs on agent initiative.
@@ -733,9 +734,10 @@ An honest self-assessment. Adopt it where the strengths matter to you and the li
   discipline; knowledge is never lost even when you skip curation. Codex, Gemini, and Copilot use
   **manual** capture until their lifecycle-capture adapters are wired (§10) — the guarantee is
   Claude-Code-specific, not universal.
-- **Privacy by construction.** Shadow mode writes zero files into a target repo; seeded mode hides
+- **Private by default.** Shadow mode writes zero files into a target repo; seeded mode hides
   via `.git/info/exclude`, never a tracked `.gitignore`. The framework stays invisible in
-  client/colleague repos.
+  client/colleague repos — that invisibility is structural, but overall privacy still depends on
+  what your captures hold and how you curate them (see [threat-model.md](threat-model.md)).
 - **Provenance and scope are explicit — and reversible.** Every knowledge item is `generic` /
   `client:<id>` / `external:<id>`; a leakage check keeps client specifics from becoming generic
   patterns; a de-identified `/curate` mode can store zero identifiers; and `/purge` retroactively
