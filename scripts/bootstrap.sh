@@ -814,9 +814,6 @@ try:
 except Exception:
     d = {}
 srv = d.setdefault("mcpServers", {})
-# Drop stale servers from the framework's former name (arch-toolkit -> bailiwick); exact old keys only.
-for _k in ("arch-filesystem", "arch-fetch", "arch-terraform", "arch-github"):
-    srv.pop(_k, None)
 srv["bailiwick-filesystem"] = {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem"] + roots}
 srv["bailiwick-fetch"] = {"command": "uvx", "args": ["mcp-server-fetch"]}
 srv["bailiwick-terraform"] = {"command": "terraform-mcp-server", "args": ["stdio"]}
@@ -843,17 +840,6 @@ PY
       fi
       echo "# END bailiwick mcp"
     } > "$_tb"
-    # Sweep a stale block from the framework's FORMER name (arch-toolkit -> bailiwick); the current
-    # marker won't match it, so it would otherwise be orphaned beside the fresh bailiwick-* block.
-    if [ -f "$CODEX" ] && grep -qF "# BEGIN arch-toolkit mcp" "$CODEX"; then
-      python3 - "$CODEX" <<'PY'
-import re, sys
-d = sys.argv[1]; t = open(d).read()
-t2 = re.sub(r"\n?# BEGIN arch-toolkit mcp.*?# END arch-toolkit mcp\n?", "\n", t, flags=re.S)
-if t2 != t: open(d, "w").write(t2)
-PY
-      echo "  mcp(codex): removed a stale arch-toolkit MCP block from $CODEX (renamed to bailiwick)"
-    fi
     if [ -f "$CODEX" ] && grep -qF "# BEGIN bailiwick mcp" "$CODEX"; then
       if python3 - "$CODEX" "$_tb" <<'PY'
 import re, sys

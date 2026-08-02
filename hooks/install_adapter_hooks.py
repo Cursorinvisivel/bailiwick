@@ -35,14 +35,6 @@ CODEX_BEGIN = "# BEGIN bailiwick hooks (managed - do not edit inside; reinstall 
 CODEX_END = "# END bailiwick hooks"
 GEMINI_HOOK_NAME = "bailiwick-guardrail"
 
-# The framework's FORMER name (arch-toolkit -> bailiwick). A prior install wrote these old-name
-# markers; the current markers above won't match them, so without an explicit sweep the stale block
-# would be orphaned beside the freshly written one (a duplicate guardrail). These match the exact old
-# names only — a differently named coexisting tool never collides.
-LEGACY_CODEX_RE = re.compile(r"\n?# BEGIN arch-toolkit hooks\b.*?# END arch-toolkit hooks\n?", re.S)
-LEGACY_GEMINI_HOOK_NAME = "arch-toolkit-guardrail"
-
-
 def codex_block():
     # TOML: forward slashes work on Windows too; commandWindows covers a python3-less PATH.
     posix = GUARDRAIL.replace("\\", "/")
@@ -69,7 +61,6 @@ def install_codex():
         with open(cfg, encoding="utf-8") as fh:
             text = fh.read()
     orig = text
-    text = LEGACY_CODEX_RE.sub("\n", text)  # drop a stale former-name block, if any
     block = codex_block()
     pattern = re.compile(re.escape(CODEX_BEGIN) + r"(.*?)" + re.escape(CODEX_END) + r"\n?", re.S)
     m = pattern.search(text)
@@ -89,8 +80,6 @@ def install_codex():
     else:
         new = text + ("\n" if text and not text.endswith("\n") else "") + block
         status = "INSTALLED"
-    if text != orig and status == "PRESENT":
-        status = "UPDATED"  # bailiwick block unchanged, but a stale former-name block was removed
     if new != orig:
         with open(cfg + ".tmp", "w", encoding="utf-8") as fh:
             fh.write(new)
@@ -128,13 +117,6 @@ def install_gemini():
         print("gemini: ERROR: hooks.BeforeTool is not a list; not modifying")
         return 3
 
-    # Drop a stale entry left by the former name (arch-toolkit -> bailiwick); exact old name only.
-    kept = [g for g in before if not (isinstance(g, dict) and any(
-        isinstance(h, dict) and h.get("name") == LEGACY_GEMINI_HOOK_NAME for h in g.get("hooks", [])))]
-    removed_legacy = len(kept) != len(before)
-    if removed_legacy:
-        before[:] = kept
-
     entry = {
         "matcher": "run_shell_command",
         "hooks": [{
@@ -154,8 +136,6 @@ def install_gemini():
             break
     else:
         before.append(entry)
-    if removed_legacy and status == "PRESENT":
-        status = "UPDATED"  # current entry unchanged, but a stale former-name entry was removed
     if status != "PRESENT":
         with open(cfg + ".tmp", "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2)

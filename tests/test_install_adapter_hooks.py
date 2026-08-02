@@ -62,29 +62,6 @@ def test_unrelated_content_survives(tmp_path):
     assert "my-own-hook" in names and "bailiwick-guardrail" in names
 
 
-def test_legacy_markers_are_swept_not_duplicated(tmp_path):
-    # A prior install under the framework's former name left old-marker blocks behind;
-    # the sweep must remove exactly those and leave ONE current guardrail per adapter.
-    (tmp_path / "codex").mkdir()
-    (tmp_path / "codex" / "config.toml").write_text(
-        "# keep me\n"
-        "# BEGIN arch-toolkit hooks\n[[hooks.PreToolUse]]\nstale = true\n# END arch-toolkit hooks\n")
-    (tmp_path / "gemini").mkdir()
-    (tmp_path / "gemini" / "settings.json").write_text(json.dumps({
-        "hooks": {"BeforeTool": [{"matcher": "run_shell_command",
-                                  "hooks": [{"name": "arch-toolkit-guardrail"}]}]},
-    }))
-    r = run(tmp_path)
-    assert r.returncode == 0
-    toml = (tmp_path / "codex" / "config.toml").read_text()
-    assert "arch-toolkit" not in toml, "legacy block must be swept"
-    assert toml.count("BEGIN bailiwick hooks") == 1
-    assert "# keep me" in toml
-    cfg = json.loads((tmp_path / "gemini" / "settings.json").read_text())
-    names = inner_names(cfg)
-    assert names.count("bailiwick-guardrail") == 1 and "arch-toolkit-guardrail" not in names
-
-
 def test_malformed_gemini_settings_refused_untouched(tmp_path):
     (tmp_path / "gemini").mkdir()
     (tmp_path / "gemini" / "settings.json").write_text("{ not json")

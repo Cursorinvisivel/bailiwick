@@ -30,20 +30,6 @@ BLOCK="$(sed "s#__BAILIWICK__#${BAILIWICK_ROOT}#g" "$TMPL")"
 
 mkdir -p "$(dirname "$DEST")"
 
-# Sweep a stale block left by the framework's FORMER name (arch-toolkit -> bailiwick). The current
-# marker below won't match it, so without this the old block would be orphaned beside the fresh one.
-# Exact old-name markers only — a differently named coexisting tool never matches.
-if [ -f "$DEST" ] && grep -qF "<!-- BEGIN arch-toolkit" "$DEST" 2>/dev/null; then
-  python3 - "$DEST" <<'PY'
-import re, sys
-d = sys.argv[1]
-t = open(d, encoding="utf-8").read()
-t2 = re.sub(r"\n?<!-- BEGIN arch-toolkit.*?<!-- END arch-toolkit -->\n?", "\n", t, flags=re.S)
-if t2 != t:
-    open(d, "w", encoding="utf-8").write(t2)
-PY
-  echo "  ${LABEL}: removed a stale arch-toolkit block from $DEST (framework was renamed to bailiwick)"
-fi
 
 if [ -f "$DEST" ] && grep -qF "$BEGIN" "$DEST" 2>/dev/null; then
   # Replace the existing managed block in place, preserving everything around it.
