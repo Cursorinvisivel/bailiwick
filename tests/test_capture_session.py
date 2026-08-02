@@ -154,7 +154,7 @@ def test_valid_json_non_object_payload_never_blocks(payload):
                     reason="the bash mirror only runs on POSIX machines; on the Windows runner "
                            "'bash' resolves to the WSL shim, which has no distribution")
 @pytest.mark.parametrize("name", [
-    "Morax", "MyMac Pro!", "host_1.local", "café:host", "A B  C", "UPPER-lower_9",
+    "Orion", "MyMac Pro!", "host_1.local", "café:host", "A B  C", "UPPER-lower_9",
 ])
 def test_machine_normalization_matches_bash_pipeline(name):
     # The python normalization in capture_session._health / guardrails._health must stay

@@ -279,8 +279,8 @@ procedure applies at any depth, so a large domain index can itself split into de
 - **Index nodes are navigation, not content** — they do NOT consume the max-5 *content*-file budget
   (the 5 is for topics/patterns). But keep the tree shallow: target **≤2 levels below root**, hard
   cap **3**. If a task needs more index hops than content files, the tree is over-split.
-- Deeper nodes are **never injected** — only loaded on the descent. This keeps per-session cost flat
-  regardless of total library size.
+- Deeper nodes are **never injected** — only loaded on the descent. This keeps per-session cost
+  bounded (root map + a shallow descent + capped content loads) regardless of total library size.
 
 ### Rebalancing (Periodic Curation, recursive)
 - Recount topics **per node**. Propose a shard for any node over threshold; propose **merging a child

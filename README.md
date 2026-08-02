@@ -4,26 +4,50 @@
 [![Views](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCursorinvisivel%2Fbailiwick%2Ftraffic-data%2Fviews.json)](https://github.com/Cursorinvisivel/bailiwick/graphs/traffic)
 [![Unique clones](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCursorinvisivel%2Fbailiwick%2Ftraffic-data%2Fclones.json&label=unique%20clones)](https://github.com/Cursorinvisivel/bailiwick/graphs/traffic)
 
-**Curated engineering context and runtime guardrails for AI coding agents.**
+**Your curated engineering knowledge, preserved and reused across sessions, projects, and AI
+coding agents — with runtime guardrails so an agent that acts on it stays within your rules.**
 
 A *bailiwick* is the domain you're responsible for — your area of authority and expertise. Bailiwick
 gives an AI coding agent — Claude Code, Codex, Gemini, or GitHub Copilot — a persistent, curated
-**memory** of how your domain works, and **runtime guardrails** so it acts within your rules. It's
-plain Markdown + Python + shell: no service, no database, no build step.
+**memory** of how your domain works: the conventions, patterns, and hard-won context you'd otherwise
+re-explain every session. Because an agent with that memory acts with more initiative, Bailiwick
+pairs it with **runtime guardrails** as containment. It's plain Markdown + Python + shell: no
+service, no database, no build step.
 
 > **Status: experimental.** Built from real cloud / infrastructure work, it ships the **machinery**
 > plus a small **seed** knowledge library to kick-start use — then you grow your own from your own
 > work. Licensed under [Apache-2.0](LICENSE).
 
+## Intent & scope
+
+Read this first — it frames everything below.
+
+- **Primary purpose:** preserve and reuse one engineer's curated knowledge, conventions, and way of
+  working across sessions, repositories, and client projects. The knowledge library and the
+  capture→curate loop *are* the product.
+- **Secondary purpose:** contain agent autonomy — real, runtime-enforced guardrails against
+  dangerous or premature actions. They exist to make an always-on, knowledge-loaded agent safe to
+  work with, not as a product of their own.
+- **Designed to layer, not replace:** it rides *alongside* whatever framework a team or client repo
+  already has — by default nothing is written into the repo at all, and the framework wiring loads
+  as hidden *complements* to the team's `CLAUDE.md` / `AGENTS.md` rather than replacing them. Shared
+  instruction files change only through explicit, intentional actions you take (`--with-standards`
+  baselines, `/enrich` drafts) — never as a side effect of wiring a repo.
+- **Current scope:** single practitioner by design — one owner, one primary machine
+  ([ROADMAP](ROADMAP.md) analyses what a team version would require; none of it is shipped).
+- **Non-goals:** full automation, and a team governance platform.
+
 ## Why
 
 AI coding agents are stateless and eager. Across sessions they forget what they learned; within a
 session they'll happily run `terraform destroy` or push a commit if the prompt drifts that way.
-Bailiwick fixes both — without a runtime service:
+Bailiwick fixes both — the memory is the point, the guardrails are what make it safe — without a
+runtime service:
 
 - **Memory that's always on, loaded on demand.** A curated library indexed by a lean map injected
-  each session. The agent loads only the few files a task needs, so context cost stays flat as the
-  library grows.
+  each session. The agent loads only the few files a task needs, so context cost stays bounded as
+  the library grows: what's injected is a lean (sharded) map, not the library, and content loads
+  are capped per task.
 - **Capture you can't forget; promotion you can't skip.** Under Claude Code, hooks stage raw sessions
   *automatically*; a human-gated `/curate` step distils them into the library. Nothing enters
   knowledge unreviewed, and nothing is lost if you skip a cycle.
@@ -62,6 +86,10 @@ $BAILIWICK/scripts/bootstrap.sh --uninstall /path/to/repo       # cleanly un-wir
 $BAILIWICK/scripts/bootstrap.sh --dry-run /path/to/repo         # preview any of the above; writes nothing
 ```
 
+(`--with-standards` writes tracked, framework-agnostic instruction baselines into a repo your
+colleagues share — a courtesy for the *repo*, not a team mode: Bailiwick itself, and your knowledge
+library, remain yours alone.)
+
 Windows PowerShell mirrors every flag with a single dash: `bootstrap.ps1 -InstallTools`,
 `bootstrap.ps1 -Seeded …`, `bootstrap.ps1 -Uninstall …`.
 
@@ -88,12 +116,14 @@ The honest per-adapter differences and the versions each is verified against:
 
 ## What it is — and isn't
 
-**Good at:** flat context cost as knowledge grows; real (not advisory) enforcement across three CLIs;
-privacy by construction (shadow mode writes nothing into a repo, seeded mode hides via
+**Good at:** bounded context cost as knowledge grows; real (not advisory) enforcement across three CLIs;
+private by default (shadow mode writes nothing into a repo, seeded mode hides via
 `.git/info/exclude`); explicit provenance and scope that stays reversible (`/purge` de-identifies a
 client/project while keeping the reusable "how"); a simple, readable substrate you can fork and trust.
 
-**Not:** it is **not a sandbox** — the guardrail matches *direct commands* only (bypassed by `make`,
+**Not:** it is **not a team governance platform** — single practitioner by design (see
+[Intent & scope](#intent--scope); [ROADMAP](ROADMAP.md) analyses a team version); it is
+**not a sandbox** — the guardrail matches *direct commands* only (bypassed by `make`,
 wrapper scripts, aliases, MCP tool calls); telemetry is single-writer; curation is manual effort;
 retrieval is a hand-curated map (no vector search yet); and the seed knowledge leans cloud/IaC —
 concretely GCP + Terraform, the domain it grew up in. The **machinery is domain-neutral**, though:
@@ -132,6 +162,20 @@ skills/      /curate · /enrich · /learn · /metrics · /investigate · /purge 
 scripts/     bootstrap.sh · bootstrap.ps1  (repo onboarding) · doctor.sh (wiring preflight)
 docs/        this documentation set · decisions/ (framework ADRs)
 ```
+
+## Seeing it whole
+
+Everything in Bailiwick — the knowledge library, agent roles, ADRs, templates, docs — is plain
+Markdown, linked and tagged, so a Markdown graph tool can render the entire framework with no
+Bailiwick tooling involved. Here is the framework clone through the VS Code
+**[Foam](https://foambubble.github.io/foam/)** extension's graph view (`Foam: Show graph`): the
+seed knowledge library clusters around *Engineering Defaults* — the hub it is by design — with the
+ADRs, Quality Workflow stages, and docs linking into it:
+
+![Bailiwick rendered as a graph by the Foam VS Code extension — knowledge topics, patterns, ADRs, agent stages, and docs as linked nodes, clustered by tags, with Engineering Defaults near the centre](docs/images/foam.jpg)
+
+As your own captures get curated in, the knowledge region of this graph grows into a map of *your*
+bailiwick.
 
 ## Community & support
 
