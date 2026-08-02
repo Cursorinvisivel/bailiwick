@@ -178,7 +178,10 @@ See: $BAILIWICK/hooks/settings.template.json (hooks block — install once in ~/
 
 ## Multi-Machine Sync
 The framework is cloned per machine; `.bailiwick-sync.json` (gitignored) sets each machine's role
-(`central` | `satellite`, default satellite). **Inbound:** the SessionStart hook fast-forwards the
+(`central` | `satellite`, default satellite). **Preflight:** `scripts/doctor.sh` (read-only)
+verifies the wiring invariants that break silently — hook paths point at *this* clone, config
+present, gpg keys match the role, no satellite telemetry delta, no stranded `sync/*` branch,
+gh account reachable. Run it after cloning/moving the framework or when sync looks off. **Inbound:** the SessionStart hook fast-forwards the
 Bailiwick clone from `origin/main`. **Outbound:** after an approved `/curate`,
 `hooks/sync_knowledge.sh` propagates — central pushes `main`; a satellite pushes a
 `sync/<machine>` branch and opens a PR. `.telemetry.json` is **central-owned** (satellites skip it).

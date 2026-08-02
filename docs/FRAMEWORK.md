@@ -411,8 +411,8 @@ seeded variant:
   `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md` that activate per-repo on the
   `.bailiwick.local.md` marker). Without it,
   every run *validates* these and prints ✓/✗ in the Next steps. (Skills and operator layers are
-  global, not per-repo.) Optionally, `--with-desktop` also wires the read-only Desktop
-  knowledge-reference MCP for Claude/ChatGPT Desktop (§10).
+  global, not per-repo.) Optionally, `--with-desktop` also wires the knowledge-scoped Desktop
+  reference MCP for Claude/ChatGPT Desktop (§10).
 - **Enrich after bootstrap (`/enrich` in Claude Code, `$bailiwick-enrich` in Codex):** scans the
   bootstrapped repo (Terraform backend/providers/modules, GCP project IDs, environments, CI/CD,
   structure), asks only for gaps it couldn't infer, and **drafts project-context-filled instruction
@@ -617,11 +617,13 @@ Key consequences (the four tools do not share one uniform integration):
   `~/.gemini/settings.json`, VS Code user `mcp.json`/instructions), leaving the repo untouched —
   verified per adapter in §7.1. Only local Copilot instruction auto-injection is build-dependent
   (VS Code #304101); its user-scope MCP is unaffected.
-- **Desktop reference (read-only, outside the four adapters).** Claude Desktop and ChatGPT Desktop
-  have no hook system, so they sit outside capture/curation/guardrails entirely. `bootstrap.sh
-  --install-tools --with-desktop` (and `bootstrap.ps1 -InstallTools -WithDesktop`) optionally wires a
-  single read-only `bailiwick-knowledge` MCP filesystem server — rooted at `knowledge/` **only**,
-  never the rest of the framework, never writable — into each app's own MCP config
+- **Desktop reference (knowledge-scoped, outside the four adapters).** Claude Desktop and ChatGPT
+  Desktop have no hook system, so they sit outside capture/curation/guardrails entirely.
+  `bootstrap.sh --install-tools --with-desktop` (and `bootstrap.ps1 -InstallTools -WithDesktop`)
+  optionally wires a single `bailiwick-knowledge` MCP filesystem server — rooted at `knowledge/`
+  **only**, never the rest of the framework. Least privilege here applies to the **root, not the
+  verbs**: the server is read-**write** within `knowledge/` and Desktop has no gates, so treat it
+  as reference-by-convention (see CLAUDE.md) — into each app's own MCP config
   (`hooks/install_desktop_mcp.py`, idempotent, path auto-detected for macOS/Windows/WSL). It lets
   either app *consult* the library outside a coding session; pair it with
   `knowledge/templates/desktop-reference-instructions.md`. Deliberately **not** a fifth adapter — a

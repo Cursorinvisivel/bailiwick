@@ -89,7 +89,9 @@ Pick the recipe that matches your change — each notes where it lives and how t
 CI (`.github/workflows/ci.yml`) runs the same checks — run them locally before opening a PR:
 
 ```bash
-python -m pytest tests/ -q                       # guardrail decision contract (install pytest first)
+python -m pytest tests/ -q                       # python contract suites (install pytest first)
+bash tests/shell/run.sh                          # shell contract suites (sandboxed, concurrent)
+bash tests/e2e/lifecycle.sh                      # end-to-end lifecycle (install→capture→backup→sync)
 python3 -m py_compile hooks/*.py skills/metrics/report.py   # hooks/scripts parse
 for f in scripts/*.sh hooks/*.sh; do bash -n "$f"; done     # shell scripts parse
 ```
