@@ -56,8 +56,9 @@ Options:
                    into Claude Desktop and ChatGPT Desktop's own MCP config — so either app can
                    consult the knowledge library for reference outside a coding session. Neither
                    app has a hook system, so this is deliberately OUTSIDE capture/curation/
-                   guardrails (see CLAUDE.md); nothing said there is captured, and nothing can be
-                   written back into the library from there. Detects macOS / native Windows / WSL
+                   guardrails (see CLAUDE.md); nothing said there is captured. The server is
+                   scoped to knowledge/ but read-WRITE within it (Desktop has no
+                   hooks or gates) — treat it as reference-by-convention. Detects macOS / native Windows / WSL
                    (resolves the Windows-host config via cmd.exe+wslpath) config paths automatically;
                    prints manual instructions when a path can't be resolved. Idempotent, bailiwick-*
                    named (never collides with your own MCP servers). Pair with the printed
@@ -89,7 +90,7 @@ Options:
                    Quality Workflow stages as native Claude Code subagents (~/.claude/agents/: bailiwick-implement, bailiwick-quality, … — ADR-010), the
                    Codex skill symlinks (~/.codex/skills/: bailiwick-curate, bailiwick-enrich, bailiwick-learn, bailiwick-investigate, bailiwick-purge), the global
                    Codex + Gemini operator layers (managed blocks in ~/.codex/AGENTS.md and
-                   ~/.gemini/GEMINI.md), and, only with --with-desktop, the read-only Claude/ChatGPT
+                   ~/.gemini/GEMINI.md), and, only with --with-desktop, the knowledge-scoped Claude/ChatGPT
                    Desktop knowledge-reference MCP wiring (see --with-desktop above). Idempotent — no-op for anything already present. Off by
                    default (it touches global state + the network). Run with NO <target-repo-path>
                    for a global-only install — nothing per-repo is written (handy after adding a new
@@ -1135,7 +1136,7 @@ if [ "$DRY_RUN" -eq 1 ] && [ "$INSTALL_TOOLS" -eq 1 ]; then
   echo "    • generate multi-tool stage adapters: ~/.gemini/agents/, ~/.codex/agents/ (TOML), ~/.copilot/agents/"
   echo "    • install operator layers into ~/.codex/AGENTS.md + ~/.gemini/GEMINI.md"
   if [ "$WITH_DESKTOP" -eq 1 ]; then
-    echo "    • merge a read-only bailiwick-knowledge MCP entry (rooted at knowledge/) into Claude"
+    echo "    • merge a knowledge-scoped bailiwick-knowledge MCP entry (read-write within knowledge/) into Claude"
     echo "      Desktop + ChatGPT Desktop's own config (--with-desktop)"
   fi
   echo "  [dry-run] nothing installed; the status lines below reflect the CURRENT state."
@@ -1380,11 +1381,13 @@ else
   GEMINI_STATUS="✗ Gemini operator layer not installed — re-run with --install-tools. Only needed if you use Gemini."
 fi
 
-# --- Optional READ-ONLY knowledge reference for Claude Desktop / ChatGPT Desktop (--with-desktop) ---
-# Neither app has a hook system, so this is deliberately OUTSIDE capture/curation/guardrails — those
-# only cover the four sanctioned adapters (Claude Code/Codex/Gemini/Copilot). Scope is narrow by
-# design: a single bailiwick-knowledge MCP filesystem server rooted at knowledge/ ONLY, never the
-# rest of the framework, and never writable from either app. Opt-in and --install-tools-gated,
+# --- Optional knowledge-SCOPED reference for Claude Desktop / ChatGPT Desktop (--with-desktop) ---
+# Scoped to knowledge/ only, but the filesystem server is read-WRITE within that root and Desktop
+# has no hooks — so it can modify the library outside every gate. Not a read-only channel; treat it
+# as reference-by-convention (CLAUDE.md). Neither app has a hook system, so this is deliberately
+# OUTSIDE capture/curation/guardrails — those only cover the four sanctioned adapters
+# (Claude Code/Codex/Gemini/Copilot). A single bailiwick-knowledge MCP filesystem server rooted at
+# knowledge/ ONLY, never the rest of the framework. Opt-in and --install-tools-gated,
 # same as the Codex/Gemini operator layers above; status is always shown once detection runs.
 DESKTOP_INSTR="$BAILIWICK_ROOT/knowledge/templates/desktop-reference-instructions.md"
 resolve_desktop_paths
@@ -1392,24 +1395,24 @@ desktop_present() { [ -n "$1" ] && [ -f "$1" ] && grep -qF "bailiwick-knowledge"
 desktop_wire() {  # <label> <config-path>
   local label="$1" cfg="$2"
   [ -n "$cfg" ] || return 0
-  if DRY; then plan "merge a read-only bailiwick-knowledge MCP entry into $label ($cfg)"; return 0; fi
+  if DRY; then plan "merge a knowledge-scoped bailiwick-knowledge MCP entry into $label ($cfg)"; return 0; fi
   echo "  --install-tools: $label knowledge reference ($cfg)…"
   python3 "$BAILIWICK_ROOT/hooks/install_desktop_mcp.py" "$cfg" "$BAILIWICK_ROOT/knowledge" 2>&1 | sed 's/^/    /' || true
 }
 if [ "$WITH_DESKTOP" -eq 1 ] && [ "$INSTALL_TOOLS" -eq 1 ] && command -v python3 >/dev/null 2>&1; then
-  echo "  --with-desktop: wiring the read-only knowledge-reference MCP server…"
+  echo "  --with-desktop: wiring the knowledge-scoped reference MCP server (read-write within knowledge/)…"
   desktop_wire "Claude Desktop" "$CLAUDE_DESKTOP_CFG"
   desktop_wire "ChatGPT Desktop" "$CHATGPT_DESKTOP_CFG"
 fi
 if desktop_present "$CLAUDE_DESKTOP_CFG"; then
-  CLAUDE_DT_STATUS="✓ Claude Desktop wired to knowledge/ (read-only) — $CLAUDE_DESKTOP_CFG — paste $DESKTOP_INSTR into its Project instructions"
+  CLAUDE_DT_STATUS="✓ Claude Desktop wired to knowledge/ (scoped; read-write within it, no hooks) — $CLAUDE_DESKTOP_CFG — paste $DESKTOP_INSTR into its Project instructions"
 elif [ -n "$CLAUDE_DESKTOP_CFG" ]; then
   CLAUDE_DT_STATUS="✗ Claude Desktop not wired ($CLAUDE_DESKTOP_CFG) — re-run with --install-tools --with-desktop, or wire manually if you don't use Claude Desktop"
 else
   CLAUDE_DT_STATUS="✗ Claude Desktop config path not detected${DESKTOP_OS_NOTE:+ ($DESKTOP_OS_NOTE)}"
 fi
 if desktop_present "$CHATGPT_DESKTOP_CFG"; then
-  CHATGPT_DT_STATUS="✓ ChatGPT Desktop wired to knowledge/ (read-only) — $CHATGPT_DESKTOP_CFG — paste $DESKTOP_INSTR into its Project instructions"
+  CHATGPT_DT_STATUS="✓ ChatGPT Desktop wired to knowledge/ (scoped; read-write within it, no hooks) — $CHATGPT_DESKTOP_CFG — paste $DESKTOP_INSTR into its Project instructions"
 elif [ -n "$CHATGPT_DESKTOP_CFG" ]; then
   CHATGPT_DT_STATUS="✗ ChatGPT Desktop not wired ($CHATGPT_DESKTOP_CFG) — re-run with --install-tools --with-desktop, or wire manually if you don't use ChatGPT Desktop"
 else
