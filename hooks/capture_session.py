@@ -88,7 +88,11 @@ def _health(event, detail):
                 machine = (json.load(fh).get("machine") or "").strip()
         except Exception:
             pass
-        machine = re.sub(r"[^a-z0-9._-]", "-", (machine or socket.gethostname()).lower())
+        # Mirror of the bash pipeline in hooks/health_common.sh (tr '[:upper:] ' '[:lower:]-' |
+        # tr -cd 'a-z0-9._-'): lowercase, space -> '-', DELETE everything else. Must stay
+        # byte-identical or the two writers split one machine's health shard across two filenames
+        # (tests/test_capture_session.py pins the equivalence).
+        machine = re.sub(r"[^a-z0-9._-]", "", (machine or socket.gethostname()).lower().replace(" ", "-"))
         hdir = os.path.join(bw_home(), "health")
         os.makedirs(hdir, exist_ok=True)
         with open(os.path.join(hdir, machine + ".jsonl"), "a", encoding="utf-8") as fh:
@@ -160,6 +164,10 @@ def main():
         payload = json.load(sys.stdin)
     except Exception:
         return 0  # Never block the harness on a malformed payload.
+    if not isinstance(payload, dict):
+        # Valid JSON that isn't an object ("[]", "3") passes the parse but has no .get() —
+        # same never-block contract as above (guardrails.py guards this identically).
+        return 0
 
     transcript = payload.get("transcript_path")
     session_id = payload.get("session_id") or "unknown-session"

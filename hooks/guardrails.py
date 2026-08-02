@@ -241,7 +241,9 @@ def _health(event, detail):
                 machine = (json.load(fh).get("machine") or "").strip()
         except Exception:
             pass
-        machine = re.sub(r"[^a-z0-9._-]", "-", (machine or socket.gethostname()).lower())
+        # Mirror of the bash pipeline in hooks/health_common.sh — lowercase, space -> '-',
+        # DELETE everything else (see capture_session.py for the shared rationale).
+        machine = re.sub(r"[^a-z0-9._-]", "", (machine or socket.gethostname()).lower().replace(" ", "-"))
         hdir = os.path.join(_bw_home(), "health")
         os.makedirs(hdir, exist_ok=True)
         with open(os.path.join(hdir, machine + ".jsonl"), "a", encoding="utf-8") as fh:

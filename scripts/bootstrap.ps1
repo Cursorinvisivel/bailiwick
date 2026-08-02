@@ -319,7 +319,7 @@ function Remove-SeededFile([string]$abs, [string]$rel, [string]$fingerprint) {
   else { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue; Write-Host "  removed: $rel" }
 }
 
-function Clear-RepoExclude([string]$abs) {
+function Clear-RepoExclude([string]$abs, [bool]$keepCaptureRule = $false) {
   # --git-common-dir, NOT --git-dir: in a linked worktree the latter returns .git/worktrees/<name>,
   # but git reads info/exclude from the COMMON dir.
   $gitdir = (git -C $abs rev-parse --git-common-dir 2>$null)
@@ -330,15 +330,26 @@ function Clear-RepoExclude([string]$abs) {
   $cur = [System.IO.File]::ReadAllText($excl)
   if (-not $cur.Contains('bailiwick framework wiring')) { return }
   if (Dry) { Plan "strip the framework block from $excl (your own exclude rules preserved)"; return }
-  $ours = @('.bailiwick-outputs/', '.mcp.json', '.vscode/mcp.json', 'CLAUDE.local.md',
+  $ours = @('.mcp.json', '.vscode/mcp.json', 'CLAUDE.local.md',
             '.bailiwick.local.md', '.codex/config.toml', '.gemini/settings.json',
             '.github/instructions/bailiwick.instructions.md')
+  # When captures survive the uninstall, their ignore rule must survive with them — otherwise the
+  # next `git add -A` stages plaintext session transcripts (mirror of bootstrap.sh
+  # strip_repo_exclude; the keep-note string must stay byte-identical across both scripts).
+  if (-not $keepCaptureRule) { $ours += '.bailiwick-outputs/' }
+  $keepNote = "# bailiwick: kept $([char]0x2014) uncurated plaintext captures still present (see --purge-captures)"
   $out = @()
   foreach ($ln in ($cur -split "\r?\n")) {
     $s = $ln.Trim()
     if ($s.Contains('bailiwick framework wiring')) { continue }
     if ($ours -contains $s) { continue }
+    if ($s -eq $keepNote) { continue }
     $out += $ln
+  }
+  if ($keepCaptureRule) {
+    $idx = [array]::IndexOf(($out | ForEach-Object { $_.Trim() }), '.bailiwick-outputs/')
+    if ($idx -eq 0) { $out = @($keepNote) + $out }
+    elseif ($idx -gt 0) { $out = @($out[0..($idx-1)]) + $keepNote + @($out[$idx..($out.Count-1)]) }
   }
   $text = ($out -join "`n").TrimEnd()   # drop any trailing blank the block left behind
   if ($text.Length -gt 0) { $text += "`n" }
@@ -360,12 +371,15 @@ function Remove-AllowlistEntry([string]$abs, [string]$bwHome) {
 }
 
 function Show-RepoCaptures([string]$abs) {
+  # Returns $true when .bailiwick-outputs/ SURVIVES (its ignore rule must be kept) — mirror of
+  # bootstrap.sh warn_repo_captures.
   $out = Join-Path $abs '.bailiwick-outputs'
-  if (-not (Test-Path -LiteralPath $out)) { return }
+  if (-not (Test-Path -LiteralPath $out)) { return $false }
   if ($PurgeCaptures) {
-    if (Dry) { Plan "delete $out INCLUDING any captures (-PurgeCaptures)" }
-    else { Remove-Item -LiteralPath $out -Recurse -Force -ErrorAction SilentlyContinue; Write-Host "  removed: .bailiwick-outputs/ (-PurgeCaptures - captures deleted)" }
-    return
+    if (Dry) { Plan "delete $out INCLUDING any captures (-PurgeCaptures)"; return $false }
+    Remove-Item -LiteralPath $out -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "  removed: .bailiwick-outputs/ (-PurgeCaptures - captures deleted)"
+    return $false
   }
   $rawDir = Join-Path $out 'raw'
   $n = 0
@@ -374,11 +388,15 @@ function Show-RepoCaptures([string]$abs) {
       Where-Object { ($_.Extension -eq '.jsonl' -or $_.Extension -eq '.md') -and ($_.FullName -notmatch '[\\/]\.curated[\\/]') }).Count
   }
   if ($n -gt 0) {
-    Write-Host "  PRESERVED: .bailiwick-outputs/ holds ~$n uncurated capture file(s) - left in place."
+    Write-Host "  PRESERVED: .bailiwick-outputs/ holds ~$n uncurated capture file(s) - left in place,"
+    Write-Host "             and its .git/info/exclude rule is KEPT so they stay untracked. These are"
+    Write-Host "             PLAINTEXT session transcripts: do not commit them."
     Write-Host "             Promote them with /curate, or delete via: -Uninstall -PurgeCaptures '$abs'"
   } else {
-    Write-Host "  note: .bailiwick-outputs/ left in place (no uncurated captures) - remove by hand if unwanted."
+    Write-Host "  note: .bailiwick-outputs/ left in place (no uncurated captures); its exclude rule is kept"
+    Write-Host "        while the directory exists - remove both by hand if unwanted."
   }
+  return $true
 }
 
 function Invoke-BailiwickRepoUninstall([string]$repo) {
@@ -404,9 +422,12 @@ function Invoke-BailiwickRepoUninstall([string]$repo) {
       }
     }
   }
-  Clear-RepoExclude $abs
+  # Captures FIRST: uninstalling must never un-hide plaintext transcripts it deliberately
+  # preserves — when they survive, their exclude rule survives with them (mirror of bootstrap.sh
+  # uninstall_repo; this ordering is the 8e750b8 capture-leak fix).
+  $keepCaptureRule = [bool](Show-RepoCaptures $abs)
+  Clear-RepoExclude $abs $keepCaptureRule
   Remove-AllowlistEntry $abs $bwHomeU
-  Show-RepoCaptures $abs
   Write-Host ""
   Write-Host "  This only un-wires the repo. The once-per-machine GLOBAL wiring (hooks, operator layers,"
   Write-Host "  skills, user MCP) stays - remove that with '-Uninstall' (no target). The clone and your"
@@ -501,6 +522,9 @@ function Resolve-GhAccount {
   }
   $script:ghUser = $ghUser; $script:ghHost = $ghHost
   $script:ghDecided = $ghDecided; $script:ghWarn = $ghWarn
+  # The seeded-path status messages read these too — without publishing them the account-map
+  # message printed an empty key and the "no account can reach <repo>" diagnostic never fired.
+  $script:ghOwner = $ghOwner; $script:ghOwnerRepo = $ghOwnerRepo; $script:ghRealHost = $ghRealHost
 }
 
 # and skip ALL per-repo wiring. Shadow mode makes this global-first setup the norm.
@@ -598,14 +622,23 @@ if ($Target -like '-*') {
 }
 
 if (-not (Test-Path $Target)) {
-  if ($Init) { New-Item -ItemType Directory -Force -Path $Target | Out-Null }
+  if ($Init) {
+    # -DryRun must not create the directory either — resolve $Target textually below.
+    if (Dry) { Plan "mkdir $Target" } else { New-Item -ItemType Directory -Force -Path $Target | Out-Null }
+  }
   else { Write-Error "target '$Target' does not exist (use -Init to create it)"; exit 2 }
 }
-$Target   = Get-NativePath ((Resolve-Path -LiteralPath $Target).Path)
+if (Test-Path $Target) {
+  $Target = Get-NativePath ((Resolve-Path -LiteralPath $Target).Path)
+} elseif (-not [System.IO.Path]::IsPathRooted($Target)) {  # dry-run -Init on a not-yet-existing dir
+  $Target = Get-NativePath (Join-Path (Get-Location).Path $Target)
+}
 $RepoName = Split-Path $Target -Leaf
 
 if (-not (Test-Path (Join-Path $Target '.git'))) {
-  if ($Init) { git -C $Target init -q; Write-Host "* git init: $Target" }
+  if ($Init) {
+    if (Dry) { Plan "git init $Target" } else { git -C $Target init -q; Write-Host "* git init: $Target" }
+  }
   else { Write-Error "'$Target' is not a git repo (use -Init to create one)"; exit 2 }
 }
 
@@ -670,6 +703,10 @@ function Copy-Standard([string]$src, [string]$rel) {     # agnostic baseline, TR
   $dest = Join-Path $Target $rel
   $existed = Test-Path $dest
   if ($existed -and -not $Clobber) { Write-Host "  keep (exists, not overwritten): $rel"; return }
+  if (Dry) {  # tracked, SHARED files — the highest-blast-radius writes this script makes
+    if ($existed) { Plan "CLOBBER tracked baseline $rel (reset to template)" } else { Plan "write tracked baseline $rel" }
+    return
+  }
   New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
   $txt = (Get-Content -Raw -LiteralPath $src).Replace('[Project / Repo Name]', $RepoName)
   [System.IO.File]::WriteAllText($dest, $txt)
@@ -703,6 +740,7 @@ function Update-StandardSection([string]$rel, [string]$canonBlock) {  # patch ON
   }
   # Idempotency: skip when the target's section already matches the canonical block.
   if ((Get-ReuseBlock $dest) -ceq $canonBlock) { Write-Host "  reuse rule already current: $rel"; return }
+  if (Dry) { Plan "refresh the reuse section in $rel (tracked file)"; return }
   $blockLines = $canonBlock -split "`n"
   $out = New-Object System.Collections.Generic.List[string]
   $inSection = $false
@@ -758,19 +796,24 @@ if ($extRoots.Count -gt 0) { Write-Host "  federation: $($extRoots.Count) extern
 # repo (except the TRACKED -WithStandards baselines, which are the deliberate shared path).
 # Bypasses ALL repo-file seeding / MCP-file / .git-exclude logic below.
 if ($Shadow) {
-  $archHome = if ($env:BAILIWICK_HOME) { $env:BAILIWICK_HOME } else { Join-Path $HOME '.bailiwick' }
-  $allowFile = Join-Path $archHome 'allowlist'
-  New-Item -ItemType Directory -Force -Path $archHome | Out-Null
+  $bwHomeS = if ($env:BAILIWICK_HOME) { $env:BAILIWICK_HOME } else { Join-Path $HOME '.bailiwick' }
+  $allowFile = Join-Path $bwHomeS 'allowlist'
 
   # 1. Allowlist entry (idempotent) — the gate (hooks + tool layers) activates on this.
-  if (-not (Test-Path $allowFile)) {
-    $allowHdr = "# bailiwick shadow allowlist - one absolute repo root per line (# comments).`n" +
-                "# Listed repos activate the framework with NO files written into them (FRAMEWORK.md 7.1).`n"
-    [System.IO.File]::WriteAllText($allowFile, $allowHdr)
-  }
-  if (@([System.IO.File]::ReadAllLines($allowFile)) -ccontains $Target) {
+  # Guarded: adding the entry ACTIVATES the framework for the repo, which is exactly the kind of
+  # state change -DryRun promises not to make.
+  $allowLines = if (Test-Path $allowFile) { @([System.IO.File]::ReadAllLines($allowFile)) } else { @() }
+  if ($allowLines -ccontains $Target) {
     Write-Host "  allowlist: already present - $Target"
+  } elseif (Dry) {
+    Plan "add $Target to $allowFile (shadow activation)"
   } else {
+    New-Item -ItemType Directory -Force -Path $bwHomeS | Out-Null
+    if (-not (Test-Path $allowFile)) {
+      $allowHdr = "# bailiwick shadow allowlist - one absolute repo root per line (# comments).`n" +
+                  "# Listed repos activate the framework with NO files written into them (FRAMEWORK.md 7.1).`n"
+      [System.IO.File]::WriteAllText($allowFile, $allowHdr)
+    }
     Add-Content -LiteralPath $allowFile -Value $Target
     Write-Host "  allowlist: added - $Target"
   }
@@ -893,7 +936,7 @@ if ($Shadow) {
   Write-Host "Next:"
   Write-Host "  - Claude Code : hooks must be installed once globally - run 'bootstrap.ps1 -InstallTools' (global-only,"
   Write-Host "      no target needed; or merge settings.template.json). SessionStart now activates on the"
-  Write-Host "      allowlist; captures stage centrally under $archHome\captures\<repo>\ - the repo stays clean."
+  Write-Host "      allowlist; captures stage centrally under $bwHomeS\captures\<repo>\ - the repo stays clean."
   Write-Host "  - Codex/Gemini: install/refresh the global operator layers (-InstallTools) - they now activate on"
   Write-Host "      ~/.bailiwick/allowlist (or BAILIWICK_SHADOW=1), no marker needed, and read the framework by"
   Write-Host "      path natively. Global fetch/terraform MCP servers are injected by -WithAgents / -WithGemini"
@@ -998,7 +1041,7 @@ Write-Managed '.vscode/mcp.json' @"
 Copy-Seeded (Join-Path $BailiwickRoot 'knowledge/templates/project-claude-md-template.md') 'CLAUDE.local.md'
 # On -Update, refresh whatever complement/config already exists (detect per tool).
 $seedMarker = $false; $geminiGenerated = $false
-if ($Update -and (Test-Path $markerPath))                                                                { $seedMarker = $true }
+if ($Update -and (Test-Path (Join-Path $Target '.bailiwick.local.md')))                                  { $seedMarker = $true }
 if ($Update -and (Test-Path (Join-Path $Target '.codex/config.toml')))                                   { $WithAgents = $true }
 if ($Update -and (Test-Path (Join-Path $Target '.gemini/settings.json')) -and (-not (Test-Tracked '.gemini/settings.json'))) { $WithGemini = $true }
 if ($Update -and (Test-Path (Join-Path $Target '.github/instructions/bailiwick.instructions.md')))    { $WithCopilot = $true }
