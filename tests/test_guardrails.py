@@ -27,7 +27,7 @@ GUARDRAILS = REPO_ROOT / "hooks" / "guardrails.py"
 @pytest.fixture(autouse=True)
 def _bw_home(tmp_path, monkeypatch):
     """Redirect the guardrail's audit/health writes into a throwaway dir for every test."""
-    monkeypatch.setenv("BAILIWICK_HOME", str(tmp_path / "arch-home"))
+    monkeypatch.setenv("BAILIWICK_HOME", str(tmp_path / "bw-home"))
     yield
 
 

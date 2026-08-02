@@ -86,7 +86,7 @@ lives by. Never send to the public repo:
 
 - Private/curated **knowledge** tied to a client or employer, `clients/<id>/` content, or real project
   IDs / org names (use placeholders `acme` / `globex` / `example.com`).
-- **Captures** — `.bailiwick-outputs/`, the legacy `.dx-outputs/`, and the central
+- **Captures** — `.bailiwick-outputs/` and the central
   `~/.bailiwick/captures/` pool. Raw session data, never committed anywhere.
 - Machine/registry config: `.bailiwick-sync.json`, `.bailiwick-sources.json` (your federation sources).
 
