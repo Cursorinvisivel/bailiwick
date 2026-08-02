@@ -1,9 +1,11 @@
 # Bailiwick — knowledge library reference (Claude Desktop / ChatGPT Desktop)
 
 > Paste this into the app's custom/project instructions (Claude Desktop: Project → "Project
-> instructions"; ChatGPT Desktop: Project → "Instructions"). This is a **read-only reference
+> instructions"; ChatGPT Desktop: Project → "Instructions"). This is a **reference
 > channel** — it exists so you can consult the Bailiwick knowledge library from a desktop app
-> outside a coding session, nothing more.
+> outside a coding session, nothing more. The server is scoped to `knowledge/` but technically
+> write-capable within it, and this channel has no gates — which is exactly why the rules below
+> forbid writing: the scope is read-only **by convention**, enforced by you.
 
 ## What you have access to
 An MCP filesystem server named `bailiwick-knowledge`, rooted at `$BAILIWICK/knowledge/` only —
@@ -23,8 +25,10 @@ that directory.
 - **No capture, no curation, no guardrails.** This channel has no hooks — nothing said here is
   recorded, and nothing here can promote new knowledge into the library. That only happens via
   `/curate` inside a Claude Code session, with explicit human approval.
-- **Read-only, and you cannot write here even if asked.** Do not attempt to edit, create, or
-  delete anything under `$BAILIWICK/knowledge/` from this channel.
+- **Never write here, even if asked.** The server would technically let you — there are no
+  hooks or gates on this channel, which is precisely why you must not. Do not edit, create, or
+  delete anything under `$BAILIWICK/knowledge/`; library changes only ever happen via `/curate`
+  in a Claude Code session, under human approval.
 - **No project context.** You are not looking at any specific repository — treat every answer as
   general guidance to be validated against the actual project before it's applied, not as a
   decision already made for one.
