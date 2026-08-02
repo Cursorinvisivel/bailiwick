@@ -22,7 +22,13 @@ bw_health() {
         "$BW_HEALTH_ROOT/.bailiwick-sync.json" 2>/dev/null | head -1)"
     fi
     [ -n "$machine" ] || machine="$(hostname -s 2>/dev/null || echo unknown)"
-    machine="$(printf '%s' "$machine" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-')"
+    if command -v bw_machine_token >/dev/null 2>&1; then
+      machine="$(bw_machine_token "$machine")"
+    else
+      # Inline mirror of config_common.sh:bw_machine_token — this helper must keep working with
+      # nothing else sourced (never-fail contract), so the pipeline stays as the fallback.
+      machine="$(printf '%s' "$machine" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-')"
+    fi
     detail="$(printf '%s' "${3:-}" | tr '"\\' "''" | tr '\n\t' '  ' | cut -c1-300)"
     mkdir -p "$home/health" 2>/dev/null
     printf '{"ts":"%s","machine":"%s","component":"%s","event":"%s","detail":"%s"}\n' \

@@ -46,16 +46,12 @@ bw_resolve_gh_account() {
   case "$BW_GH_HOST" in *.*) : ;; *) BW_GH_HOST="github.com" ;; esac
 
   _bw_cfg="$_bw_root/.bailiwick-sync.json"
+  # Scalar reads delegate to the shared primitive (hooks/config_common.sh); if it is somehow
+  # absent the overrides are simply ignored and the access probe below still resolves.
+  . "$(dirname "${BASH_SOURCE[0]:-$0}")/config_common.sh" 2>/dev/null || true
   _bw_cfg_get() {  # top-level string value for key $1, or empty
-    [ -f "$_bw_cfg" ] || return 0
-    if command -v python3 >/dev/null 2>&1; then
-      python3 -c 'import json,sys
-try: d=json.load(open(sys.argv[1]))
-except Exception: d={}
-v=d.get(sys.argv[2]); print(v if isinstance(v,str) else "")' "$_bw_cfg" "$1" 2>/dev/null
-    else
-      grep -oE "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]+\"" "$_bw_cfg" 2>/dev/null | head -1 | sed -E 's/.*"([^"]+)"$/\1/'
-    fi
+    command -v bw_cfg_get >/dev/null 2>&1 || return 0
+    BW_CFG_FILE="$_bw_cfg" bw_cfg_get "$1"
   }
   _bw_cfg_map_get() {  # github_account_map[$1] (python only; degrades to the probe without python3)
     [ -f "$_bw_cfg" ] || return 0
@@ -112,6 +108,22 @@ print(v if isinstance(v,str) else "")' "$_bw_cfg" "$1" 2>/dev/null
     fi
   fi
   return 0
+}
+
+# Explicit-repo args for gh calls, from the last resolution. Word-split is intentional at the
+# call sites (owner/repo cannot contain spaces) — this helper owns that contract so callers
+# don't each carry a shellcheck pragma.
+bw_gh_repo_args() {  # echoes "--repo <host>/<owner>/<repo>" or nothing
+  [ -n "${BW_GH_REPO:-}" ] || return 0
+  printf -- '--repo %s/%s' "${BW_GH_HOST:-github.com}" "$BW_GH_REPO"
+}
+
+# Open-PR probe for a branch: echoes the PR number, or nothing when none is OPEN. The state
+# filter matters — branch names are reused across syncs, so a MERGED/CLOSED PR must not count.
+bw_gh_open_pr() {  # <branch>
+  _bw_ra="$(bw_gh_repo_args)"
+  # shellcheck disable=SC2086  # intentional word-split of the --repo args
+  bw_gh pr list $_bw_ra --head "$1" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true
 }
 
 # `gh` as the resolved account. Token is re-read from gh's keychain on EVERY call (lazy), so the

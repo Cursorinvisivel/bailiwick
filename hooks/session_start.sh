@@ -22,36 +22,18 @@ command -v bw_health >/dev/null 2>&1 || bw_health() { :; }
 # complement file (CLAUDE.local.md / .bailiwick.local.md / the Copilot instructions) that
 # references $BAILIWICK. The team's own shared CLAUDE.md/AGENTS.md are never relied on.
 is_bailiwick_repo() {
-  local f
-  for f in \
+  # One grep over all three complement files: -q short-circuits on the first match, and a
+  # missing file is just a suppressed error — same any-match semantics as a per-file loop.
+  grep -q 'BAILIWICK' \
     "$PROJECT_DIR/.bailiwick.local.md" \
     "$PROJECT_DIR/CLAUDE.local.md" \
-    "$PROJECT_DIR/.github/instructions/bailiwick.instructions.md"; do
-    if [ -f "$f" ] && grep -q 'BAILIWICK' "$f" 2>/dev/null; then
-      return 0
-    fi
-  done
-  return 1
+    "$PROJECT_DIR/.github/instructions/bailiwick.instructions.md" 2>/dev/null
 }
-# Shadow activation (no in-repo marker; FRAMEWORK.md §7.1): BAILIWICK_SHADOW=1 (per-shell) or a
-# repo-root match in ~/.bailiwick/allowlist (one absolute path per line; # comments). Lets the
-# framework attach to a repo left completely untouched (e.g. a client clone).
+# Shadow activation (no in-repo marker; FRAMEWORK.md §7.1) — shared gate in config_common.sh.
+. "$BAILIWICK_ROOT/hooks/config_common.sh" 2>/dev/null || true
 is_shadow_repo() {
-  [ "${BAILIWICK_SHADOW:-}" = "1" ] && return 0
-  local list="$BW_HOME/allowlist" here line entry
-  [ -f "$list" ] || return 1
-  here="$(cd "$PROJECT_DIR" 2>/dev/null && pwd -P || echo "$PROJECT_DIR")"
-  while IFS= read -r line || [ -n "$line" ]; do
-    line="${line%%#*}"
-    line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
-    line="${line%/}"
-    # Realpath BOTH sides, like capture_session.py:is_shadow_repo — comparing the entry verbatim
-    # made a symlinked allowlist path activate the python hooks but not the bash ones.
-    [ -n "$line" ] || continue
-    entry="$( (cd "$line" 2>/dev/null && pwd -P) || echo "$line" )"
-    if [ "$here" = "$entry" ]; then return 0; fi
-  done < "$list"
-  return 1
+  command -v bw_is_shadow_repo >/dev/null 2>&1 || return 1
+  bw_is_shadow_repo "$PROJECT_DIR"
 }
 
 SEEDED=0; SHADOW=0

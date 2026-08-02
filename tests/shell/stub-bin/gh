@@ -31,7 +31,14 @@ case "$1 ${2:-}" in
     echo "tok_$user"
     ;;
   "api "*|"api")
-    has_word "${GH_TOKEN:-}" "${GH_STUB_CANREAD:-}" && exit 0
+    # A bare call (no GH_TOKEN) runs as the ACTIVE account, like real gh.
+    tok="${GH_TOKEN:-tok_${GH_STUB_ACCOUNTS%% *}}"
+    if has_word "$tok" "${GH_STUB_CANREAD:-}"; then
+      # GH_STUB_API_JSON: literal stdout for the call (e.g. a --jq'd field value like "false"
+      # for public_origin.sh's '.private' probe). Empty = success with no body, as before.
+      [ -n "${GH_STUB_API_JSON:-}" ] && printf '%s\n' "$GH_STUB_API_JSON"
+      exit 0
+    fi
     exit 1
     ;;
   "pr list")

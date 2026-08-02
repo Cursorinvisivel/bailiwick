@@ -26,23 +26,16 @@ cd "$BAILIWICK_ROOT"
 . "$BAILIWICK_ROOT/hooks/health_common.sh" 2>/dev/null || true
 command -v bw_health >/dev/null 2>&1 || bw_health() { :; }
 
-CFG="$BAILIWICK_ROOT/.bailiwick-sync.json"
-role="satellite"
-machine="$(hostname 2>/dev/null || echo unknown)"
-if [ -f "$CFG" ]; then
-  m=""
-  if command -v python3 >/dev/null 2>&1; then
-    role="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("role","satellite"))' "$CFG" 2>/dev/null || echo satellite)"
-    m="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("machine") or "")' "$CFG" 2>/dev/null || true)"
-  else  # no python3: best-effort grep parse
-    role="$(grep -oE '"role"[[:space:]]*:[[:space:]]*"[^"]+"' "$CFG" | head -1 | sed -E 's/.*"([^"]+)"$/\1/')"
-    m="$(grep -oE '"machine"[[:space:]]*:[[:space:]]*"[^"]+"' "$CFG" | head -1 | sed -E 's/.*"([^"]+)"$/\1/')"
-  fi
-  role="${role:-satellite}"
-  [ -n "${m:-}" ] && machine="$m"
+# Role + branch-safe machine token from the shared primitives (hooks/config_common.sh — the
+# single implementation of the config read and the token normalization).
+. "$BAILIWICK_ROOT/hooks/config_common.sh" 2>/dev/null || true
+if command -v bw_cfg_get >/dev/null 2>&1; then
+  role="$(bw_cfg_get role satellite)"
+  machine="$(bw_machine_token)"
+else
+  echo "[sync] hooks/config_common.sh missing — cannot determine role/machine; aborting." >&2
+  exit 1
 fi
-# normalise machine token for a branch-safe name
-machine="$(printf '%s' "$machine" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9._-')"
 
 git fetch origin main --quiet || { bw_health sync_knowledge warn "cannot reach origin - commits stay local"; echo "[sync] cannot reach origin — aborting (commits stay local)"; exit 0; }
 
@@ -94,18 +87,17 @@ if command -v gh >/dev/null 2>&1; then
   repo_args=""
   if command -v bw_resolve_gh_account >/dev/null 2>&1; then
     bw_resolve_gh_account "$BAILIWICK_ROOT"
-    [ -n "${BW_GH_REPO:-}" ] && repo_args="--repo ${BW_GH_HOST}/${BW_GH_REPO}"
+    repo_args="$(bw_gh_repo_args)"
     [ -n "${BW_GH_USER:-}" ] && echo "[sync] gh: acting as '${BW_GH_USER}' on ${BW_GH_HOST} (${BW_GH_DECIDED})"
     [ -n "${BW_GH_WARN:-}" ] && echo "[sync] ⚠ gh: ${BW_GH_WARN}" >&2
   else
     bw_health sync_knowledge warn "hooks/gh_account.sh missing — gh runs as the active account"
     bw_gh() { gh "$@"; }
+    bw_gh_open_pr() { gh pr list --head "$1" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true; }
   fi
-  # Reuse the PR only if one is actually OPEN for this branch. The branch name is reused across
-  # syncs, so a previous PR may be MERGED/CLOSED — checking mere existence (gh pr view) would treat
-  # a merged PR as still-open and skip creation, stranding the new commits with no route to main.
-  # shellcheck disable=SC2086  # repo_args is intentionally word-split; owner/repo has no spaces
-  open_num="$(bw_gh pr list $repo_args --head "$branch" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+  # Reuse the PR only if one is actually OPEN for this branch (bw_gh_open_pr owns the state
+  # filter — a MERGED/CLOSED PR must not count, or new commits strand with no route to main).
+  open_num="$(bw_gh_open_pr "$branch")"
   if [ -n "$open_num" ]; then
     echo "[sync] PR #${open_num} already open for ${branch} (updated by the push)."
   else

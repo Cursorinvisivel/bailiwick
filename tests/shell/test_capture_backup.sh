@@ -18,12 +18,12 @@ export GNUPGHOME="$SAT_GNUPG"
 INST="$T_SANDBOX/inst"; t_make_instance "$INST"
 git init -q --bare "$T_SANDBOX/holding.git"
 
-write_cfg() {  # <ack> <recipient> [repo]
+write_cfg() {  # <ack> <recipient> [repo] [throttle-minutes]
   cat > "$INST/.bailiwick-sync.json" <<EOF
 { "role": "satellite", "machine": "testsat",
   "capture_backup": { "enabled": true, "confidentiality_ack": $1,
     "repo": "${3:-file://$T_SANDBOX/holding.git}", "gpg_recipients": ["$2"],
-    "branch": "capture/testsat", "throttle_minutes": 0 } }
+    "branch": "capture/testsat", "throttle_minutes": ${4:-0} } }
 EOF
 }
 
@@ -90,6 +90,23 @@ mblob="$(find "$XDG_CACHE_HOME/bailiwick/capture-mirror" -name 's3.jsonl.gpg' 2>
 assert_eq "ciphertext preserved in local mirror for replay" "s3.jsonl.gpg" "$(basename "${mblob:-none}")"
 assert_file "source survives push failure" "$PROJ/.bailiwick-outputs/raw/s3.jsonl"
 export XDG_CACHE_HOME="$T_SANDBOX/cache"
+write_cfg true "$FPR"
+
+echo "== throttle: Stop events inside the window are no-ops; SessionEnd bypasses it"
+write_cfg true "$FPR" "" 60
+rm -f "$PROJ/.bailiwick-outputs/.backup-last"
+echo "SECRET-PAYLOAD-DELTA" > "$PROJ/.bailiwick-outputs/raw/s4.jsonl"
+echo '{"hook_event_name":"Stop"}' | CLAUDE_PROJECT_DIR="$PROJ" bash "$INST/hooks/capture_backup.sh" push >/dev/null 2>&1
+assert_contains "first Stop push goes through (no stamp yet)" "s4.jsonl.gpg" \
+  "$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat)"
+echo "SECRET-PAYLOAD-ECHO" > "$PROJ/.bailiwick-outputs/raw/s5.jsonl"
+echo '{"hook_event_name":"Stop"}' | CLAUDE_PROJECT_DIR="$PROJ" bash "$INST/hooks/capture_backup.sh" push >/dev/null 2>&1
+assert_not_contains "second Stop inside the 60-min window is a no-op" "s5.jsonl.gpg" \
+  "$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat)"
+assert_file "throttled capture still safe at source" "$PROJ/.bailiwick-outputs/raw/s5.jsonl"
+echo '{"hook_event_name":"SessionEnd"}' | CLAUDE_PROJECT_DIR="$PROJ" bash "$INST/hooks/capture_backup.sh" push >/dev/null 2>&1
+assert_contains "SessionEnd bypasses the throttle" "s5.jsonl.gpg" \
+  "$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat)"
 write_cfg true "$FPR"
 
 echo "== key mismatch at decrypt: blob retained, recoverable once the right key arrives"
