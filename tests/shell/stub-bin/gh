@@ -31,6 +31,8 @@ case "$1 ${2:-}" in
     echo "tok_$user"
     ;;
   "api "*|"api")
+    # GH_STUB_SLEEP: delay before answering, for timeout-path tests.
+    [ -n "${GH_STUB_SLEEP:-}" ] && sleep "$GH_STUB_SLEEP"
     # A bare call (no GH_TOKEN) runs as the ACTIVE account, like real gh.
     tok="${GH_TOKEN:-tok_${GH_STUB_ACCOUNTS%% *}}"
     if has_word "$tok" "${GH_STUB_CANREAD:-}"; then

@@ -114,6 +114,29 @@ never propagate to another clone by sync.
   environment variable) as a managed, path-scoped line — never overwriting a differing export —
   so two-clone setups keep pointing at the installed private instance.
 
+## Amendment 1 (2026-08-02) — cached banner, live enforcement
+
+The SessionStart banner paid the layer-2 network probe (a live `gh api` round-trip) on **every
+session** of every private-origin clone, unthrottled and without a timeout. Per a Security Review
+ruling, the check is now split:
+
+- **Banner (session_start.sh)** — may serve a **cached negative verdict** ("origin is a private
+  repo") for up to **24h** (mtime TTL), keyed by the exact origin URL, stored as a
+  fixed-vocabulary token under `$BAILIWICK_HOME/cache/` (0600; strict parse — anything malformed
+  is a miss). Only the negative is ever cached: a "public" verdict re-warns every session, and
+  errors/timeouts/gh-absent outcomes are never cached. Probe timeout: 5s.
+- **Enforcement (sync_knowledge.sh, the standalone `check` entry point /curate Step 0 invokes,
+  bootstrap)** — stays **live and uncached**, unchanged. Layer 1 (canonical slug) and the
+  `allow_public_push` override are offline and always evaluated at every call site. Probe
+  timeout: 15s, with a health-log warn when it fires (fail-open was already the accepted
+  degraded mode for a missing/unauthenticated `gh`).
+
+**Accepted risk (explicit):** if a private origin flips public mid-TTL, the in-session banner can
+be absent for up to 24h — but no framework machinery can publish during that window, because every
+publish path re-checks live. Reason strings shown in session context are always regenerated from
+code, never read from the cache file (a cached-text echo would otherwise be a prompt-injection
+channel into session context).
+
 ## References
 
 - [staying-private.md](../staying-private.md) — the topology and the full protection stack
