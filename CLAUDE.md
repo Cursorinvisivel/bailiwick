@@ -94,7 +94,10 @@ Enforced by Claude Code hooks ($BAILIWICK/hooks/):
   backup repo's git history until rewritten/key-destroyed; `--history` **outputs** the rewrite commands
   for **both** the knowledge and backup repos, never executes them. `--attest` (output-only) drafts a
   safety-net attestation + non-reversible internal stub — an engineering record, never a legal assurance
-  (ADR-008). Pairs with `/curate --sanitized` (de-identified mode — stores no identifiers). Codex
+  (ADR-008). Pairs with `/curate --sanitized` (de-identified mode — stores no identifiers). Deep removal
+  (history rewrite/squash, crypto-erasure) follows `docs/history-purge.md`, gated by
+  `scripts/purge_verify.sh` (`preflight` blocks while un-curated captures exist anywhere;
+  `residual` measures tree/history/backup/host leftovers so erasure tiers are verifiable). Codex
   wrapper: `$bailiwick-purge`.
 
 See $BAILIWICK/hooks/README.md.

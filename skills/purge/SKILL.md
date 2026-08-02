@@ -115,7 +115,12 @@ first.
    history is **brutally destructive**: it changes every commit hash, and satellites / open sync PRs
    must **re-clone** (their `main` diverges). The skill's only job here is to **generate the exact
    commands for the user to run themselves** — it does NOT execute the history rewrite, `git rm`, or
-   `filter-repo`. Print a ready-to-run block:
+   `filter-repo`. The full operator procedure (fleet choreography, the orphan-squash alternative
+   that drops ALL older commits, crypto-erasure, host-side residuals) is **docs/history-purge.md** —
+   point the user there, and print a ready-to-run block that STARTS with the preflight gate:
+   - **Preflight, non-negotiable first line:** `bash scripts/purge_verify.sh preflight` — deep
+     removal must never destroy un-curated captures; the gate blocks while any machine's staging or
+     any `capture/*` branch of the backup repo still holds pending blobs.
    - **Knowledge repo:** the `git filter-repo` invocation(s), e.g.
      `git filter-repo --replace-text <(printf '%s==><redacted>\n' <id> <org-token> "<org name>")`
      (or `--path clients/<from>/ --invert-paths` to drop the client subtree from history).
@@ -123,18 +128,27 @@ first.
      not touch the encrypted capture-backup repo, where the client's ciphertext still lives in history
      after Step 5's purge. Output the equivalent per matched subtree from Step 2:
      `git filter-repo --path <machine>/<repo-key>/ --invert-paths` (repeat per `<machine>/`), then
-     force-push the backup branch and have every machine re-fetch its mirror. The **only** other
-     true-erasure lever is **destroying the gpg key** (which renders all ciphertext undecryptable).
+     force-push the backup branch and have every machine delete + re-clone its capture-mirror. But
+     prefer **crypto-erasure** (docs/history-purge.md §2): re-encrypt the RETAINED blobs to a new
+     key, then destroy the old private key — a rewrite can never chase copies you don't control
+     (satellite mirrors, repo backups); key destruction erases them all at once.
    - The steps to run around them: back up each repo first, force-push afterward, and have every clone /
      satellite / backup mirror re-fetch (histories diverge).
-   The user runs the commands deliberately, outside the skill.
+   Also output the **host-side residuals** note: a force-push leaves old objects fetchable by SHA
+   until server GC, and `refs/pull/*` pins pre-rewrite objects permanently — guaranteed removal
+   needs a host support request (docs/history-purge.md §3). The user runs the commands
+   deliberately, outside the skill.
 
    **Erasure tiers — never over-claim.** Report only the tier that matches what was *actually run*:
    - **De-identified** (Steps 1–5, no `--history`): working trees are clean and the current backup tree
      no longer holds the blobs, **but ciphertext persists in the backup repo's git history** (the gpg
      key never leaves the curating machine). This is the default, honest claim.
    - **Fully erased**: only after the backup-repo history is rewritten on **all** remotes **and/or** the
-     gpg key is destroyed. Derive this tier from verifiable state — never from an operator assertion.
+     gpg key is destroyed. Derive this tier from verifiable state — never from an operator
+     assertion: `bash scripts/purge_verify.sh residual <id> "<org token>" "<org name>"
+     --backup-path <machine>/<repo-key>/` must come back clean (working tree, git history,
+     backup trees + history); its refs/pull count tells you whether the host still pins old
+     objects (then the claim stays "removed from all refs we control").
 
 7. **(`--attest`, optional) Purge attestation — draft only, never sent.** Produce a record that a scrub
    happened, *without re-creating the identity you just removed*. This is an **engineering record of
