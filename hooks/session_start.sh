@@ -70,9 +70,12 @@ EOF
 
 # ADR-009: on a public-origin (contribute-only) clone, tell BOTH user and agent up front that
 # ingestion is blocked — so /curate is not attempted and its refusal is not a surprise.
+# Banner path only: BW_PO_CACHE=1 lets a fresh negative (private-origin) verdict skip the live
+# layer-2 network probe for up to 24h, and the 5s timeout bounds a slow API/DNS — this call runs
+# on EVERY session. Enforcement (sync_knowledge, /curate's `check`) stays live and uncached.
 if . "$BAILIWICK_ROOT/hooks/public_origin.sh" 2>/dev/null \
    && command -v bw_public_origin_block >/dev/null 2>&1 \
-   && co_reason="$(bw_public_origin_block "$BAILIWICK_ROOT")"; then
+   && co_reason="$(BW_PO_CACHE=1 BW_PO_TIMEOUT=5 bw_public_origin_block "$BAILIWICK_ROOT")"; then
   cat <<EOF
 - CONTRIBUTE-ONLY instance ($co_reason): knowledge ingestion is blocked here. /curate must not promote and hooks/sync_knowledge.sh will refuse to push — knowledge/ is tracked, so propagating would publish it. Generic contributions are fine; move private work to a clone whose origin is a private repo you own (docs/staying-private.md).
 EOF

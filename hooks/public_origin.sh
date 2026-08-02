@@ -61,11 +61,56 @@ bw_public_origin_block() {
   fi
 
   # Layer 2 — any public GitHub origin (catches forks). Fail-open without gh.
+  #
+  # Caching (security-review ruling, ADR-009 amendment): the live probe is a network round-trip,
+  # and session_start pays it on EVERY session. When — and only when — the caller sets
+  # BW_PO_CACHE=1 (the BANNER path; enforcement callers never set it), a fresh NEGATIVE verdict
+  # ("origin is a private repo") suppresses the probe for up to 24h. Only the negative is ever
+  # cached: "public" must re-warn every session, and errors/timeouts/gh-absent are never cached.
+  # The cache stores a fixed token + the exact origin URL (strict parse; anything else = miss) —
+  # reason strings are always regenerated from code, never read from the cache.
   if command -v gh >/dev/null 2>&1; then
-    private="$(gh api "repos/$slug" --jq '.private' 2>/dev/null || true)"
+    _po_url="$(git -C "$root" remote get-url origin 2>/dev/null || true)"
+    _po_cache=""
+    if [ "${BW_PO_CACHE:-0}" = "1" ] && [ -n "$_po_url" ]; then
+      _po_cache="${BAILIWICK_HOME:-$HOME/.bailiwick}/cache/public-origin-$(printf '%s' "$_po_url" | cksum | tr ' ' '-')"
+      if [ -f "$_po_cache" ]; then
+        # fresh = mtime within 24h; verified against the EXACT url (cksum is only a filename aid)
+        _po_age=$(( $(date +%s) - $(stat -c %Y "$_po_cache" 2>/dev/null || stat -f %m "$_po_cache" 2>/dev/null || echo 0) ))
+        if [ "$_po_age" -lt 86400 ] \
+           && [ "$(sed -n 1p "$_po_cache" 2>/dev/null)" = "private" ] \
+           && [ "$(sed -n 2p "$_po_cache" 2>/dev/null)" = "$_po_url" ]; then
+          return 1  # fresh negative verdict — skip the probe this session
+        fi
+      fi
+    fi
+    # Probe with a timeout: an API/DNS stall must not hang the caller. rc 124 (timed out) is
+    # surfaced via BW_PO_PROBE_TIMED_OUT so the ENFORCEMENT site can health-log the degradation.
+    BW_PO_PROBE_TIMED_OUT=0
+    if command -v timeout >/dev/null 2>&1; then
+      private="$(timeout "${BW_PO_TIMEOUT:-15}" gh api "repos/$slug" --jq '.private' 2>/dev/null)" || {
+        if [ $? -eq 124 ]; then
+          BW_PO_PROBE_TIMED_OUT=1
+          # Enforcement callers set BW_PO_HEALTH_COMPONENT so the fail-open degradation is
+          # visible in /metrics (the block usually runs in a command substitution, so an
+          # in-function health call is the only reliable channel out).
+          if [ -n "${BW_PO_HEALTH_COMPONENT:-}" ] && command -v bw_health >/dev/null 2>&1; then
+            bw_health "$BW_PO_HEALTH_COMPONENT" warn "gh visibility probe timed out — ADR-009 layer 2 skipped (canonical-slug check only)"
+          fi
+        fi
+        private=""
+      }
+    else
+      private="$(gh api "repos/$slug" --jq '.private' 2>/dev/null || true)"
+    fi
     if [ "$private" = "false" ]; then
       printf 'origin (%s) is a PUBLIC GitHub repository' "$slug"
       return 0
+    fi
+    if [ "$private" = "true" ] && [ -n "$_po_cache" ]; then
+      # Definitive negative — cache it (0600) for the banner path only.
+      mkdir -p "$(dirname "$_po_cache")" 2>/dev/null || true
+      { printf 'private\n%s\n' "$_po_url" > "$_po_cache" && chmod 600 "$_po_cache"; } 2>/dev/null || true
     fi
   fi
   return 1

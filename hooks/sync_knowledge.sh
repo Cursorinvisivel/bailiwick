@@ -50,7 +50,10 @@ fi
 # either role's push so neither path can publish.
 . "$BAILIWICK_ROOT/hooks/public_origin.sh" 2>/dev/null || true
 if command -v bw_public_origin_block >/dev/null 2>&1; then
-  if reason="$(bw_public_origin_block "$BAILIWICK_ROOT")"; then
+  # LIVE and uncached — enforcement never rides a stale verdict. The timeout (default 15s)
+  # converts an indefinite hang into the already-accepted fail-open degraded mode, and
+  # BW_PO_HEALTH_COMPONENT makes that degradation visible in /metrics.
+  if reason="$(BW_PO_HEALTH_COMPONENT=sync_knowledge bw_public_origin_block "$BAILIWICK_ROOT")"; then
     bw_public_origin_notice "$reason"
     bw_health sync_knowledge error "propagation refused: $reason ($ahead commit(s) stay local)"
     echo "[sync] REFUSED — $ahead commit(s) stay local (ADR-009 contribute-only)." >&2
