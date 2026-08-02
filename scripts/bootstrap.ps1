@@ -62,7 +62,8 @@
   -PurgeCaptures (only with '-Uninstall <repo>') also deletes that repo's .bailiwick-outputs/ INCLUDING
   any uncurated captures (default is to preserve + warn). Irreversible.
   -WithDesktop (only with -InstallTools): wire a knowledge-SCOPED 'bailiwick-knowledge' MCP filesystem server -
-  rooted at knowledge/ ONLY, never the rest of the framework, never writable - into Claude Desktop and
+  rooted at knowledge/ ONLY, never the rest of the framework, read-write WITHIN that root (no hooks/gates;
+  reference-by-convention) - into Claude Desktop and
   ChatGPT Desktop's own MCP config, so either app can CONSULT the knowledge library outside a coding
   session. Both apps sit OUTSIDE the four hook-adapters (no hook system, so no capture/curation/guardrails).
   Auto-detects the macOS/Windows config paths; idempotent (delegates the merge to install_desktop_mcp.py).
@@ -1433,7 +1434,7 @@ if (Test-GlobalLayer $geminiAgents) {
 # has no hooks - so it can modify the library outside every gate. Not a read-only channel.
 # Neither app has a hook system, so this is deliberately OUTSIDE capture/curation/guardrails (those only
 # cover the four sanctioned adapters). A single bailiwick-knowledge MCP filesystem server rooted at
-# knowledge/ ONLY, never the rest of the framework, and never writable from either app. Opt-in and
+# knowledge/ ONLY, never the rest of the framework. Opt-in and
 # -InstallTools-gated; status is always shown once detection runs (mirrors bootstrap.sh --with-desktop).
 $desktopInstr = Join-Path $BailiwickRoot 'knowledge/templates/desktop-reference-instructions.md'
 Resolve-DesktopPaths
@@ -1458,7 +1459,7 @@ if (Test-DesktopWired $script:ClaudeDesktopCfg) {
   $claudeDtStatus = "-- Claude Desktop config path not detected" + $(if ($script:DesktopOsNote) { " ($($script:DesktopOsNote))" } else { "" })
 }
 if (Test-DesktopWired $script:ChatgptDesktopCfg) {
-  $chatgptDtStatus = "OK ChatGPT Desktop wired to knowledge/ (read-only) - $($script:ChatgptDesktopCfg) - paste $desktopInstr into its Project instructions"
+  $chatgptDtStatus = "OK ChatGPT Desktop wired to knowledge/ (scoped; read-write within it, no hooks) - $($script:ChatgptDesktopCfg) - paste $desktopInstr into its Project instructions"
 } elseif ($script:ChatgptDesktopCfg) {
   $chatgptDtStatus = "-- ChatGPT Desktop not wired ($($script:ChatgptDesktopCfg)) - re-run with -InstallTools -WithDesktop, or wire manually if you don't use ChatGPT Desktop"
 } else {
