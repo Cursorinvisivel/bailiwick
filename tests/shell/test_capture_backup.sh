@@ -129,4 +129,51 @@ assert_not_contains "purged blob removed from branch" "s1.jsonl.gpg" "$after"
 assert_contains "other blobs survive the purge" "s2.jsonl.gpg" "$after"
 assert_file "purge NEVER touches the source capture" "$PROJ/.bailiwick-outputs/raw/s1.jsonl"
 
+echo "== purged blob stays purged: an un-retired source must not resurrect it"
+# The source capture s1 still sits in the repo's raw staging (retirement is manual/cross-repo);
+# without the tombstone the next push re-encrypts it and undoes the purge. A fresh s6 in the
+# same run proves the loop continues past the skip — purged old capture + new session on the
+# same repo is exactly the production mix.
+echo "SECRET-PAYLOAD-FOXTROT" > "$PROJ/.bailiwick-outputs/raw/s6.jsonl"
+echo '{"hook_event_name":"SessionEnd"}' | CLAUDE_PROJECT_DIR="$PROJ" bash "$INST/hooks/capture_backup.sh" push >/dev/null 2>&1
+assert_exit "mixed skip+encrypt push exits 0" 0 "$?"
+after="$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat)"
+assert_not_contains "purged blob NOT re-pushed while its source is un-retired" "s1.jsonl.gpg" "$after"
+assert_contains "new capture in the same run still pushed" "s6.jsonl.gpg" "$after"
+assert_contains "tombstone manifest lives on the branch" ".purged" "$after"
+manifest="$(git -C "$T_SANDBOX/holding.git" show capture/testsat:.purged 2>/dev/null)"
+assert_not_contains "manifest is de-identified (hashed entries, no repo-key)" "proj" "$manifest"
+assert_file "source still untouched after the skipped push" "$PROJ/.bailiwick-outputs/raw/s1.jsonl"
+
+echo "== cross-machine: pull and purge reach another machine's branch"
+# Machine 2 (testsat2): own instance, own mirror cache, own project — pushes to its own branch.
+INST2="$T_SANDBOX/inst2"; t_make_instance "$INST2"
+cat > "$INST2/.bailiwick-sync.json" <<EOF
+{ "role": "satellite", "machine": "testsat2",
+  "capture_backup": { "enabled": true, "confidentiality_ack": true,
+    "repo": "file://$T_SANDBOX/holding.git", "gpg_recipients": ["$FPR"],
+    "branch": "capture/testsat2", "throttle_minutes": 0 } }
+EOF
+PROJ2="$T_SANDBOX/proj2"; mkdir -p "$PROJ2/.bailiwick-outputs/raw"
+echo "SECRET-PAYLOAD-GOLF" > "$PROJ2/.bailiwick-outputs/raw/r1.jsonl"
+push2() { echo '{"hook_event_name":"SessionEnd"}' | CLAUDE_PROJECT_DIR="$PROJ2" XDG_CACHE_HOME="$T_SANDBOX/cache-m2" bash "$INST2/hooks/capture_backup.sh" push; }
+push2 >/dev/null 2>&1
+rel2="$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat2 2>/dev/null | grep 'r1\.jsonl\.gpg$' | head -1)"
+assert_contains "machine 2 pushed to its own branch" "testsat2/" "${rel2:-<none>}"
+bash "$INST/hooks/capture_backup.sh" pull "$T_SANDBOX/inbox-x" >/dev/null 2>&1
+xrec="$(find "$T_SANDBOX/inbox-x" -name 'r1.jsonl' | head -1)"
+assert_eq "pull from machine 1 decrypts machine 2's blob" "SECRET-PAYLOAD-GOLF" "$(cat "${xrec:-/dev/null}" 2>/dev/null)"
+bash "$INST/hooks/capture_backup.sh" purge "$rel2" >/dev/null 2>&1
+after2="$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat2)"
+assert_not_contains "cross-machine purge removes the blob from the OTHER machine's branch" "r1.jsonl.gpg" "$after2"
+assert_contains "tombstone manifest on the other machine's branch" ".purged" "$after2"
+assert_file "cross-machine purge NEVER touches machine 2's source" "$PROJ2/.bailiwick-outputs/raw/r1.jsonl"
+# Machine 2's next push (stale mirror, un-retired source, fresh capture): the reject -> rebase ->
+# push cycle must carry the new capture through WITHOUT resurrecting the remotely purged blob.
+echo "SECRET-PAYLOAD-HOTEL" > "$PROJ2/.bailiwick-outputs/raw/r2.jsonl"
+push2 >/dev/null 2>&1
+after2="$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat2)"
+assert_contains "machine 2's new capture still lands after the remote purge" "r2.jsonl.gpg" "$after2"
+assert_not_contains "purged blob does NOT resurrect from machine 2's un-retired source" "r1.jsonl.gpg" "$after2"
+
 t_summary

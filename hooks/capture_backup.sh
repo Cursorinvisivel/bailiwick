@@ -8,8 +8,12 @@
 # Modes:
 #   push (default)   encrypt new/changed .bailiwick-outputs captures and push ciphertext to the
 #                    per-machine branch of the dedicated PRIVATE backup repo.
-#   pull [dest]      decrypt every blob into <dest> (default $BAILIWICK_ROOT/.bailiwick-inbox/raw) for /curate.
-#   purge <relpath>  remove one ciphertext blob from the backup branch (post-curate cleanup).
+#   pull [dest]      decrypt every blob — this machine's worktree AND every other capture/*
+#                    branch — into <dest> (default $BAILIWICK_ROOT/.bailiwick-inbox/raw) for /curate.
+#   purge <relpath>  remove one ciphertext blob from whichever machine's branch holds it
+#                    (post-curate cleanup) and tombstone it in that branch's root .purged
+#                    manifest so push never re-encrypts it while the source capture is still
+#                    un-retired somewhere.
 #
 # Config: $BAILIWICK_ROOT/.bailiwick-sync.json -> "capture_backup": { enabled, repo, gpg_recipients[],
 #         branch, throttle_minutes, confidentiality_ack }. Disabled/absent => no-op.
@@ -64,10 +68,12 @@ except Exception:
     pass
 ' "$CFG" 2>/dev/null || true)
 
+# Enabled-but-broken states must reach the health shard: from a hook, stderr goes nowhere,
+# and a bare exit 0 here is a month-long backup outage /metrics never sees.
 [ "$ENABLED" = "1" ] || exit 0
-[ -n "$REPO" ] || { echo "[backup] enabled but no repo configured" >&2; exit 0; }
-[ "${#RCPTS[@]}" -gt 0 ] || { echo "[backup] enabled but no gpg_recipients configured" >&2; exit 0; }
-command -v gpg >/dev/null 2>&1 || { echo "[backup] gpg not installed" >&2; exit 0; }
+[ -n "$REPO" ] || { bw_health capture_backup error "enabled but no repo configured — backup inactive"; echo "[backup] enabled but no repo configured" >&2; exit 0; }
+[ "${#RCPTS[@]}" -gt 0 ] || { bw_health capture_backup error "enabled but no gpg_recipients configured — backup inactive"; echo "[backup] enabled but no gpg_recipients configured" >&2; exit 0; }
+command -v gpg >/dev/null 2>&1 || { bw_health capture_backup error "gpg not installed — backup inactive, captures local-only"; echo "[backup] gpg not installed" >&2; exit 0; }
 
 # Shared primitives: machine token + shadow gate (hooks/config_common.sh — single bash
 # implementation; without it the shadow-staged path is simply skipped, in-repo backup still runs).
@@ -143,12 +149,24 @@ case "$MODE" in
     [ -n "$repo_name" ] || repo_name="$(basename "$PROJECT_DIR")"
     destdir="$MIRROR/$mtoken/$repo_name"
     mkdir -p "$destdir"
+    # Tombstoned relpaths — union of the worktree manifest and origin's: a purge issued from
+    # ANOTHER machine lands on origin first, and this worktree only syncs at the next
+    # push-reject→rebase. Reading both closes that window.
+    PURGED="$( { cat "$MIRROR/.purged" 2>/dev/null || true; git -C "$MIRROR" show "origin/$BRANCH:.purged" 2>/dev/null || true; } | sort -u )"
     enc_args=(); for r in "${RCPTS[@]}"; do enc_args+=(--recipient "$r"); done
     changed=0
     shopt -s nullglob
     for f in "$RAW"/*.jsonl "$RAW"/*.md; do
       [ -f "$f" ] || continue
       base="$(basename "$f")"
+      # Purged blobs must stay purged: a purge removes the sha sidecar, so without this check the
+      # next push re-encrypts and resurrects the blob for as long as the source capture is
+      # un-retired (curated from another repo/machine than the origin). Skip by relpath, not sha —
+      # a resumed session rewriting the capture must not re-leak purged content.
+      if [ -n "$PURGED" ]; then
+        ph="$(printf '%s' "$mtoken/$repo_name/$base.gpg" | sha256sum | awk '{print $1}')"
+        printf '%s\n' "$PURGED" | grep -qx "$ph" && continue
+      fi
       sha="$(sha256sum "$f" | awk '{print $1}')"
       shaf="$destdir/$base.gpg.sha256"
       [ -f "$shaf" ] && [ "$(cat "$shaf")" = "$sha" ] && continue
@@ -201,6 +219,10 @@ case "$MODE" in
     DEST="${2:-$BAILIWICK_ROOT/.bailiwick-inbox/raw}"
     mkdir -p "$DEST"
     ensure_mirror
+    # Blobs are per-machine BRANCHES (capture/<machine>), and ensure_mirror fetches only ours —
+    # the cross-machine pool /curate and /purge sweep lives on the other branches. Fetch them all
+    # here (curate-time only, never on the push hot path) so the loops below can see every machine.
+    git -C "$MIRROR" fetch --quiet origin '+refs/heads/*:refs/remotes/origin/*' 2>/dev/null || true
     # Decrypt needs to UNLOCK the (passphrase-protected) private key, which means gpg-agent must be
     # able to prompt via pinentry. Tell gpg-agent which terminal to use, if we have one (harmless if
     # not — a GUI pinentry uses $DISPLAY instead). This makes the manual `… pull` path work in a plain
@@ -247,6 +269,28 @@ case "$MODE" in
       hout="$BW_HOME/health/remote/$(basename "${blob%.gpg}")"
       gpg --yes --quiet --decrypt --output "$hout" "$blob" 2>/dev/null || rm -f "$hout"
     done
+    # Other machines' branches: read-only via ls-tree + git show — no checkout, the worktree
+    # stays on OUR branch (it may hold unpushed ciphertext the loops above already covered).
+    while IFS= read -r br; do
+      [ "$br" = "HEAD" ] && continue
+      [ "$br" = "$BRANCH" ] && continue
+      while IFS= read -r rel; do
+        case "$rel" in health/*) continue;; *.gpg) ;; *) continue;; esac
+        out="$DEST/${rel%.gpg}"
+        mkdir -p "$(dirname "$out")"
+        [ -f "$out" ] && continue
+        if git -C "$MIRROR" show "origin/$br:$rel" 2>/dev/null | gpg --yes --quiet --decrypt --output "$out"; then n=$((n+1)); else
+          fail=$((fail+1)); rm -f "$out"
+          echo "[backup] decrypt failed for $br:$rel" >&2
+        fi
+      done < <(git -C "$MIRROR" ls-tree -r --name-only "origin/$br" 2>/dev/null)
+      while IFS= read -r hrel; do
+        hb="$(basename "${hrel%.gpg}")"
+        [ "$hb" = "$mtoken.jsonl" ] && continue
+        hout="$BW_HOME/health/remote/$hb"
+        git -C "$MIRROR" show "origin/$br:$hrel" 2>/dev/null | gpg --yes --quiet --decrypt --output "$hout" 2>/dev/null || rm -f "$hout"
+      done < <(git -C "$MIRROR" ls-tree -r --name-only "origin/$br" -- health 2>/dev/null | grep '\.jsonl\.gpg$' || true)
+    done < <(git -C "$MIRROR" for-each-ref --format='%(refname:short)' refs/remotes/origin 2>/dev/null | sed 's|^origin/||')
     shopt -u nullglob
     if [ "$fail" -gt 0 ]; then
       echo "[backup] decrypted $n new blob(s) into $DEST ($fail failed — see the passphrase note above)"
@@ -255,12 +299,59 @@ case "$MODE" in
     fi
     ;;
   purge)
-    rel="${2:-}"; [ -n "$rel" ] || { echo "usage: capture_backup.sh purge <relpath-under-branch>" >&2; exit 2; }
+    rel="${2:-}"; rel="${rel#./}"
+    [ -n "$rel" ] || { echo "usage: capture_backup.sh purge <relpath-under-branch>" >&2; exit 2; }
     # A bare session name matches neither blob (two per session: .jsonl.gpg + .md.gpg) and
     # exits 0 as "nothing to purge" — warn before it fails quiet.
     case "$rel" in *.gpg) ;; *) echo "[backup] warning: relpath should end in .jsonl.gpg or .md.gpg — a bare session name never matches (two blobs per session)" >&2;; esac
     ensure_mirror
+    # Another machine's blob lives on ITS branch (capture/<machine>), which our worktree never
+    # checks out. Purge it there via a throwaway detached worktree — the main worktree must stay
+    # on OUR branch, or the next push's `git add -A` would commit one machine's tree to another's.
+    mach="${rel%%/*}"
+    if [ "$mach" != "$mtoken" ]; then
+      git -C "$MIRROR" fetch --quiet origin '+refs/heads/*:refs/remotes/origin/*' 2>/dev/null || true
+      tbr="capture/$mach"
+      if ! git -C "$MIRROR" rev-parse -q --verify "refs/remotes/origin/$tbr" >/dev/null 2>&1; then
+        # Convention miss (custom branch name): find the branch that actually holds the blob.
+        tbr=""
+        while IFS= read -r b; do
+          [ "$b" = "HEAD" ] && continue
+          git -C "$MIRROR" cat-file -e "origin/$b:$rel" 2>/dev/null && { tbr="$b"; break; }
+        done < <(git -C "$MIRROR" for-each-ref --format='%(refname:short)' refs/remotes/origin 2>/dev/null | sed 's|^origin/||')
+        [ -n "$tbr" ] || { echo "[backup] no branch holds $rel — nothing to purge" >&2; exit 0; }
+      fi
+      wt="$(mktemp -d "${TMPDIR:-/tmp}/bw-purge-wt.XXXXXX")"
+      if ! git -C "$MIRROR" worktree add -q --detach "$wt/w" "origin/$tbr" 2>/dev/null; then
+        rm -rf "$wt"
+        bw_health capture_backup warn "purge: cannot stage worktree for $tbr ($rel)"
+        echo "[backup] cannot stage a worktree for $tbr — purge not applied" >&2; exit 0
+      fi
+      wid() { git -C "$wt/w" -c user.name=bailiwick -c user.email=backup@local "$@"; }
+      wid rm -q --ignore-unmatch "$rel" "$rel.sha256" 2>/dev/null || true
+      ph="$(printf '%s' "$rel" | sha256sum | awk '{print $1}')"
+      grep -qx "$ph" "$wt/w/.purged" 2>/dev/null || { printf '%s\n' "$ph" >> "$wt/w/.purged"; wid add .purged; }
+      if wid commit -q -m "purge: $rel (curated)" 2>/dev/null; then
+        # No local branch to drain from later (the worktree is gone after this run) — a failed
+        # push here is retried by simply re-running the same purge command.
+        wid push -q origin "HEAD:refs/heads/$tbr" 2>/dev/null \
+          && echo "[backup] purged $rel (branch $tbr)" \
+          || { bw_health capture_backup warn "purge push failed ($rel on $tbr) — re-run to retry"; echo "[backup] purge push failed for $tbr — re-run to retry" >&2; }
+      else
+        echo "[backup] nothing new to purge: $rel"
+      fi
+      git -C "$MIRROR" worktree remove -f "$wt/w" 2>/dev/null || true
+      git -C "$MIRROR" worktree prune 2>/dev/null || true
+      rm -rf "$wt"
+      exit 0
+    fi
     git_id rm -q --ignore-unmatch "$rel" "$rel.sha256" 2>/dev/null || true
+    # Tombstone in the branch-root manifest so push never re-encrypts this blob (see push loop).
+    # Entries are sha256 of the blob relpath, NOT the path itself: a path-named marker would keep
+    # the client-identifying repo-key in the current tree — exactly what purge_verify.sh residual
+    # --backup-path greps for — while a hashed line matches no prefix and names no client.
+    ph="$(printf '%s' "$rel" | sha256sum | awk '{print $1}')"
+    grep -qx "$ph" "$MIRROR/.purged" 2>/dev/null || { printf '%s\n' "$ph" >> "$MIRROR/.purged"; git_id add .purged; }
     git_id commit -q -m "purge: $rel (curated)" 2>/dev/null || echo "[backup] nothing new to purge: $rel"
     # Always drain: a prior purge's push may have failed silently, leaving the mirror ahead —
     # "commit succeeded" and "push attempted" must stay decoupled or stranded commits never flush.
