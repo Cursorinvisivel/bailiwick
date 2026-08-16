@@ -93,9 +93,24 @@ Unlocked: `rc=0` in under a second.
 Re-probe after they confirm — but note that the probe only describes the moment it ran.
 `default-cache-ttl` is an **idle** timer (600s by default; `max-cache-ttl` 7200s is the absolute
 ceiling), and *your own approval prompts consume it*: the delay between issuing a call and the user
-approving it counts against the cache exactly like any other idle time. This is the likeliest reason
-a probe fails seconds after a successful unlock — not a broken agent. Step 5 closes the gap by
-chaining the probe to the commit.
+approving it counts against the cache exactly like any other idle time. This is the reason a probe
+fails seconds after a successful unlock — not a broken agent. Step 5 closes the gap by chaining the
+probe to the commit.
+
+**Verify this yourself in ten minutes** rather than taking it on faith — the claim is the whole
+justification for step 5's chaining, and it is cheap to reproduce:
+
+```bash
+printf sigtest | gpg --local-user <KEY> --sign -o /dev/null   # unlock; keyinfo now reads 1
+sleep 600                                                      # idle, touching nothing else
+timeout 10 gpg --batch --no-tty --pinentry-mode error \
+  --local-user <KEY> --sign -o /dev/null; echo "rc=$?"         # rc=2, keyinfo now reads -
+```
+
+Observed exactly so: `1` → `-` across a clean 600s idle window, with the probe failing `No pinentry`
+— the same symptom as a key that was never unlocked. That indistinguishability is the trap: an
+expired cache and an absent one look identical, which is why the fix is to leave no gap rather than
+to interpret the error.
 
 ### When the re-probe still fails — hand the commit over
 

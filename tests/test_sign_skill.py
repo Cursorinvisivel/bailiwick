@@ -223,6 +223,8 @@ def test_both_copies_chain_the_probe_to_the_commit():
         src = path.read_text(encoding="utf-8")
         assert "&& git commit -S" in src, f"{path.name} does not chain the probe to the commit"
         assert "idle" in src.lower(), f"{path.name} does not explain the idle-TTL mechanism"
+        # The reproduction is what makes the TTL claim checkable rather than folklore.
+        assert "sleep 600" in src, f"{path.name} dropped the reproduction for the idle-TTL claim"
 
 
 def test_codex_wrapper_does_not_instruct_the_claude_only_unlock():

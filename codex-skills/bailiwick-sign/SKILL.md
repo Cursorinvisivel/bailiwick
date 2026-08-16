@@ -57,6 +57,11 @@ that can never be answered.
   time. Chaining puts the approval before both, so the probe is fresh and the commit follows
   microseconds later. A failed probe short-circuits the `&&`, so the commit is never attempted on a
   cold key.
+
+  Reproducible in ten minutes if you doubt it: unlock (`keyinfo` reads `1`), `sleep 600` touching
+  nothing else, then probe — `rc=2` and `keyinfo` reads `-`. The expired cache reports `No pinentry`,
+  identical to a key that was never unlocked, so the error cannot tell you which happened. That is
+  why the fix is to leave no gap rather than to interpret the failure.
 - **non-zero** → stop and ask the user to run this **in their own terminal** (any terminal on the
   machine — a second tab, a plain shell, their editor's terminal):
 
