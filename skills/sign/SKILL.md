@@ -90,8 +90,12 @@ Unlocked: `rc=0` in under a second.
   type, paste, or echo it anywhere you can see, and never use `--passphrase` or
   `--pinentry-mode loopback` to work around this.
 
-Re-probe after they confirm. The cache expires (commonly 10 min idle), so probe again if time has
-passed between the unlock and the commit.
+Re-probe after they confirm — but note that the probe only describes the moment it ran.
+`default-cache-ttl` is an **idle** timer (600s by default; `max-cache-ttl` 7200s is the absolute
+ceiling), and *your own approval prompts consume it*: the delay between issuing a call and the user
+approving it counts against the cache exactly like any other idle time. This is the likeliest reason
+a probe fails seconds after a successful unlock — not a broken agent. Step 5 closes the gap by
+chaining the probe to the commit.
 
 ### When the re-probe still fails — hand the commit over
 
@@ -119,14 +123,27 @@ skill's contract is a *verified* signed commit, not who typed the command.
 Get the keygrip with `gpg --with-keygrip --list-secret-keys <KEY>` — the agent caches by keygrip,
 not by fingerprint, so the fingerprint will not match anything in `keyinfo` output.
 
-## Step 5 — commit
+## Step 5 — commit, in the same call as a fresh probe
+
+**Chain the probe and the commit.** `default-cache-ttl` (600s) is an *idle* timer, and the clock
+keeps running while a tool-approval prompt sits unanswered — so a probe that passed in an earlier
+call proves nothing about now. `git commit -S` re-signs at execution time; if the cache expired in
+between, gpg needs pinentry mid-commit, which is the hang this skill exists to prevent.
 
 ```bash
-git commit -S -F .git/COMMIT_MSG_<slug>
+timeout 10 gpg --batch --no-tty --pinentry-mode error \
+  --local-user "$(git config user.signingkey)" --sign -o /dev/null <<< probe \
+  && git commit -S -F .git/COMMIT_MSG_<slug>
 ```
+
+Approval happens *before* the call runs, so the probe is fresh at execution and the commit follows
+microseconds later — no window for expiry. A failed probe short-circuits the `&&`, so the commit is
+never attempted on a cold key.
 
 The framework guardrail confirms every `git commit`. **That prompt is expected, not a failure** —
 it is the "clear user go-ahead" rule doing its job. Do not treat it as an error or retry around it.
+Its latency is exactly the gap this chaining closes: the user thinking for eleven minutes at that
+prompt is enough to expire a cache that was warm when you probed separately.
 
 ## Step 6 — verify it actually signed
 

@@ -43,7 +43,20 @@ timeout 10 gpg --batch --no-tty --pinentry-mode error \
 `--pinentry-mode error` is load-bearing: it makes gpg fail instantly instead of waiting on a prompt
 that can never be answered.
 
-- **rc=0** → the agent can sign now. Proceed to the commit.
+- **rc=0** → the agent can sign now. Proceed to the commit — **chained to a fresh probe**, never as
+  a separate later call:
+
+  ```bash
+  timeout 10 gpg --batch --no-tty --pinentry-mode error \
+    --local-user "$(git config user.signingkey)" --sign -o /dev/null <<< probe \
+    && git commit -S -F .git/COMMIT_MSG_<slug>
+  ```
+
+  `default-cache-ttl` (600s) is an **idle** timer, and approval prompts consume it: a probe that
+  passed in an earlier call proves nothing about now, and `git commit -S` re-signs at execution
+  time. Chaining puts the approval before both, so the probe is fresh and the commit follows
+  microseconds later. A failed probe short-circuits the `&&`, so the commit is never attempted on a
+  cold key.
 - **non-zero** → stop and ask the user to run this **in their own terminal** (any terminal on the
   machine — a second tab, a plain shell, their editor's terminal):
 
