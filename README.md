@@ -158,7 +158,7 @@ A map of the whole set is in **[docs/README.md](docs/README.md)**.
 knowledge/   INDEX.md · topics/ patterns/ context/ templates/ · .telemetry.json
 agents/      role definitions (lead orchestrator + 5 domain-context + 7 Quality Workflow stages)
 hooks/       guardrail + capture + sync + health hooks, and the installers
-skills/      /curate · /enrich · /learn · /metrics · /investigate · /purge  (+ codex-skills/ wrappers)
+skills/      /curate · /enrich · /learn · /metrics · /investigate · /purge · /sign  (+ codex-skills/ wrappers)
 scripts/     bootstrap.sh · bootstrap.ps1  (repo onboarding) · doctor.sh (wiring preflight)
 docs/        this documentation set · decisions/ (framework ADRs)
 ```

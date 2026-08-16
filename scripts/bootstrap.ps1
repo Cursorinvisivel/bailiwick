@@ -37,7 +37,7 @@
   in its ${GITHUB_TOKEN} env-var form. Use for offline / CI runs.
   -InstallTools installs missing once-per-machine prerequisites: terraform-mcp-server and github-mcp-server (go install),
   the capture/curation + guardrail hooks (merged into ~/.claude/settings.json), the global Claude
-  skill symlinks (~/.claude/skills/: /curate, /enrich, /learn, /metrics, /investigate, /purge), the Quality Workflow
+  skill symlinks (~/.claude/skills/: /curate, /enrich, /learn, /metrics, /investigate, /purge, /sign), the Quality Workflow
   stages as native Claude Code subagents (~/.claude/agents/: bailiwick-implement, bailiwick-quality, ... - ADR-010), the Codex skill symlinks
   (~/.codex/skills/: bailiwick-curate, bailiwick-enrich, bailiwick-learn, bailiwick-investigate, bailiwick-purge), and the global Codex + Gemini operator layers
   (managed blocks in ~/.codex/AGENTS.md and ~/.gemini/GEMINI.md). Idempotent; off by default.
