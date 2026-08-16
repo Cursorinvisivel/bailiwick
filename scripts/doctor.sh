@@ -260,6 +260,62 @@ else
   ok "no shadow allowlist (fine unless you expect shadow-mode repos; bootstrap.sh <repo> creates it)"
 fi
 
+# ---- 8. MCP server runners ---------------------------------------------------------------------
+# bootstrap registers the bailiwick-* MCP servers by NAME; nothing verifies the runner exists. A
+# missing one is invisible until a session tries to connect and reports a bare "ENOENT" naming the
+# server but not the binary — the tools are simply absent, and the agent works on without them.
+MCPCFG="${CLAUDE_CONFIG:-$HOME/.claude.json}"
+if [ ! -f "$MCPCFG" ]; then
+  warn "no $MCPCFG — cannot verify user-scope MCP server runners"
+elif [ "$HAVE_PY" -eq 1 ]; then
+  # command is the runner; for the `sh -c '… exec <bin> …'` wrapper the real binary is inside args.
+  mcp_rows="$(python3 - "$MCPCFG" <<'PY'
+import json, re, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    print("UNPARSEABLE"); sys.exit()
+for name, s in sorted((d.get("mcpServers") or {}).items()):
+    if not name.startswith("bailiwick-") or not isinstance(s, dict):
+        continue
+    cmd = s.get("command") or ""
+    args = [a for a in (s.get("args") or []) if isinstance(a, str)]
+    if cmd in ("sh", "bash", "/bin/sh", "/bin/bash"):
+        m = re.search(r'\bexec\s+(\S+)', " ".join(args))
+        if m:
+            cmd = m.group(1)
+    print("%s\t%s\t%s" % (name, cmd, " ".join(args)))
+PY
+)"
+  if [ "$mcp_rows" = "UNPARSEABLE" ]; then
+    warn "$MCPCFG is not valid JSON — cannot verify MCP server runners"
+  elif [ -z "$mcp_rows" ]; then
+    warn "no bailiwick-* MCP servers registered in $MCPCFG (run bootstrap.sh --install-tools)"
+  else
+    while IFS="$(printf '\t')" read -r m_name m_cmd m_args; do
+      [ -n "$m_name" ] || continue
+      if [ -z "$m_cmd" ]; then
+        fail "$m_name has no command — it can never start; re-run bootstrap.sh --install-tools"
+      elif command -v "$m_cmd" >/dev/null 2>&1; then
+        ok "$m_name runner on PATH ($m_cmd)"
+      else
+        fail "$m_name runner '$m_cmd' NOT on PATH — the server fails at connect with 'ENOENT' and its tools are silently absent; re-run bootstrap.sh --install-tools (uvx: curl -LsSf https://astral.sh/uv/install.sh | sh)"
+      fi
+      # Upstream mcp-server-fetch is unpinned and breaks against mcp SDK 2.x (McpError renamed),
+      # so it exits at import time — a start failure that looks nothing like a missing binary.
+      case "$m_args" in
+        *mcp-server-fetch*)
+          case "$m_args" in
+            *'mcp<2'*) : ;;
+            *) warn "$m_name does not pin the mcp SDK — mcp-server-fetch fails on import against SDK 2.x; re-run bootstrap.sh --install-tools to re-register it with --with 'mcp<2'" ;;
+          esac ;;
+      esac
+    done <<EOF
+$mcp_rows
+EOF
+  fi
+fi
+
 echo
 if [ "$ERR" -gt 0 ]; then
   echo "doctor: $ERR broken, $WARN degraded — fix the ✗ items before trusting capture/sync."

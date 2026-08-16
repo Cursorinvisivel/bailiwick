@@ -110,4 +110,59 @@ out="$(doctor)"; rc=$?
 assert_exit "central + foreign parked branch, no PR -> exit 1" 1 "$rc"
 assert_contains "central sees sync/doctest parked" "sync/doctest" "$out"
 
+# ---- MCP server runners -------------------------------------------------------------------------
+# A registered server whose runner is absent fails only at connect time, as a bare "ENOENT" that
+# names the SERVER and not the missing binary — doctor has to name the binary or the check is moot.
+# Back to a role/machine with nothing parked, so these cases assert on the MCP check alone.
+cat > "$INST/.bailiwick-sync.json" <<'EOF'
+{ "role": "satellite", "machine": "doccentral" }
+EOF
+MCPCFG="$T_SANDBOX/claude.json"
+doctor_mcp() { CLAUDE_SETTINGS="$SETTINGS" CLAUDE_CONFIG="$MCPCFG" bash "$INST/scripts/doctor.sh" 2>&1; }
+
+echo "== a registered MCP server whose runner is not on PATH is BROKEN"
+cat > "$MCPCFG" <<'EOF'
+{ "mcpServers": { "bailiwick-ghost": { "command": "bw-definitely-absent", "args": [] } } }
+EOF
+out="$(doctor_mcp)"; rc=$?
+assert_exit "absent runner -> exit 1" 1 "$rc"
+assert_contains "names the missing BINARY, not just the server" "bw-definitely-absent" "$out"
+assert_contains "connects the symptom to the cause" "ENOENT" "$out"
+
+echo "== the sh -c wrapper is unwrapped to the real binary (not reported as 'sh')"
+cat > "$MCPCFG" <<'EOF'
+{ "mcpServers": { "bailiwick-github": { "command": "sh",
+  "args": ["-c", "TOKEN=x exec bw-absent-wrapped stdio"] } } }
+EOF
+out="$(doctor_mcp)"; rc=$?
+assert_exit "wrapped absent binary -> exit 1" 1 "$rc"
+assert_contains "unwraps past sh to the exec'd binary" "bw-absent-wrapped" "$out"
+
+echo "== non-bailiwick servers are none of doctor's business"
+cat > "$MCPCFG" <<'EOF'
+{ "mcpServers": { "some-third-party": { "command": "bw-absent-foreign", "args": [] },
+  "bailiwick-filesystem": { "command": "sh", "args": [] } } }
+EOF
+out="$(doctor_mcp)"; rc=$?
+assert_exit "foreign broken server -> still exit 0" 0 "$rc"
+assert_not_contains "does not police servers it does not own" "bw-absent-foreign" "$out"
+
+echo "== an UNPINNED mcp-server-fetch is degraded (starts, then dies on import vs SDK 2.x)"
+cat > "$MCPCFG" <<'EOF'
+{ "mcpServers": { "bailiwick-fetch": { "command": "sh", "args": ["mcp-server-fetch"] } } }
+EOF
+out="$(doctor_mcp)"; rc=$?
+assert_exit "unpinned SDK is a warning, not broken -> exit 0" 0 "$rc"
+assert_contains "flags the missing SDK pin" "does not pin the mcp SDK" "$out"
+
+echo "== the pinned form is clean"
+cat > "$MCPCFG" <<'EOF'
+{ "mcpServers": { "bailiwick-fetch": { "command": "sh",
+  "args": ["--with", "mcp<2", "mcp-server-fetch"] } } }
+EOF
+out="$(doctor_mcp)"; rc=$?
+assert_exit "pinned + runner present -> exit 0" 0 "$rc"
+assert_contains "reports the runner as present" "bailiwick-fetch runner on PATH" "$out"
+assert_not_contains "no pin warning when pinned" "does not pin the mcp SDK" "$out"
+
 t_summary

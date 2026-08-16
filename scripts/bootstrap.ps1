@@ -844,7 +844,7 @@ if ($Shadow) {
       else { Write-Host "  mcp(user): could not register $name - add manually: claude mcp add --scope user $name -- $($spawn -join ' ')" }
     }
     Register-UserMcp 'bailiwick-filesystem' (@('npx', '-y', '@modelcontextprotocol/server-filesystem') + $shRoots)
-    Register-UserMcp 'bailiwick-fetch' @('uvx', 'mcp-server-fetch')
+    Register-UserMcp 'bailiwick-fetch' @('uvx', '--with', 'mcp<2', 'mcp-server-fetch')
     Register-UserMcp 'bailiwick-terraform' @('terraform-mcp-server', 'stdio')
     if ($ghShadowSh) { Register-UserMcp 'bailiwick-github' @('sh', '-c', $ghShadowSh) }
     else { Write-Host "  mcp(user): bailiwick-github not registered (no usable gh account - see gh notes) - add manually if wanted" }
@@ -873,7 +873,7 @@ if ($Shadow) {
       $srv | Add-Member -Force -NotePropertyName 'bailiwick-filesystem' -NotePropertyValue ([pscustomobject]@{
         command = 'npx'; args = @('-y', '@modelcontextprotocol/server-filesystem') + $shRoots })
       $srv | Add-Member -Force -NotePropertyName 'bailiwick-fetch' -NotePropertyValue ([pscustomobject]@{
-        command = 'uvx'; args = @('mcp-server-fetch') })
+        command = 'uvx'; args = @('--with', 'mcp<2', 'mcp-server-fetch') })
       $srv | Add-Member -Force -NotePropertyName 'bailiwick-terraform' -NotePropertyValue ([pscustomobject]@{
         command = 'terraform-mcp-server'; args = @('stdio') })
       if ($ghShadowSh) {
@@ -897,7 +897,7 @@ if ($Shadow) {
     $tomlBlock = "# BEGIN bailiwick mcp (managed - refreshed by bootstrap.ps1 -WithAgents in shadow mode)`n" +
                  "[mcp_servers.bailiwick-filesystem]`ncommand = `"npx`"`n" +
                  "args = [`"-y`", `"@modelcontextprotocol/server-filesystem`"$fsExtra]`n" +
-                 "[mcp_servers.bailiwick-fetch]`ncommand = `"uvx`"`nargs = [`"mcp-server-fetch`"]`n" +
+                 "[mcp_servers.bailiwick-fetch]`ncommand = `"uvx`"`nargs = [`"--with`", `"mcp<2`", `"mcp-server-fetch`"]`n" +
                  "[mcp_servers.bailiwick-terraform]`ncommand = `"terraform-mcp-server`"`nargs = [`"stdio`"]`n" +
                  $(if ($ghShadowSh) { "[mcp_servers.bailiwick-github]`ncommand = `"sh`"`nargs = [`"-c`", `"$ghShadowSh`"]`n" } else { '' }) +
                  "# END bailiwick mcp"
@@ -996,7 +996,7 @@ Write-Managed '.mcp.json' @"
     },
     "fetch": {
       "command": "uvx",
-      "args": ["mcp-server-fetch"]
+      "args": ["--with", "mcp<2", "mcp-server-fetch"]
     },
     "github": {
       $ghBlockMcp
@@ -1019,7 +1019,7 @@ Write-Managed '.vscode/mcp.json' @"
     },
     "fetch": {
       "command": "uvx",
-      "args": ["mcp-server-fetch"]
+      "args": ["--with", "mcp<2", "mcp-server-fetch"]
     },
     "github": {
       $ghBlockVsc
@@ -1067,7 +1067,7 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", $mcpRoots]
 
 [mcp_servers.fetch]
 command = "uvx"
-args = ["mcp-server-fetch"]
+args = ["--with", "mcp<2", "mcp-server-fetch"]
 
 [mcp_servers.github]
 $ghBlockToml
@@ -1093,7 +1093,7 @@ if ($WithGemini) {
     },
     "fetch": {
       "command": "uvx",
-      "args": ["mcp-server-fetch"]
+      "args": ["--with", "mcp<2", "mcp-server-fetch"]
     },
     "github": {
       $ghBlockMcp
@@ -1191,6 +1191,23 @@ if (Get-Command terraform-mcp-server -ErrorAction SilentlyContinue) {
   $tfStatus = "MISSING terraform-mcp-server - run: go install github.com/hashicorp/terraform-mcp-server/cmd/terraform-mcp-server@latest  (or re-run with -InstallTools; then add `$(go env GOPATH)\bin to PATH)"
 } else {
   $tfStatus = "MISSING terraform-mcp-server and 'go' not found - install Go, then re-run with -InstallTools (see README)"
+}
+
+# fetch MCP server runs via uvx (Astral). Unlike the two Go servers there is no binary to install -
+# uvx fetches mcp-server-fetch on demand - so the ONLY prerequisite is uv itself. Without it the
+# server is still registered and fails at connect time with a bare "ENOENT", which points at nothing.
+$uvBin = Join-Path $HOME '.local\bin'
+if ((-not (Get-Command uvx -ErrorAction SilentlyContinue)) -and $InstallTools) {
+  Write-Host "  -InstallTools: installing uv (Astral installer -> $uvBin)..."
+  try { Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression } catch { Write-Host "    uv install failed: $_" }
+  if (Test-Path (Join-Path $uvBin 'uvx.exe')) { $env:PATH = $uvBin + [IO.Path]::PathSeparator + $env:PATH }
+}
+if (Get-Command uvx -ErrorAction SilentlyContinue) {
+  $uvStatus = "OK uvx on PATH ($((Get-Command uvx).Source)) - bailiwick-fetch can start"
+} elseif (Test-Path (Join-Path $uvBin 'uvx.exe')) {
+  $uvStatus = "MISSING uv installed to $uvBin - add that dir to PATH (bailiwick-fetch fails with ENOENT until you do)"
+} else {
+  $uvStatus = "MISSING uvx - bailiwick-fetch will fail to connect with 'ENOENT'. Run: irm https://astral.sh/uv/install.ps1 | iex  (or re-run with -InstallTools; then ensure $uvBin is on PATH)"
 }
 
 # github MCP server is GitHub's official local Go binary (stdio), wired the same Docker-free way.
@@ -1472,6 +1489,7 @@ if ($GlobalOnly) {
   Write-Host "Next:"
   Write-Host "  - $tfStatus"
   Write-Host "  - $ghMcpStatus"
+  Write-Host "  - $uvStatus"
   Write-Host "  - $hooksStatus"
   Write-Host "  - $skillStatus"
   Write-Host "  - $agentStageStatus"
@@ -1489,6 +1507,7 @@ if ($GlobalOnly) {
   Write-Host "Next:"
   Write-Host "  - $tfStatus"
   Write-Host "  - $ghMcpStatus"
+  Write-Host "  - $uvStatus"
   Write-Host "  - $hooksStatus"
   Write-Host "  - $skillStatus"
   Write-Host "  - $agentStageStatus"
@@ -1505,6 +1524,7 @@ if ($GlobalOnly) {
   Write-Host "  - $ghStatusMsg"
   Write-Host "  - $tfStatus"
   Write-Host "  - $ghMcpStatus"
+  Write-Host "  - $uvStatus"
   Write-Host "  - $hooksStatus"
   Write-Host "  - $skillStatus"
   Write-Host "  - $agentStageStatus"
