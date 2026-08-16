@@ -77,6 +77,14 @@ Enforced by Claude Code hooks ($BAILIWICK/hooks/):
   shadow: `~/.bailiwick/captures/<repo-key>/`) — promotion rides the standard capture→curate
   human gate; writes no knowledge itself. Complement to `/enrich` (instruction files vs knowledge
   candidates). Codex wrapper: `$bailiwick-learn`.
+- **`/sign`** ($BAILIWICK/skills/sign/) — create a **GPG-signed** commit end to end: scope the change,
+  draft a Conventional Commits message to `.git/`, pre-flight it against the attribution rule, handle
+  the pinentry unlock handshake, commit with `-S`, and verify `%G?` is actually `G`. Two silent
+  failures it exists to remove: a `-S` that never engages (unsigned commit, discovered later by a
+  branch-protection rule), and pinentry blocking on a TTY the agent does not have (the tool call hangs
+  until timeout). `check_message.py` imports `SIGNATURE_RE` **from `hooks/guardrails.py`** rather than
+  redefining it, so the pre-flight and the runtime guardrail can never drift. **Commits only — never
+  pushes**; publishing stays a separate, explicitly-authorised step.
 - **`/metrics`** ($BAILIWICK/skills/metrics/) — read-only health report on the
   knowledge library (retrieval, load→applied→used funnel, cold/stale candidates, telemetry↔file
   reconciliation). No gate needed; writes nothing.

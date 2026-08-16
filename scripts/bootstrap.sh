@@ -86,7 +86,7 @@ Options:
   --install-tools  Install the once-per-machine prerequisites when missing: the
                    terraform-mcp-server and github-mcp-server binaries (via 'go install', needs go), the
                    capture/curation + guardrail hooks (merged into ~/.claude/settings.json),
-                   the global Claude skill symlinks (~/.claude/skills/: /curate, /enrich, /learn, /metrics, /investigate, /purge), the
+                   the global Claude skill symlinks (~/.claude/skills/: /curate, /enrich, /learn, /metrics, /investigate, /purge, /sign), the
                    Quality Workflow stages as native Claude Code subagents (~/.claude/agents/: bailiwick-implement, bailiwick-quality, … — ADR-010), the
                    Codex skill symlinks (~/.codex/skills/: bailiwick-curate, bailiwick-enrich, bailiwick-learn, bailiwick-investigate, bailiwick-purge), the global
                    Codex + Gemini operator layers (managed blocks in ~/.codex/AGENTS.md and

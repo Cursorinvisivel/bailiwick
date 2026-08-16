@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bailiwick Sign"
+  short_description: "GPG-signed commit, verified, no agent signature"
+  default_prompt: "Use $bailiwick-sign to create a GPG-signed commit — probe the key before signing so pinentry cannot hang, pre-flight the message for AI attribution, and verify %G? is G. Never push."
