@@ -24,7 +24,8 @@ tools read live. Five moving parts, and how a session flows through them:
 3. **`hooks/`** — the only things that *run*: the runtime guardrail (`guardrails.py`), capture, sync,
    and health hooks, plus the installers that wire them in.
 4. **`skills/`** — human-gated procedures (`SKILL.md` files): `/curate`, `/enrich`, `/learn`,
-   `/metrics`, `/investigate`, `/purge`. Markdown procedures, not programs.
+   `/metrics`, `/investigate`, `/purge`, `/sign`. Markdown procedures, not programs (the two
+   exceptions carry a helper alongside: `metrics/report.py`, `sign/check_message.py`).
 5. **`scripts/bootstrap.sh`** (+ `bootstrap.ps1`) — onboards a repo (shadow or seeded) and installs
    the once-per-machine global wiring.
 
