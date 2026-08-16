@@ -52,10 +52,23 @@ that can never be answered.
   ```
 
   Wait for them to confirm, then **re-probe**. The cache expires (commonly 10 min idle), so probe
-  again if time passed between the unlock and the commit. If the probe still fails, the agent's
-  process may not share the user's `gpg-agent` socket — check `gpgconf --list-dirs agent-socket`
-  and `gpg-connect-agent 'keyinfo --list' /bye` (the `cached` column reads `1` when the passphrase
-  is held). Report what you find; do not work around it.
+  again if time passed between the unlock and the commit.
+
+**If the re-probe still fails, do not loop.** On some machines the unlock leaves no usable cache for
+the agent's process — `gpg-connect-agent 'keyinfo <KEYGRIP>' /bye` reads `-` in the cached column
+immediately after a successful unlock — so re-probing fails forever while the user's own terminal
+signs fine. Asking for a third and fourth unlock burns their time and teaches them the skill is
+broken. After **one** failed re-probe, confirm the cache is genuinely absent, then hand the final
+step over; the message file is already written and pre-flighted, so nothing is lost:
+
+```
+git commit -S -F .git/COMMIT_MSG_<slug>
+```
+
+Then verify it yourself exactly as if you had run it — verification is the part that must not be
+skipped, and it needs no key. This is a supported path, not a failure: the contract is a *verified*
+signed commit, not who typed the command. Get the keygrip with
+`gpg --with-keygrip --list-secret-keys <KEY>`; the agent caches by keygrip, not fingerprint.
 
 Never use `--passphrase` or `--pinentry-mode loopback` to sidestep the prompt, and never ask the
 user to type, paste, or echo their passphrase anywhere the agent can see it.

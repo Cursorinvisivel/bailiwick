@@ -93,6 +93,32 @@ Unlocked: `rc=0` in under a second.
 Re-probe after they confirm. The cache expires (commonly 10 min idle), so probe again if time has
 passed between the unlock and the commit.
 
+### When the re-probe still fails — hand the commit over
+
+**Do not loop.** On some machines the unlock does *not* leave a usable cache for the agent's
+process: `gpg-connect-agent 'keyinfo <KEYGRIP>' /bye` reads `-` in the cached column immediately
+after a successful unlock, so re-probing will fail forever while the user's own terminal signs
+fine. Asking for a third and fourth unlock burns their time and teaches them the skill is broken.
+
+After **one** failed re-probe, confirm the cache is genuinely absent, then hand the commit over —
+the message file is already written and pre-flighted, so nothing is lost by letting the user run
+the final step:
+
+```bash
+gpg-connect-agent 'keyinfo <KEYGRIP>' /bye     # 4th field: 1 = cached, - = not
+```
+
+```
+! git commit -S -F .git/COMMIT_MSG_<slug>
+```
+
+Then verify it yourself (step 6) exactly as if you had run it — the verification is the part that
+must not be skipped, and it does not need the key. This is a supported path, not a failure: the
+skill's contract is a *verified* signed commit, not who typed the command.
+
+Get the keygrip with `gpg --with-keygrip --list-secret-keys <KEY>` — the agent caches by keygrip,
+not by fingerprint, so the fingerprint will not match anything in `keyinfo` output.
+
 ## Step 5 — commit
 
 ```bash
