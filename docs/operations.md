@@ -259,7 +259,7 @@ terraform servers:
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "$PWD", "$BAILIWICK"]
     },
-    "fetch":  { "command": "uvx", "args": ["mcp-server-fetch"] },
+    "fetch":  { "command": "uvx", "args": ["--with", "mcp<2", "mcp-server-fetch"] },
     "github": {
       "command": "sh",
       "args": ["-c", "GITHUB_PERSONAL_ACCESS_TOKEN=$(gh auth token --hostname github.com --user <you>) exec github-mcp-server stdio"]
@@ -273,6 +273,13 @@ The `--user <you>` pin matters on a company-managed laptop: gh's *active* accoun
 company identity that cannot see your personal repos, so pin the account that owns the framework.
 `bootstrap.sh` derives this automatically and falls back to a `${GITHUB_TOKEN}` env-var form when no
 logged-in gh account can reach the repo.
+
+The `fetch` server's `--with "mcp<2"` pin is load-bearing, not cosmetic. Upstream `mcp-server-fetch`
+does not constrain the `mcp` SDK it imports; against SDK 2.x it dies at import (`McpError` was
+renamed `MCPError`), so `uvx` resolves the newest SDK and the server exits before it ever speaks the
+protocol. Two distinct failures hide behind the same "server won't start": **no `uvx` on `PATH`**
+(reported as a bare `ENOENT`) and **the unpinned SDK** (an import traceback you never see, because
+stderr goes nowhere). `scripts/doctor.sh` §8 checks both — runner on `PATH`, and the pin present.
 
 ### Hidden complements (one per tool)
 

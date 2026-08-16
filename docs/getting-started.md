@@ -37,6 +37,11 @@ Optional, but recommended:
 - **`github-mcp-server`** — GitHub's official local MCP binary (also `go install`) that serves
   repo/PR/issue context; its token comes from `gh` (above) or `$GITHUB_TOKEN`. `--install-tools`
   installs it too when `go` is present. Both MCP binaries need `$(go env GOPATH)/bin` on your `PATH`.
+- **`uv`** ([Astral](https://astral.sh/uv)) — the runner for the `fetch` MCP server, which has no
+  binary of its own: `uvx` fetches `mcp-server-fetch` on demand. `--install-tools` installs uv for
+  you; it lands in `~/.local/bin`, which must be on your `PATH`. Without it the server is still
+  registered and fails at connect time with a bare **`ENOENT`** naming the server, not the missing
+  binary — `scripts/doctor.sh` names it explicitly.
 - **`gpg`** — only if you later enable encrypted dirty-zone backup (see [operations](operations.md)).
 
 Clone the repo, then point `$BAILIWICK` at it (the docs, templates, and configs all resolve

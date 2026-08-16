@@ -789,7 +789,7 @@ if [ "$SHADOW" -eq 1 ]; then
       fi
     }
     sh_mcp bailiwick-filesystem npx -y @modelcontextprotocol/server-filesystem "${SH_ROOTS[@]}"
-    sh_mcp bailiwick-fetch uvx mcp-server-fetch
+    sh_mcp bailiwick-fetch uvx --with "mcp<2" mcp-server-fetch
     sh_mcp bailiwick-terraform terraform-mcp-server stdio
     if [ -n "$GH_USER" ]; then
       sh_mcp bailiwick-github sh -c "$GH_SHADOW_SH"
@@ -816,7 +816,7 @@ except Exception:
     d = {}
 srv = d.setdefault("mcpServers", {})
 srv["bailiwick-filesystem"] = {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem"] + roots}
-srv["bailiwick-fetch"] = {"command": "uvx", "args": ["mcp-server-fetch"]}
+srv["bailiwick-fetch"] = {"command": "uvx", "args": ["--with", "mcp<2", "mcp-server-fetch"]}
 srv["bailiwick-terraform"] = {"command": "terraform-mcp-server", "args": ["stdio"]}
 if gh:
     srv["bailiwick-github"] = {"command": "sh", "args": ["-c", gh]}
@@ -833,7 +833,7 @@ PY
       echo "# BEGIN bailiwick mcp (managed — refreshed by bootstrap.sh --with-agents in shadow mode)"
       echo "[mcp_servers.bailiwick-filesystem]"; echo "command = \"npx\""
       printf 'args = ["-y", "@modelcontextprotocol/server-filesystem"%s]\n' "$(for r in "${SH_ROOTS[@]}"; do printf ', "%s"' "$r"; done)"
-      echo "[mcp_servers.bailiwick-fetch]"; echo "command = \"uvx\""; echo "args = [\"mcp-server-fetch\"]"
+      echo "[mcp_servers.bailiwick-fetch]"; echo "command = \"uvx\""; echo "args = [\"--with\", \"mcp<2\", \"mcp-server-fetch\"]"
       echo "[mcp_servers.bailiwick-terraform]"; echo "command = \"terraform-mcp-server\""; echo "args = [\"stdio\"]"
       if [ -n "$GH_SHADOW_SH" ]; then
         echo "[mcp_servers.bailiwick-github]"; echo "command = \"sh\""
@@ -945,7 +945,7 @@ write_managed ".mcp.json" <<EOF
     },
     "fetch": {
       "command": "uvx",
-      "args": ["mcp-server-fetch"]
+      "args": ["--with", "mcp<2", "mcp-server-fetch"]
     },
     "github": {
       ${GH_BLOCK_MCP}
@@ -968,7 +968,7 @@ write_managed ".vscode/mcp.json" <<EOF
     },
     "fetch": {
       "command": "uvx",
-      "args": ["mcp-server-fetch"]
+      "args": ["--with", "mcp<2", "mcp-server-fetch"]
     },
     "github": {
       ${GH_BLOCK_VSC}
@@ -1020,7 +1020,7 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", ${MCP_ROOTS}]
 
 [mcp_servers.fetch]
 command = "uvx"
-args = ["mcp-server-fetch"]
+args = ["--with", "mcp<2", "mcp-server-fetch"]
 
 [mcp_servers.github]
 ${GH_BLOCK_TOML}
@@ -1048,7 +1048,7 @@ if [ "$WITH_GEMINI" -eq 1 ]; then
     },
     "fetch": {
       "command": "uvx",
-      "args": ["mcp-server-fetch"]
+      "args": ["--with", "mcp<2", "mcp-server-fetch"]
     },
     "github": {
       ${GH_BLOCK_MCP}
@@ -1159,6 +1159,23 @@ elif command -v go >/dev/null 2>&1; then
   fi
 else
   TF_STATUS="✗ terraform-mcp-server NOT on PATH and 'go' is missing — install golang-go, then re-run with --install-tools (see docs/getting-started.md)"
+fi
+
+# fetch MCP server runs via uvx (Astral). Unlike the two Go servers there is no binary to install —
+# uvx fetches mcp-server-fetch on demand — so the ONLY prerequisite is uv itself. Without it the
+# server is still registered and fails at connect time with a bare "ENOENT", which points at nothing.
+if ! command -v uvx >/dev/null 2>&1 && [ "$INSTALL_TOOLS" -eq 1 ] && command -v curl >/dev/null 2>&1; then
+  echo "  --install-tools: installing uv (Astral installer → ~/.local/bin)…"
+  curl -LsSf https://astral.sh/uv/install.sh | sh 2>&1 | sed 's/^/    /' || true
+  hash -r 2>/dev/null || true
+  command -v uvx >/dev/null 2>&1 || PATH="${HOME}/.local/bin:$PATH"
+fi
+if command -v uvx >/dev/null 2>&1; then
+  UV_STATUS="✓ uvx on PATH ($(command -v uvx)) — bailiwick-fetch can start"
+elif [ -x "${HOME}/.local/bin/uvx" ]; then
+  UV_STATUS="✓ uv installed to ${HOME}/.local/bin — add that dir to PATH (bailiwick-fetch fails with ENOENT until you do)"
+else
+  UV_STATUS="✗ uvx NOT on PATH — bailiwick-fetch will fail to connect with 'ENOENT'. Run: curl -LsSf https://astral.sh/uv/install.sh | sh  (or re-run with --install-tools; then ensure ~/.local/bin is on PATH)"
 fi
 
 # github MCP server is GitHub's official local Go binary (stdio), wired the same Docker-free way.
@@ -1424,6 +1441,7 @@ if [ "$GLOBAL_ONLY" -eq 1 ]; then
   printf 'Next:\n'
   printf '  • %s\n' "$TF_STATUS"
   printf '  • %s\n' "$GH_MCP_STATUS"
+  printf '  • %s\n' "$UV_STATUS"
   printf '  • %s\n' "$HOOKS_STATUS"
   printf '  • %s\n' "$SKILL_STATUS"
   printf '  • %s\n' "$AGENT_STAGE_STATUS"
@@ -1440,6 +1458,7 @@ elif [ "$SHADOW" -eq 1 ]; then
   printf 'Next:\n'
   printf '  • %s\n' "$TF_STATUS"
   printf '  • %s\n' "$GH_MCP_STATUS"
+  printf '  • %s\n' "$UV_STATUS"
   printf '  • %s\n' "$HOOKS_STATUS"
   printf '  • %s\n' "$SKILL_STATUS"
   printf '  • %s\n' "$AGENT_STAGE_STATUS"
@@ -1455,6 +1474,7 @@ else
   printf '  • %s\n' "$GH_STATUS_MSG"
   printf '  • %s\n' "$TF_STATUS"
   printf '  • %s\n' "$GH_MCP_STATUS"
+  printf '  • %s\n' "$UV_STATUS"
   printf '  • %s\n' "$HOOKS_STATUS"
   printf '  • %s\n' "$SKILL_STATUS"
   printf '  • %s\n' "$AGENT_STAGE_STATUS"
