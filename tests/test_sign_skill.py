@@ -198,6 +198,35 @@ def test_codex_wrapper_documents_all_three_exit_codes():
     assert "`2`" in src and "`1`" in src and "`0`" in src, "wrapper must document 0/1/2"
 
 
+def test_both_copies_document_the_handover_fallback():
+    """A re-probe that keeps failing must terminate in a handover, not an unlock loop.
+
+    Observed in practice: on some machines a successful unlock leaves no usable cache for the
+    agent's process (keyinfo reads '-' immediately after), so re-probing never succeeds while the
+    user's own terminal signs fine. Both copies must say so, and must still require verification.
+    """
+    for path in (REPO_ROOT / "skills" / "sign" / "SKILL.md", CODEX_WRAPPER):
+        src = path.read_text(encoding="utf-8")
+        assert "keyinfo" in src, f"{path.name} does not show how to confirm the cache is absent"
+        assert "do not loop" in src.lower(), f"{path.name} does not forbid the unlock loop"
+        assert "verify" in src.lower(), f"{path.name} dropped the verification requirement"
+
+
+def test_both_copies_chain_the_probe_to_the_commit():
+    """The probe must be fresh at execution, not left over from an earlier call.
+
+    default-cache-ttl is an IDLE timer and approval latency counts against it, so a probe that
+    passed in a previous tool call proves nothing by the time `git commit -S` re-signs. Both copies
+    must chain them with && so the approval precedes both and a cold key short-circuits.
+    """
+    for path in (REPO_ROOT / "skills" / "sign" / "SKILL.md", CODEX_WRAPPER):
+        src = path.read_text(encoding="utf-8")
+        assert "&& git commit -S" in src, f"{path.name} does not chain the probe to the commit"
+        assert "idle" in src.lower(), f"{path.name} does not explain the idle-TTL mechanism"
+        # The reproduction is what makes the TTL claim checkable rather than folklore.
+        assert "sleep 600" in src, f"{path.name} dropped the reproduction for the idle-TTL claim"
+
+
 def test_codex_wrapper_does_not_instruct_the_claude_only_unlock():
     """The one permitted divergence, asserted in the right direction: Codex has no `!` prefix, so
     the wrapper must tell the user to unlock in their own terminal instead of copying Claude's."""

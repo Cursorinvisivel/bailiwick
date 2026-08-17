@@ -406,8 +406,8 @@ seeded variant:
 - **Global prerequisites (`--install-tools`):** installs the once-per-machine pieces when missing —
   terraform-mcp-server (`go install`), the capture/curation **+ guardrail** hooks
   (`~/.claude/settings.json`), the global **Claude Code skill symlinks** (`~/.claude/skills/`:
-  `/curate`, `/enrich`, `/learn`, `/metrics`, `/investigate`, `/purge`), the global **Codex skill symlinks** (`~/.codex/skills/`: `$bailiwick-curate`,
-  `$bailiwick-enrich`, `$bailiwick-learn`, `$bailiwick-investigate`, `$bailiwick-purge`), and the global **Codex + Gemini operator layers** (managed blocks in
+  `/curate`, `/enrich`, `/learn`, `/metrics`, `/investigate`, `/purge`, `/sign`), the global **Codex skill symlinks** (`~/.codex/skills/`: `$bailiwick-curate`,
+  `$bailiwick-enrich`, `$bailiwick-learn`, `$bailiwick-investigate`, `$bailiwick-purge`, `$bailiwick-sign`), and the global **Codex + Gemini operator layers** (managed blocks in
   `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md` that activate per-repo on the
   `.bailiwick.local.md` marker). Without it,
   every run *validates* these and prints ✓/✗ in the Next steps. (Skills and operator layers are
@@ -587,10 +587,16 @@ Key consequences (the four tools do not share one uniform integration):
   `$GITHUB_TOKEN`), independent of Codex env expansion.
 - **Codex skills mirror the Claude Code skills.** `codex-skills/bailiwick-curate`,
   `codex-skills/bailiwick-enrich`, `codex-skills/bailiwick-learn`, `codex-skills/bailiwick-investigate`,
-  and `codex-skills/bailiwick-purge` are Codex-native wrappers installed into `~/.codex/skills/` by
+  `codex-skills/bailiwick-purge`, and `codex-skills/bailiwick-sign` are Codex-native wrappers installed
+  into `~/.codex/skills/` by
   `--install-tools`. They intentionally point back to the canonical `skills/*/SKILL.md` files, so the
   procedure stays single-source while Codex gets a native `$bailiwick-curate` / `$bailiwick-enrich` /
-  `$bailiwick-learn` / `$bailiwick-investigate` / `$bailiwick-purge` trigger instead of a copied prompt.
+  `$bailiwick-learn` / `$bailiwick-investigate` / `$bailiwick-purge` / `$bailiwick-sign` trigger
+  instead of a copied prompt. `bailiwick-sign` diverges on exactly one point, and deliberately: the
+  key-unlock handshake cannot use Claude Code's `!` prefix, so it directs the user to any terminal on
+  the machine — `gpg-agent` is per-user, so the passphrase cache is shared across processes.
+  `tests/test_sign_skill.py` asserts that divergence in both directions, so the wrapper cannot quietly
+  drift back into a copy or lose a safety boundary.
 - **Gemini gets a global layer + shared marker, and (CLI) a wired guardrail.** `--install-tools` installs a
   managed block in `~/.gemini/GEMINI.md` (loaded first, so a repo `GEMINI.md` keeps precedence; the
   framework defaults are stated *in* the global file since the VS Code agent has no guaranteed loader
@@ -676,8 +682,8 @@ bailiwick/
                   guardrails.py  install_hooks.py  settings.template.json  health_common.sh
                   install_global_layer.sh  install_adapter_hooks.py  install_desktop_mcp.py
                   codex-global-agents.tmpl.md  gemini-global.tmpl.md
-  skills/         curate/  enrich/  learn/  metrics/{SKILL.md,report.py}  investigate/  purge/   (each a SKILL.md)
-  codex-skills/   bailiwick-curate/  bailiwick-enrich/  bailiwick-learn/  bailiwick-investigate/  bailiwick-purge/  (SKILL.md wrappers)
+  skills/         curate/  enrich/  learn/  metrics/{SKILL.md,report.py}  investigate/  purge/  sign/{SKILL.md,check_message.py}   (each a SKILL.md)
+  codex-skills/   bailiwick-curate/  bailiwick-enrich/  bailiwick-learn/  bailiwick-investigate/  bailiwick-purge/  bailiwick-sign/  (SKILL.md wrappers)
   copilot-instructions/   terraform-gcp(.gke/.data/.project-stack).md
   prompts/        iam-review · pr-review · module-docs · cost-estimate · security-pr-report
   vscode/         mcp.json (template) · terraform.code-snippets

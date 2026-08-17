@@ -69,7 +69,7 @@ This is idempotent (re-run it any time — e.g. after adding a new skill) and in
   preserved). These fire in *every* project but self-gate — they stay inert unless the repo is
   Bailiwick-wired.
 - The **global Claude Code skills** as symlinks in `~/.claude/skills/`: `/curate`, `/enrich`,
-  `/learn`, `/metrics`, `/investigate`, `/purge`.
+  `/learn`, `/metrics`, `/investigate`, `/purge`, `/sign`.
 - The **Quality Workflow stages as native Claude Code subagents** — symlinks in `~/.claude/agents/`
   (`bailiwick-implement`, `bailiwick-quality`, `bailiwick-memory`, `bailiwick-security-review`,
   `bailiwick-docs`, `bailiwick-cloud-research`, `bailiwick-federation`). This is what lets the Lead

@@ -90,17 +90,75 @@ Unlocked: `rc=0` in under a second.
   type, paste, or echo it anywhere you can see, and never use `--passphrase` or
   `--pinentry-mode loopback` to work around this.
 
-Re-probe after they confirm. The cache expires (commonly 10 min idle), so probe again if time has
-passed between the unlock and the commit.
+Re-probe after they confirm — but note that the probe only describes the moment it ran.
+`default-cache-ttl` is an **idle** timer (600s by default; `max-cache-ttl` 7200s is the absolute
+ceiling), and *your own approval prompts consume it*: the delay between issuing a call and the user
+approving it counts against the cache exactly like any other idle time. This is the reason a probe
+fails seconds after a successful unlock — not a broken agent. Step 5 closes the gap by chaining the
+probe to the commit.
 
-## Step 5 — commit
+**Verify this yourself in ten minutes** rather than taking it on faith — the claim is the whole
+justification for step 5's chaining, and it is cheap to reproduce:
 
 ```bash
-git commit -S -F .git/COMMIT_MSG_<slug>
+printf sigtest | gpg --local-user <KEY> --sign -o /dev/null   # unlock; keyinfo now reads 1
+sleep 600                                                      # idle, touching nothing else
+timeout 10 gpg --batch --no-tty --pinentry-mode error \
+  --local-user <KEY> --sign -o /dev/null; echo "rc=$?"         # rc=2, keyinfo now reads -
 ```
+
+Observed exactly so: `1` → `-` across a clean 600s idle window, with the probe failing `No pinentry`
+— the same symptom as a key that was never unlocked. That indistinguishability is the trap: an
+expired cache and an absent one look identical, which is why the fix is to leave no gap rather than
+to interpret the error.
+
+### When the re-probe still fails — hand the commit over
+
+**Do not loop.** On some machines the unlock does *not* leave a usable cache for the agent's
+process: `gpg-connect-agent 'keyinfo <KEYGRIP>' /bye` reads `-` in the cached column immediately
+after a successful unlock, so re-probing will fail forever while the user's own terminal signs
+fine. Asking for a third and fourth unlock burns their time and teaches them the skill is broken.
+
+After **one** failed re-probe, confirm the cache is genuinely absent, then hand the commit over —
+the message file is already written and pre-flighted, so nothing is lost by letting the user run
+the final step:
+
+```bash
+gpg-connect-agent 'keyinfo <KEYGRIP>' /bye     # 4th field: 1 = cached, - = not
+```
+
+```
+! git commit -S -F .git/COMMIT_MSG_<slug>
+```
+
+Then verify it yourself (step 6) exactly as if you had run it — the verification is the part that
+must not be skipped, and it does not need the key. This is a supported path, not a failure: the
+skill's contract is a *verified* signed commit, not who typed the command.
+
+Get the keygrip with `gpg --with-keygrip --list-secret-keys <KEY>` — the agent caches by keygrip,
+not by fingerprint, so the fingerprint will not match anything in `keyinfo` output.
+
+## Step 5 — commit, in the same call as a fresh probe
+
+**Chain the probe and the commit.** `default-cache-ttl` (600s) is an *idle* timer, and the clock
+keeps running while a tool-approval prompt sits unanswered — so a probe that passed in an earlier
+call proves nothing about now. `git commit -S` re-signs at execution time; if the cache expired in
+between, gpg needs pinentry mid-commit, which is the hang this skill exists to prevent.
+
+```bash
+timeout 10 gpg --batch --no-tty --pinentry-mode error \
+  --local-user "$(git config user.signingkey)" --sign -o /dev/null <<< probe \
+  && git commit -S -F .git/COMMIT_MSG_<slug>
+```
+
+Approval happens *before* the call runs, so the probe is fresh at execution and the commit follows
+microseconds later — no window for expiry. A failed probe short-circuits the `&&`, so the commit is
+never attempted on a cold key.
 
 The framework guardrail confirms every `git commit`. **That prompt is expected, not a failure** —
 it is the "clear user go-ahead" rule doing its job. Do not treat it as an error or retry around it.
+Its latency is exactly the gap this chaining closes: the user thinking for eleven minutes at that
+prompt is enough to expire a cache that was warm when you probed separately.
 
 ## Step 6 — verify it actually signed
 
