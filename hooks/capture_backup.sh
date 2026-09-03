@@ -213,7 +213,9 @@ case "$MODE" in
       }
     fi
     bw_health capture_backup info "push ok ($repo_name -> $BRANCH)"
-    echo "[backup] pushed '$repo_name' captures to $BRANCH"
+    # stderr, not stdout: Codex parses a Stop/SessionEnd hook's stdout as JSON, so a plain line
+    # there marks the hook Failed. Same channel its failure sibling above already uses.
+    echo "[backup] pushed '$repo_name' captures to $BRANCH" >&2
     ;;
   pull)
     DEST="${2:-$BAILIWICK_ROOT/.bailiwick-inbox/raw}"

@@ -147,8 +147,9 @@ Windows: `bootstrap.ps1 /path/to/repo`, `bootstrap.ps1 -Seeded /path/to/repo`, e
 ## 4. Verify it works
 
 Open **Claude Code** in the wired repo and confirm three things (this is the fullest experience —
-under Codex the guardrail *denies* with a break-glass override rather than prompting, and capture is
-manual; Gemini CLI prompts like Claude Code but capture is manual):
+under Codex the guardrail *denies* with a break-glass override rather than prompting, and capture
+runs only once you grant each hook its one-time trust; Gemini CLI prompts like Claude Code but
+capture is manual):
 
 1. **Knowledge index is injected.** On session start you should see the framework defaults asserted
    and the knowledge `INDEX.md` (the ~2k-token map) injected. That's the SessionStart hook — the

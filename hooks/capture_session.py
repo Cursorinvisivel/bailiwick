@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Enforced raw session capture for the bailiwick knowledge pipeline.
 
-Invoked by the Stop and SessionEnd hooks. Reads the hook JSON payload on stdin,
-and — when the session shows substantive work — copies the session transcript
-into <project>/.bailiwick-outputs/raw/<session_id>.jsonl and writes a small markdown
-header for human/nag visibility.
+Invoked by the Stop and SessionEnd hooks of Claude Code AND Codex CLI (>= 0.147, which
+added those events). Reads the hook JSON payload on stdin, and — when the session shows
+substantive work — copies the session transcript into
+<project>/.bailiwick-outputs/raw/<session_id>.jsonl and writes a small markdown header for
+human/nag visibility. Both CLIs pass the same payload fields; only the transcript shape
+differs, which the per-record dispatch below absorbs (see "Codex transcript vocabulary").
 
 Raw captures are gitignored and never committed. Promotion into the curated
 knowledge library happens only via /curate, under a human gate. This script
@@ -37,6 +39,24 @@ KNOWLEDGE_RE = re.compile(r"knowledge/(?:topics|patterns|context)/([a-z0-9][a-z0
 CLIENT_KNOWLEDGE_RE = re.compile(r"knowledge/clients/([a-z0-9][a-z0-9-]*)/([a-z0-9][a-z0-9-]*)\.md")
 MCP_FS_READ_RE = re.compile(r"^mcp__(?:bailiwick-)?filesystem__read_")
 BASH_READ_RE = re.compile(r"\b(cat|head|tail|less|more|grep|rg|sed|awk)\b")
+
+# ---- Codex transcript vocabulary ---------------------------------------------------------------
+# Both CLIs hand this hook the SAME envelope (session_id / transcript_path / cwd / hook_event_name —
+# verified against codex `stop.command.input` and `session-end.command.input`), so only the
+# transcript SHAPE differs: Claude Code writes {"message": {"content": [{"type": "tool_use", ...}]}},
+# Codex a rollout of {"type": "response_item"|"event_msg"|..., "payload": {...}}. Records are
+# dispatched per line on that shape, so one hook covers both (and a resumed/mixed file cannot lie).
+# `exec`/`exec_command` are Codex's shell (code mode wraps the same call in a JS snippet);
+# `apply_patch` is its file-mutating tool — the Edit/Write of MUTATING_TOOLS above.
+CODEX_MUTATING_TOOLS = {"apply_patch"}
+CODEX_EXEC_TOOLS = {"exec", "exec_command", "shell"}
+# The command inside either shape: `"cmd": "..."` in the function-call arguments JSON, or the same
+# key inside the `tools.exec_command({...})` JS of a code-mode call. Captured WITH its quotes so
+# json.loads does the un-escaping (a code-mode input is doubly escaped).
+CODEX_CMD_RE = re.compile(r'"cmd"\s*:\s*("(?:[^"\\]|\\.)*")')
+# MCP reads appear in a rollout under the BARE tool name (`read_text_file`), not the
+# `mcp__server__tool` form PreToolUse matches on — accept either.
+CODEX_READ_TOOL_RE = re.compile(r"^(?:mcp__[a-z0-9-]+__)?read_")
 
 
 def knowledge_ids(text):
@@ -99,6 +119,83 @@ def origin_remote(project_dir):
         return ""
 
 
+def _scan_command(cmd, st):
+    """A shell command from EITHER flavor: read ops emit `loaded` ids, a git commit marks shipped."""
+    if not cmd:
+        return
+    if BASH_READ_RE.search(cmd):
+        st["loaded"].update(knowledge_ids(cmd))
+    if COMMIT_RE.search(cmd):
+        st["committed"] = True
+
+
+def _scan_claude(rec, st):
+    """Claude Code transcript record: tool calls live in message.content[] as `tool_use` blocks."""
+    message = rec.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, list):
+        return
+    for block in content:
+        if not (isinstance(block, dict) and block.get("type") == "tool_use"):
+            continue
+        name = block.get("name", "")
+        st["tool_calls"] += 1
+        st["tools"].add(name)
+        if name in MUTATING_TOOLS:
+            st["mutating"] += 1
+        # Derive `loaded` knowledge ids from genuine READ operations only
+        # (never from a path merely appearing in a Write/Edit/other input).
+        try:
+            inp = block.get("input") or {}
+            if name == "Read":
+                st["loaded"].update(knowledge_ids(str(inp.get("file_path") or "")))
+            elif MCP_FS_READ_RE.match(name):
+                st["loaded"].update(knowledge_ids(json.dumps(inp)))
+            elif name == "Bash":
+                _scan_command(inp.get("command") or "", st)
+        except Exception:
+            pass
+
+
+def _scan_codex(rec, st):
+    """Codex rollout record: the same signals, carried by `payload` instead of `message`.
+
+    `function_call` (name + `arguments` JSON string) and `custom_tool_call` (name + `input`, JS in
+    code mode) are the two tool-call shapes; `patch_apply_end` is the event Codex emits when a patch
+    actually lands, which is the only mutation trace left when the patch went through code mode.
+    """
+    payload = rec.get("payload")
+    if not isinstance(payload, dict):
+        return
+    kind = payload.get("type")
+    if kind == "patch_apply_end":
+        if payload.get("success"):
+            st["patch_events"] += 1
+        return
+    if kind not in ("function_call", "custom_tool_call"):
+        return
+    name = payload.get("name") or ""
+    st["tool_calls"] += 1
+    st["tools"].add(name)
+    if name in CODEX_MUTATING_TOOLS:
+        st["mutating"] += 1
+        return  # the patch body is a diff, not a command — no read/commit signal in it
+    raw = payload.get("arguments")
+    if not isinstance(raw, str):
+        raw = payload.get("input")
+    if not isinstance(raw, str):
+        return
+    if name in CODEX_EXEC_TOOLS:
+        for quoted in CODEX_CMD_RE.findall(raw):
+            try:
+                cmd = json.loads(quoted)
+            except Exception:
+                cmd = quoted[1:-1]  # un-escaping failed: the raw text still carries the signal
+            _scan_command(cmd, st)
+    elif CODEX_READ_TOOL_RE.match(name):
+        st["loaded"].update(knowledge_ids(raw))
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -122,11 +219,8 @@ def main():
     if not (seeded or shadow):
         return 0  # Inert outside bailiwick-wired repos (seeded or shadow-activated).
 
-    tool_calls = 0
-    mutating = 0
-    committed = False
-    tools_used = set()
-    loaded_ids = set()
+    st = {"tool_calls": 0, "mutating": 0, "patch_events": 0, "committed": False,
+          "tools": set(), "loaded": set(), "agent": "claude"}
     try:
         with open(transcript, "r", encoding="utf-8") as fh:
             for line in fh:
@@ -137,36 +231,27 @@ def main():
                     rec = json.loads(line)
                 except Exception:
                     continue
-                content = (rec.get("message") or {}).get("content")
-                if not isinstance(content, list):
+                if not isinstance(rec, dict):
                     continue
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "tool_use":
-                        name = block.get("name", "")
-                        tool_calls += 1
-                        tools_used.add(name)
-                        if name in MUTATING_TOOLS:
-                            mutating += 1
-                        # Derive `loaded` knowledge ids from genuine READ operations only
-                        # (never from a path merely appearing in a Write/Edit/other input).
-                        try:
-                            inp = block.get("input") or {}
-                            if name == "Read":
-                                loaded_ids.update(knowledge_ids(str(inp.get("file_path") or "")))
-                            elif MCP_FS_READ_RE.match(name):
-                                loaded_ids.update(knowledge_ids(json.dumps(inp)))
-                            elif name == "Bash":
-                                cmd = inp.get("command") or ""
-                                if BASH_READ_RE.search(cmd):
-                                    loaded_ids.update(knowledge_ids(cmd))
-                                # `committed`: a git commit in a Bash call means work shipped.
-                                if COMMIT_RE.search(cmd):
-                                    committed = True
-                        except Exception:
-                            pass
+                if isinstance(rec.get("payload"), dict) and "message" not in rec:
+                    st["agent"] = "codex"
+                    _scan_codex(rec, st)
+                else:
+                    _scan_claude(rec, st)
     except Exception as e:
         _health("error", "transcript read failed for {}: {!r}".format(session_id, e)[:200])
         return 0
+
+    tool_calls = st["tool_calls"]
+    mutating = st["mutating"]
+    committed = st["committed"]
+    tools_used = st["tools"]
+    loaded_ids = st["loaded"]
+    # Code-mode Codex applies a patch from INSIDE an `exec` call, so the only trace left is the
+    # patch_apply_end event. Use it as a FLOOR, never an addition — an `apply_patch` tool call and
+    # its patch_apply_end are the same edit counted from two sides.
+    if not mutating:
+        mutating = st["patch_events"]
 
     substantive = mutating > 0 or tool_calls >= MIN_TOOL_CALLS
     if not substantive:
@@ -200,6 +285,7 @@ def main():
             fh.write("- event: {}\n".format(event))
             fh.write("- project_dir: {}\n".format(project_dir))
             fh.write("- mode: {}\n".format("seeded" if seeded else "shadow"))
+            fh.write("- agent: {}\n".format(st["agent"]))
             if not seeded:
                 fh.write("- origin_remote: {}\n".format(origin_remote(project_dir) or "(none)"))
             fh.write("- tool_calls: {} (mutating: {})\n".format(tool_calls, mutating))
