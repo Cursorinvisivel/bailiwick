@@ -62,6 +62,41 @@ def test_unrelated_content_survives(tmp_path):
     assert "my-own-hook" in names and "bailiwick-guardrail" in names
 
 
+def test_codex_capture_events_are_wired(tmp_path):
+    # codex-cli >= 0.147 fires Stop/SessionEnd with the same payload Claude Code sends, so the
+    # capture pair rides the same scripts. Without both events a Codex session is captured only
+    # per-turn (Stop) or only on close (SessionEnd) — the pair is the contract.
+    run(tmp_path)
+    toml = (tmp_path / "codex" / "config.toml").read_text()
+    for event in ("Stop", "SessionEnd"):
+        assert "[[hooks.{}]]".format(event) in toml
+        block = toml.split("[[hooks.{}]]".format(event), 1)[1]
+        assert "capture_session.py" in block and "capture_backup.sh" in block
+
+
+def test_pretooluse_stays_first_so_guardrail_trust_survives(tmp_path):
+    # Codex keys hook trust by `<event>:<group>:<index>` over the hook definition. Appending the
+    # capture events must not reorder or rewrite the guardrail, or every install re-prompts.
+    run(tmp_path)
+    toml = (tmp_path / "codex" / "config.toml").read_text()
+    assert toml.index("[[hooks.PreToolUse]]") < toml.index("[[hooks.Stop]]") < toml.index("[[hooks.SessionEnd]]")
+
+
+def test_existing_hook_trust_survives_reinstall(tmp_path):
+    run(tmp_path)
+    cfg = tmp_path / "codex" / "config.toml"
+    toml = cfg.read_text().replace(
+        "# END bailiwick hooks",
+        '\n[hooks.state]\n\n[hooks.state."cfg:pre_tool_use:0:0"]\n'
+        'trusted_hash = "sha256:abc"\nenabled = true\n# END bailiwick hooks')
+    cfg.write_text(toml)
+    r = run(tmp_path)
+    assert r.returncode == 0
+    after = cfg.read_text()
+    assert "sha256:abc" in after, "a reinstall must not wipe the user's hook trust"
+    assert after.count("[hooks.state]") == 1
+
+
 def test_malformed_gemini_settings_refused_untouched(tmp_path):
     (tmp_path / "gemini").mkdir()
     (tmp_path / "gemini" / "settings.json").write_text("{ not json")

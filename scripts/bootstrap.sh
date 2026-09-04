@@ -1209,10 +1209,12 @@ if ! hooks_present && [ "$INSTALL_TOOLS" -eq 1 ] && command -v python3 >/dev/nul
   echo "  --install-tools: merging capture/curation hooks into ~/.claude/settings.json…"
   python3 "$BAILIWICK_ROOT/hooks/install_hooks.py" "$USER_SETTINGS" "$HOOK_TMPL" 2>&1 | sed 's/^/    /' || true
 fi
-# Codex + Gemini guardrail adapters (same engine as the Claude Code guardrail; deny/ask contract
-# per tool, self-gating to wired/shadow repos — see hooks/install_adapter_hooks.py).
+# Codex + Gemini hook adapters: the guardrail (same engine as the Claude Code guardrail; deny/ask
+# contract per tool) everywhere, plus Codex capture on Stop/SessionEnd (codex-cli >= 0.147, the
+# same scripts Claude Code runs). All self-gating to wired/shadow repos — see
+# hooks/install_adapter_hooks.py.
 if [ "$INSTALL_TOOLS" -eq 1 ] && command -v python3 >/dev/null 2>&1; then
-  echo "  --install-tools: wiring the guardrail into Codex (PreToolUse) + Gemini (BeforeTool)…"
+  echo "  --install-tools: wiring Codex hooks (guardrail PreToolUse + capture Stop/SessionEnd) and the Gemini guardrail (BeforeTool)…"
   python3 "$BAILIWICK_ROOT/hooks/install_adapter_hooks.py" 2>&1 | sed 's/^/    /' || true
 fi
 if hooks_present; then
