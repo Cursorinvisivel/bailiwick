@@ -1247,10 +1247,12 @@ if ((-not (Test-HooksPresent)) -and $InstallTools -and $pyExe -and (Test-Path $h
   Write-Host "  -InstallTools: merging capture/curation hooks into ~/.claude/settings.json..."
   & $pyExe.Source (Join-Path $BailiwickRoot "hooks/install_hooks.py") $userSettings $hookTmpl 2>&1 | ForEach-Object { "    $_" }
 }
-# Codex + Gemini guardrail adapters (same engine as the Claude Code guardrail; deny/ask contract
-# per tool, self-gating to wired/shadow repos - see hooks/install_adapter_hooks.py).
+# Codex + Gemini hook adapters: the guardrail (same engine as the Claude Code guardrail; deny/ask
+# contract per tool) everywhere, plus Codex capture on Stop/SessionEnd (codex-cli >= 0.147, the
+# same scripts Claude Code runs). All self-gating to wired/shadow repos - see
+# hooks/install_adapter_hooks.py.
 if ($InstallTools -and $pyExe) {
-  Write-Host "  -InstallTools: wiring the guardrail into Codex (PreToolUse) + Gemini (BeforeTool)..."
+  Write-Host "  -InstallTools: wiring Codex hooks (guardrail PreToolUse + capture Stop/SessionEnd) and the Gemini guardrail (BeforeTool)..."
   & $pyExe.Source (Join-Path $BailiwickRoot "hooks/install_adapter_hooks.py") 2>&1 | ForEach-Object { "    $_" }
 }
 if (Test-HooksPresent) {

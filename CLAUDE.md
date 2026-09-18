@@ -54,11 +54,12 @@ Rules:
 - Updates to the knowledge library require explicit human approval (via `/curate`)
 
 ## Capture & Curation
-Enforced by Claude Code hooks ($BAILIWICK/hooks/):
+Enforced by harness hooks ($BAILIWICK/hooks/) — Claude Code, and Codex CLI for capture:
 - **Capture (automatic).** Stop/SessionEnd hooks write raw transcripts of substantial sessions
-  to `<project>/.bailiwick-outputs/raw/`. The SessionStart hook asserts the framework defaults, injects the
-  knowledge index (the map), and nags when captures are pending. The harness runs these — capture
-  cannot be forgotten.
+  to `<project>/.bailiwick-outputs/raw/` — under Claude Code and, since codex-cli 0.147, Codex CLI
+  too (one script, both transcript shapes; inert until each Codex hook is trusted once). The
+  SessionStart hook (Claude Code) asserts the framework defaults, injects the knowledge index (the
+  map), and nags when captures are pending. The harness runs these — capture cannot be forgotten.
 - **Curation (human-gated).** The `/curate` skill ($BAILIWICK/skills/curate/)
   distills captures into the knowledge library; promotion always requires approval.
 - **Durability (optional).** With `capture_backup` enabled in `.bailiwick-sync.json`, Stop/SessionEnd

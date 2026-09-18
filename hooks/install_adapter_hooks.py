@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Install the bailiwick guardrail as Codex + Gemini pre-execution hooks (global, per machine).
+"""Install the bailiwick hooks into Codex + Gemini (global, per machine).
 
 Usage: install_adapter_hooks.py            # install/refresh both adapters
        install_adapter_hooks.py codex      # just one
        install_adapter_hooks.py gemini
 
-Wires guardrails.py (the same engine Claude Code runs) into:
-  - Codex CLI:  a managed block in ~/.codex/config.toml  -> [[hooks.PreToolUse]] matcher "^Bash$"
-                (Codex requires a one-time interactive trust of new hooks — TUI `/hooks`;
-                 until trusted, the hook is configured but does not run.)
+Wires the same scripts Claude Code runs into:
+  - Codex CLI:  a managed block in ~/.codex/config.toml ->
+                  * [[hooks.PreToolUse]] matcher "^Bash$"  -> guardrails.py (ADR-006 tiers)
+                  * [[hooks.Stop]] / [[hooks.SessionEnd]]  -> capture_session.py, then
+                    capture_backup.sh push (codex-cli >= 0.147, which added those events)
+                (Codex requires a one-time interactive trust PER hook definition — it prompts on
+                 the hook's first fire in a trusted project, in the `codex` CLI (`/hooks` manages
+                 trust); until trusted, a hook is configured but does not run.)
   - Gemini CLI: a named entry in ~/.gemini/settings.json -> hooks.BeforeTool
                 (matcher "run_shell_command"; decision "ask" mirrors the Claude Code tiers).
 
@@ -30,6 +34,8 @@ import sys
 
 BAILIWICK_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GUARDRAIL = os.path.join(BAILIWICK_ROOT, "hooks", "guardrails.py")
+CAPTURE = os.path.join(BAILIWICK_ROOT, "hooks", "capture_session.py")
+CAPTURE_BACKUP = os.path.join(BAILIWICK_ROOT, "hooks", "capture_backup.sh")
 
 CODEX_BEGIN = "# BEGIN bailiwick hooks (managed - do not edit inside; reinstall via bootstrap --install-tools)"
 CODEX_END = "# END bailiwick hooks"
@@ -37,19 +43,56 @@ GEMINI_HOOK_NAME = "bailiwick-guardrail"
 
 def codex_block():
     # TOML: forward slashes work on Windows too; commandWindows covers a python3-less PATH.
-    posix = GUARDRAIL.replace("\\", "/")
+    # ORDER IS LOAD-BEARING: Codex keys hook trust by `<event>:<group>:<index>` (observed:
+    # `[hooks.state."<config path>:pre_tool_use:0:0"]`), so PreToolUse stays first and
+    # byte-identical — its trust entry keeps addressing the same hook. Whether the stored
+    # `trusted_hash` also survives depends on what Codex hashes, which is NOT verified here (two
+    # candidate preimages for a live entry did not reproduce it); if it re-prompts once for the
+    # guardrail after this change, that is the reason.
+    guard = GUARDRAIL.replace("\\", "/")
+    capture = CAPTURE.replace("\\", "/")
+    backup = CAPTURE_BACKUP.replace("\\", "/")
     return """{begin}
 [[hooks.PreToolUse]]
 matcher = "^Bash$"
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
-command = 'python3 "{path}" codex'
-commandWindows = 'python "{path}" codex'
+command = 'python3 "{guard}" codex'
+commandWindows = 'python "{guard}" codex'
 timeout = 30
 statusMessage = "bailiwick guardrail"
-{end}
-""".format(begin=CODEX_BEGIN, path=posix, end=CODEX_END)
+{capture_events}{end}
+""".format(begin=CODEX_BEGIN, guard=guard, end=CODEX_END,
+           capture_events="".join(codex_capture_event(ev, capture, backup)
+                                  for ev in ("Stop", "SessionEnd")))
+
+
+def codex_capture_event(event, capture, backup):
+    """Capture pair for one Codex lifecycle event (codex-cli >= 0.147 added Stop/SessionEnd).
+
+    Same two commands, same order, as the Claude Code template: copy the transcript into the
+    dirty zone, then push the encrypted off-machine copy. Both hooks self-gate to wired repos
+    and both CLIs pass the same payload fields (`session_id`/`transcript_path`/`cwd`/
+    `hook_event_name`), so the scripts need no per-CLI argument. Kept synchronous — the backup
+    push must observe the capture the line above it just wrote.
+    """
+    return """
+[[hooks.{event}]]
+
+[[hooks.{event}.hooks]]
+type = "command"
+command = 'python3 "{capture}"'
+commandWindows = 'python "{capture}"'
+timeout = 60
+statusMessage = "bailiwick capture"
+
+[[hooks.{event}.hooks]]
+type = "command"
+command = 'bash "{backup}" push'
+timeout = 60
+statusMessage = "bailiwick capture backup"
+""".format(event=event, capture=capture, backup=backup)
 
 
 def install_codex():
