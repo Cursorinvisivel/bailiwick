@@ -228,7 +228,8 @@ if created:
         d = json.load(open(example))
     except Exception:
         d = {}
-    # The example's sample machine name and placeholder backup must not leak into a real config.
+    # The sample machine name and placeholder backup of the example must not leak into a real config.
+    # (No apostrophes anywhere in this heredoc: bash 3.2 scans quotes inside $(...) even in a quoted heredoc.)
     d.pop("machine", None)
     cb = d.get("capture_backup")
     if isinstance(cb, dict):
