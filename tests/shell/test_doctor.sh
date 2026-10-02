@@ -40,6 +40,24 @@ rm "$INST/.bailiwick-sync.json"
 out="$(doctor)"; rc=$?
 assert_exit "missing config still exits 0" 0 "$rc"
 assert_contains "warns about the missing config" ".bailiwick-sync.json missing" "$out"
+assert_contains "points a demoted central at the fix" "bootstrap.sh --role central" "$out"
+
+echo "== a satellite holding the capture-pool SECRET key looks like a demoted central"
+KEYED="$T_SANDBOX/gnupg-keyed"
+KFPR="$(t_gen_gpg_key "$KEYED" doctor-central)"
+if [ -n "$KFPR" ]; then
+  cat > "$INST/.bailiwick-sync.json" <<EOC
+{ "role": "satellite", "machine": "doctest",
+  "capture_backup": { "enabled": true, "gpg_recipients": ["$KFPR"] } }
+EOC
+  out="$(GNUPGHOME="$KEYED" doctor)"; rc=$?
+  assert_exit "satellite with secret key -> still exit 0 (warn)" 0 "$rc"
+  assert_contains "flags the misplaced secret key" "holds the gpg SECRET key" "$out"
+  assert_not_contains "no longer claims encrypt-only" "secret key intentionally absent" "$out"
+else
+  echo "  SKIP secret-key-on-satellite case — this gpg cannot generate the fixture"
+fi
+echo '{ "role": "satellite", "machine": "doctest" }' > "$INST/.bailiwick-sync.json"
 
 echo "== capture backup enabled with a missing recipient key is BROKEN"
 cat > "$INST/.bailiwick-sync.json" <<'EOF'
@@ -101,6 +119,26 @@ out="$(doctor)"; rc=$?
 unset GH_STUB_PR_LIST
 assert_exit "parked branch with PR -> exit 0" 0 "$rc"
 assert_contains "reports it as waiting on the merge" "PR #9 open" "$out"
+
+echo "== an open PR that CONFLICTS with main is BROKEN (an open PR is not a mergeable one)"
+export GH_STUB_PR_LIST="9" GH_STUB_PR_MERGEABLE="CONFLICTING"
+out="$(doctor)"; rc=$?
+assert_exit "conflicting PR -> exit 1" 1 "$rc"
+assert_contains "names the conflict" "PR #9 is CONFLICTING with main" "$out"
+assert_contains "says how to unstick it" "git rebase origin/main sync/doctest" "$out"
+
+echo "== mergeability not yet computed is only degraded (GitHub computes it lazily)"
+export GH_STUB_PR_MERGEABLE="UNKNOWN"
+out="$(doctor)"; rc=$?
+assert_exit "unknown mergeability -> exit 0" 0 "$rc"
+assert_contains "warns it is lazily computed" "computes it lazily" "$out"
+
+echo "== a mergeable PR nobody merges is degraded — the no-central signal"
+export GH_STUB_PR_MERGEABLE="MERGEABLE"
+out="$(BW_DOCTOR_STALE_DAYS=0 doctor)"; rc=$?
+unset GH_STUB_PR_LIST GH_STUB_PR_MERGEABLE
+assert_exit "stale mergeable PR -> exit 0" 0 "$rc"
+assert_contains "asks whether a central exists" "is there an active central" "$out"
 
 echo "== central sweeps OTHER machines' parked branches too"
 cat > "$INST/.bailiwick-sync.json" <<'EOF'
