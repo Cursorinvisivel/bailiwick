@@ -19,6 +19,7 @@
                                [-WithStandards] [-Update] [-Visible] [-Force] [-Clobber] [-NoGhAuth]
                                [-InstallTools] [-WithDesktop] [-DryRun] <target-repo-path>
     pwsh scripts/bootstrap.ps1 -InstallTools [-WithDesktop]                 (global-only: no target repo needed)
+    pwsh scripts/bootstrap.ps1 -Role central|satellite [-Machine <name>]   (set this machine's sync role)
     pwsh scripts/bootstrap.ps1 -Uninstall [-DryRun]                        (remove global wiring; bailiwick-scoped)
     pwsh scripts/bootstrap.ps1 -Uninstall <repo> [-PurgeCaptures] [-DryRun]  (un-seed one repo; captures preserved)
 
@@ -91,6 +92,8 @@ param(
   [switch]$Uninstall,
   [switch]$PurgeCaptures,
   [switch]$WithDesktop,
+  [string]$Role,
+  [string]$Machine,
   [switch]$Help
 )
 
@@ -571,11 +574,74 @@ function Warn-PublicOrigin {
   }
 }
 
+# -Role: (re)write THIS machine's sync role into the clone's .bailiwick-sync.json. The file is
+# gitignored by design, so a reinstalled central comes back as a satellite with nothing saying so -
+# the fleet then has no merge authority and every sync/* PR waits forever. This is the one-command
+# restore. Only 'role' (+ 'machine') change; every other key (capture_backup, gh pinning) survives.
+# Mirrors bootstrap.sh configure_role.
+$SyncCfg = Join-Path $BailiwickRoot '.bailiwick-sync.json'
+function Set-SyncRole {
+  if ($Role -notin @('central', 'satellite')) {
+    Write-Error "-Role must be 'central' or 'satellite' (got '$Role')" -ErrorAction Continue; exit 2
+  }
+  $created = -not (Test-Path -LiteralPath $SyncCfg)
+  if ($created) {
+    try { $d = Get-Content -Raw -LiteralPath (Join-Path $BailiwickRoot '.bailiwick-sync.example.json') | ConvertFrom-Json }
+    catch { $d = [pscustomobject]@{} }
+    # The example's sample machine name and placeholder backup must not leak into a real config.
+    $d.PSObject.Properties.Remove('machine')
+    if ($d.PSObject.Properties['capture_backup'] -and $d.capture_backup) { $d.capture_backup.enabled = $false }
+    $oldRole = 'satellite (default)'
+  } else {
+    try { $d = Get-Content -Raw -LiteralPath $SyncCfg | ConvertFrom-Json }
+    catch { Write-Error "$SyncCfg is not valid JSON ($($_.Exception.Message)) - fix or remove it first" -ErrorAction Continue; exit 2 }
+    $oldRole = if ($d.PSObject.Properties['role'] -and $d.role) { $d.role } else { 'satellite (default)' }
+  }
+  $mach = if ($Machine) { $Machine } elseif ($d.PSObject.Properties['machine'] -and $d.machine) { $d.machine } else { ($env:COMPUTERNAME, [System.Net.Dns]::GetHostName() | Where-Object { $_ } | Select-Object -First 1) }
+  $out = [ordered]@{}
+  if ($d.PSObject.Properties['//']) { $out['//'] = $d.'//' }
+  $out['role'] = $Role
+  $out['machine'] = $mach
+  foreach ($p in $d.PSObject.Properties) { if ($p.Name -notin @('//', 'role', 'machine')) { $out[$p.Name] = $p.Value } }
+  $verb = if ($created) { 'created' } else { 'updated' }
+  $pre = ''
+  if ($DryRun) { $pre = '[dry-run] would have ' } else {
+    # UTF-8 WITHOUT a BOM: Windows PowerShell's -Encoding UTF8 writes one, and the bash/python
+    # readers of this file reject it.
+    $json = ([pscustomobject]$out | ConvertTo-Json -Depth 10) + "`n"
+    [System.IO.File]::WriteAllText("$SyncCfg.tmp", $json, (New-Object System.Text.UTF8Encoding $false))
+    Move-Item -Force -LiteralPath "$SyncCfg.tmp" -Destination $SyncCfg
+  }
+  Write-Host "* sync role : $pre$verb $SyncCfg - role: $oldRole -> $Role, machine: $mach"
+  if ($Role -eq 'central') {
+    Write-Host "  central = merge authority: it pushes curated knowledge straight to main, owns .telemetry.json,"
+    Write-Host "  and is where satellite sync/* PRs get merged. Keep exactly ONE central - demote any other"
+    Write-Host "  machine claiming it with: bootstrap.ps1 -Role satellite (run there)."
+    $cb = $out['capture_backup']
+    if ($cb -and $cb.enabled -and (Get-Command gpg -ErrorAction SilentlyContinue)) {
+      foreach ($fpr in @($cb.gpg_recipients)) {
+        & gpg --list-secret-keys $fpr *> $null
+        if ($LASTEXITCODE -ne 0) { Write-Host "  WARNING: gpg SECRET key for $fpr is not on this machine - central cannot decrypt the capture pool until you restore it (gpg --import)." }
+      }
+    }
+  }
+  if ($created) { Write-Host "  New file: capture_backup is OFF and no gh account is pinned - review $SyncCfg (see .bailiwick-sync.example.json)." }
+  Write-Host "  Verify: scripts/doctor.sh (bash)"
+}
+if ($Machine -and -not $Role) { Write-Error "-Machine only applies with -Role" -ErrorAction Continue; exit 2 }
+if ($Role) {
+  if ($Uninstall) { Write-Error "-Role conflicts with -Uninstall" -ErrorAction Continue; exit 2 }
+  Set-SyncRole
+  # Standalone role change: nothing else was asked for.
+  if (-not $InstallTools -and -not $Target) { exit 0 }
+}
+
 $GlobalOnly = ($InstallTools -and -not $Target)
 if ($Help -or (-not $Target -and -not $GlobalOnly -and -not $Uninstall)) {
   Get-Help $PSCommandPath -Detailed 2>$null
   Write-Host "Usage: bootstrap.ps1 [-Seeded|-Shadow] [-Init] [-WithAgents] [-WithCopilot] [-AllTools] [-WithStandards] [-Update] [-Visible] [-Force] [-Clobber] [-NoGhAuth] [-InstallTools] [-WithDesktop] [-DryRun] <target-repo-path>"
   Write-Host "       bootstrap.ps1 -InstallTools [-WithDesktop]   (global-only: no target repo needed)"
+  Write-Host "       bootstrap.ps1 -Role central|satellite [-Machine <name>]   (set this machine's sync role in .bailiwick-sync.json)"
   Write-Host "       bootstrap.ps1 -Uninstall [-DryRun]     (remove the global once-per-machine wiring; bailiwick-scoped)"
   Write-Host "       bootstrap.ps1 -Uninstall <repo> [-PurgeCaptures] [-DryRun]  (un-seed one repo; captures preserved)"
   Write-Host "Default mode is SHADOW (zero-footprint; personal): no files are written into the repo."
@@ -1485,10 +1551,20 @@ if (Test-DesktopWired $script:ChatgptDesktopCfg) {
   $chatgptDtStatus = "-- ChatGPT Desktop config path not detected" + $(if ($script:DesktopOsNote) { " ($($script:DesktopOsNote))" } else { "" })
 }
 
+# The per-machine role is gitignored, so it is the one piece of machine setup a reinstall or fresh
+# clone loses without a trace - say so here rather than let a former central run as a satellite.
+if (Test-Path -LiteralPath $SyncCfg) {
+  $syncRole = try { (Get-Content -Raw -LiteralPath $SyncCfg | ConvertFrom-Json).role } catch { '?' }
+  $syncStatus = "sync role: $syncRole ($SyncCfg)"
+} else {
+  $syncStatus = "WARNING no .bailiwick-sync.json - this machine runs as a SATELLITE by default. Your central (e.g. after a reinstall)? bootstrap.ps1 -Role central   - otherwise: bootstrap.ps1 -Role satellite"
+}
+
 if ($GlobalOnly) {
   Write-Host ""
   Write-Host "OK Global bailiwick prerequisites installed/validated (no repo wired)."
   Write-Host "Next:"
+  Write-Host "  - $syncStatus"
   Write-Host "  - $tfStatus"
   Write-Host "  - $ghMcpStatus"
   Write-Host "  - $uvStatus"
@@ -1507,6 +1583,7 @@ if ($GlobalOnly) {
   Write-Host ""
   Write-Host "OK Global bailiwick prerequisites installed/validated ('$RepoName' shadow-wired above - no repo files)."
   Write-Host "Next:"
+  Write-Host "  - $syncStatus"
   Write-Host "  - $tfStatus"
   Write-Host "  - $ghMcpStatus"
   Write-Host "  - $uvStatus"
@@ -1523,6 +1600,7 @@ if ($GlobalOnly) {
   Write-Host ""
   Write-Host "OK Bootstrapped '$RepoName'."
   Write-Host "Next:"
+  Write-Host "  - $syncStatus"
   Write-Host "  - $ghStatusMsg"
   Write-Host "  - $tfStatus"
   Write-Host "  - $ghMcpStatus"

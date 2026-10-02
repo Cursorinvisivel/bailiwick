@@ -69,7 +69,9 @@ fi
 CFG="$BAILIWICK_ROOT/.bailiwick-sync.json"
 role="satellite"; machine=""; cb_enabled=""; cb_recipients=""
 if [ ! -f "$CFG" ]; then
-  warn ".bailiwick-sync.json missing — role defaults to 'satellite', capture backup is OFF, gh account unpinned (copy .bailiwick-sync.example.json and fill it in)"
+  # The silent demotion: a reinstalled central comes back as a satellite, the fleet is left with no
+  # merge authority, and every sync/* PR waits forever (see the stale-PR check in section 6).
+  warn ".bailiwick-sync.json missing — role defaults to 'satellite', capture backup is OFF, gh account unpinned. If this machine is (or was, before a reinstall) your CENTRAL, restore it: scripts/bootstrap.sh --role central; otherwise scripts/bootstrap.sh --role satellite"
 elif [ "$HAVE_PY" -eq 1 ]; then
   cfg_line="$(python3 - "$CFG" <<'PY'
 import json, sys
@@ -141,9 +143,14 @@ if [ "$cb_enabled" = "1" ]; then
         else
           fail "role is 'central' but the gpg SECRET key for $fpr is absent — NO machine can decrypt the capture pool; restore the key here or re-key the fleet"
         fi
+      elif gpg --list-secret-keys "$fpr" >/dev/null 2>&1; then
+        # The decrypt key lives only on the curating machine — a satellite holding it is most
+        # likely a central whose role was lost (reinstall, fresh clone).
+        warn "role is 'satellite' but this machine holds the gpg SECRET key for $fpr — that key belongs on the curating (central) machine; if this IS your central, scripts/bootstrap.sh --role central"
+      else
+        ok "satellite is encrypt-only for $fpr (secret key intentionally absent here)"
       fi
     done
-    [ "$role" = "satellite" ] && ok "satellite is encrypt-only (secret key intentionally absent here)"
   fi
 fi
 
@@ -198,7 +205,11 @@ fi
 # The stranding check: a sync/<machine> branch ahead of origin/main with no open PR means curated
 # knowledge is durably pushed yet unreachable — every other machine fast-forwards from origin/main
 # and will never see it, and nothing about that state makes a sound on its own.
-# check_parked <branch>: is the parked branch merged / PR'd / stranded?
+# An open PR is not enough: one that CONFLICTS with main can never be merged as-is, so the knowledge
+# is just as stranded as with no PR at all. And a mergeable PR that nobody merges for weeks usually
+# means there is no central left to merge it (a lost .bailiwick-sync.json demotes it silently).
+STALE_DAYS="${BW_DOCTOR_STALE_DAYS:-14}"
+# check_parked <branch>: is the parked branch merged / PR'd / mergeable / stranded?
 check_parked() {
   _pb="$1"
   git fetch origin "+refs/heads/${_pb}:refs/remotes/origin/${_pb}" --quiet 2>/dev/null || return 0
@@ -207,13 +218,28 @@ check_parked() {
     ok "origin/${_pb} fully merged into origin/main"
     return 0
   fi
+  _pb_behind="$(git rev-list --count "origin/${_pb}..origin/main" 2>/dev/null || echo 0)"
   _pb_oldest="$(git log --format=%ct --reverse "origin/main..origin/${_pb}" 2>/dev/null | head -1)"
   _pb_days=""
   [ -n "$_pb_oldest" ] && _pb_days=$(( ( $(date +%s) - _pb_oldest ) / 86400 ))
   if [ "$HAVE_GH" -eq 1 ]; then
     _pb_pr="$(bw_gh_open_pr "$_pb")"
     if [ -n "$_pb_pr" ]; then
-      ok "origin/${_pb} is $_pb_ahead commit(s) ahead with PR #${_pb_pr} open (waiting on central merge${_pb_days:+; oldest commit ${_pb_days}d old})"
+      # shellcheck disable=SC2086  # intentional word-split of the --repo args
+      _pb_merge="$(bw_gh pr view "$_pb_pr" $repo_args --json mergeable --jq '.mergeable' 2>/dev/null || true)"
+      case "$_pb_merge" in
+        CONFLICTING)
+          fail "origin/${_pb} PR #${_pb_pr} is CONFLICTING with main (${_pb_behind} commit(s) behind${_pb_days:+; oldest commit ${_pb_days}d old}) — it cannot merge; on the machine that owns it: git fetch origin && git rebase origin/main ${_pb}, resolve, then git push --force-with-lease origin ${_pb} (the open PR updates itself)" ;;
+        MERGEABLE)
+          if [ -n "$_pb_days" ] && [ "$_pb_days" -ge "$STALE_DAYS" ]; then
+            warn "origin/${_pb} PR #${_pb_pr} is mergeable but has waited ${_pb_days}d (${_pb_behind} behind main) — is there an active central to merge it? (a reinstalled central comes back as a satellite: scripts/bootstrap.sh --role central there)"
+          else
+            ok "origin/${_pb} is $_pb_ahead commit(s) ahead with PR #${_pb_pr} open and mergeable (waiting on central merge${_pb_days:+; oldest commit ${_pb_days}d old})"
+          fi ;;
+        *)
+          # GitHub computes mergeability lazily — UNKNOWN right after a push is normal.
+          warn "origin/${_pb} PR #${_pb_pr} is open but its mergeability is ${_pb_merge:-unknown} (GitHub computes it lazily — re-run shortly)${_pb_days:+; oldest commit ${_pb_days}d old}" ;;
+      esac
     else
       fail "origin/${_pb} is $_pb_ahead commit(s) ahead of origin/main with NO open PR${_pb_days:+ (oldest commit ${_pb_days}d old)} — knowledge is stranded; open one: gh pr create ${repo_args:+$repo_args }--base main --head ${_pb}"
     fi

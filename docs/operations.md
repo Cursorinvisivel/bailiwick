@@ -85,7 +85,10 @@ commits**.
 
 ### Roles — `.bailiwick-sync.json`
 
-Copy `.bailiwick-sync.example.json` → `.bailiwick-sync.json` (gitignored) on each machine and set its role:
+Set each machine's role with `scripts/bootstrap.sh --role central|satellite [--machine <name>]`
+(Windows: `bootstrap.ps1 -Role … [-Machine …]`). It writes `.bailiwick-sync.json` (gitignored): it
+creates the file from `.bailiwick-sync.example.json` when absent, and otherwise changes only `role`/`machine`,
+leaving capture backup and gh pinning as they are. `--dry-run` previews. Hand-editing works too:
 
 ```json
 { "role": "satellite", "machine": "laptop-01" }
@@ -95,6 +98,12 @@ Copy `.bailiwick-sync.example.json` → `.bailiwick-sync.json` (gitignored) on e
   straight to `origin/main`.
 - **satellite** — every other machine (the default when the file is absent). Skips the telemetry
   step entirely; `/curate` parks its commits on `sync/<machine>` and opens a PR to `main`.
+
+Keep exactly **one** central. Because the file is gitignored, **reinstalling or re-cloning the central
+machine silently demotes it to a satellite**: the fleet loses its merge authority and satellite PRs
+wait forever. After rebuilding central, run `bootstrap.sh --role central` and restore the
+capture-backup gpg secret key. Bootstrap's summary flags a missing config, and `doctor.sh` warns about
+it (see below).
 
 ### Inbound — automatic
 
@@ -141,7 +150,11 @@ PR-less for weeks. `scripts/doctor.sh` is a read-only preflight that checks them
 paths point at *this* clone, per-machine config present and parseable, encrypt/decrypt keys match
 the role, satellites carry no telemetry delta, the resolved gh account can reach the repo, and no
 parked `sync/*` branch lacks an open PR (central sweeps **all** of them — it is the merge
-authority; a satellite checks its own). Run it after cloning/moving the framework, changing
+authority; a satellite checks its own). An open PR is not enough on its own: a PR that **conflicts**
+with `main` fails the check, with the behind-count and the rebase command; mergeability GitHub hasn't
+computed yet only warns. Doctor also warns on **no-central symptoms**: a
+mergeable PR waiting longer than `BW_DOCTOR_STALE_DAYS` (default 14), a satellite holding the
+capture-pool gpg *secret* key, or a missing config. Each warning names the `--role central` fix. Run it after cloning/moving the framework, changing
 machines or accounts, or whenever sync behaviour looks off. Exit 0 = healthy; exit 1 = something
 is broken enough to lose captures or strand knowledge.
 

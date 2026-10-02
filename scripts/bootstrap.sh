@@ -24,6 +24,7 @@ bailiwick project bootstrap — wire a repo to the framework, invisible to the s
 
 Usage: bootstrap.sh [options] <target-repo-path>
        bootstrap.sh --install-tools            (global-only: no target repo needed)
+       bootstrap.sh --role central|satellite [--machine <name>]   (set this machine's sync role)
 
 Modes (SHADOW is the DEFAULT):
   (no mode flag)   SHADOW MODE (FRAMEWORK.md §7.1): zero-footprint; personal. Activates the
@@ -119,6 +120,16 @@ Options:
                    go-installed MCP binaries are left in place. Preview with --dry-run.
   --purge-captures Only with '--uninstall <repo>': also delete that repo's .bailiwick-outputs/
                    INCLUDING any uncurated captures (default is to preserve + warn). Irreversible.
+  --role <r>       Set THIS machine's multi-machine sync role ('central' | 'satellite') in the
+                   clone's .bailiwick-sync.json (gitignored, so a reinstall or fresh clone loses it
+                   and the machine silently comes back as a satellite). Creates the file from
+                   .bailiwick-sync.example.json when absent; otherwise changes only 'role' (and
+                   'machine' with --machine), preserving capture_backup, gh pinning, etc. Runs
+                   standalone (no target needed) or alongside --install-tools / a repo. Exactly ONE
+                   machine in the fleet should be central — it merges satellite PRs, owns
+                   telemetry, and holds the capture-backup decrypt key. Verify with scripts/doctor.sh.
+  --machine <name> With --role: the machine name (sync branch sync/<name>, health shard). Default:
+                   the existing value, else the short hostname.
   -h, --help       Show this help.
 
 Default: SHADOW mode — zero-footprint; personal; nothing is written into the repo. With
@@ -127,7 +138,7 @@ framework is written to the tracked .gitignore, so a clone shows no trace of it.
 USAGE
 }
 
-DO_INIT=0; WITH_AGENTS=0; WITH_COPILOT=0; WITH_GEMINI=0; WITH_DESKTOP=0; FORCE=0; CLOBBER=0; VISIBLE=0; UPDATE=0; NO_GH_AUTH=0; INSTALL_TOOLS=0; WITH_STANDARDS=0; SHADOW=0; SEEDED=0; DRY_RUN=0; UNINSTALL=0; PURGE_CAPTURES=0; TARGET_ARG=""
+DO_INIT=0; WITH_AGENTS=0; WITH_COPILOT=0; WITH_GEMINI=0; WITH_DESKTOP=0; FORCE=0; CLOBBER=0; VISIBLE=0; UPDATE=0; NO_GH_AUTH=0; INSTALL_TOOLS=0; WITH_STANDARDS=0; SHADOW=0; SEEDED=0; DRY_RUN=0; UNINSTALL=0; PURGE_CAPTURES=0; TARGET_ARG=""; ROLE=""; MACHINE_ARG=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
@@ -148,6 +159,10 @@ while [ $# -gt 0 ]; do
     --seeded) SEEDED=1 ;;
     --force) FORCE=1 ;;
     --clobber) CLOBBER=1 ;;
+    --role) [ $# -ge 2 ] || { echo "error: --role needs a value (central|satellite)" >&2; exit 2; }; ROLE="$2"; shift ;;
+    --role=*) ROLE="${1#--role=}" ;;
+    --machine) [ $# -ge 2 ] || { echo "error: --machine needs a value" >&2; exit 2; }; MACHINE_ARG="$2"; shift ;;
+    --machine=*) MACHINE_ARG="${1#--machine=}" ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown option: $1" >&2; usage; exit 2 ;;
     *) TARGET_ARG="$1" ;;
@@ -188,6 +203,88 @@ warn_public_origin() {
     echo
   fi
 }
+
+# --role: (re)write THIS machine's sync role into the clone's .bailiwick-sync.json. The file is
+# gitignored by design, so a reinstalled central comes back as a satellite with nothing saying so —
+# the fleet then has no merge authority and every sync/* PR waits forever. This is the one-command
+# restore. Only 'role' (+ 'machine') change; every other key (capture_backup, gh pinning) survives.
+SYNC_CFG="$BAILIWICK_ROOT/.bailiwick-sync.json"
+configure_role() {
+  case "$ROLE" in
+    central|satellite) ;;
+    *) echo "error: --role must be 'central' or 'satellite' (got '$ROLE')" >&2; exit 2 ;;
+  esac
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "error: --role needs python3 (safe JSON edit of $SYNC_CFG)" >&2; exit 2
+  fi
+  local plan
+  plan="$(python3 - "$SYNC_CFG" "$BAILIWICK_ROOT/.bailiwick-sync.example.json" "$ROLE" "$MACHINE_ARG" \
+          "$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)" "$DRY_RUN" <<'PY'
+import json, os, sys
+cfg, example, role, machine_arg, host, dry = sys.argv[1:7]
+created = not os.path.exists(cfg)
+if created:
+    try:
+        d = json.load(open(example))
+    except Exception:
+        d = {}
+    # The sample machine name and placeholder backup of the example must not leak into a real config.
+    # (No apostrophes anywhere in this heredoc: bash 3.2 scans quotes inside $(...) even in a quoted heredoc.)
+    d.pop("machine", None)
+    cb = d.get("capture_backup")
+    if isinstance(cb, dict):
+        cb["enabled"] = False
+else:
+    try:
+        d = json.load(open(cfg))
+    except Exception as e:
+        print("ERROR\t%s is not valid JSON (%s) — fix or remove it first" % (cfg, e)); sys.exit()
+old_role = "satellite (default)" if created else (d.get("role") or "satellite (default)")
+machine = machine_arg or d.get("machine") or host
+d["role"] = role
+d["machine"] = machine
+out = {"//": d.pop("//")} if "//" in d else {}
+out["role"] = d.pop("role"); out["machine"] = d.pop("machine"); out.update(d)
+if dry != "1":
+    tmp = cfg + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(out, f, indent=2); f.write("\n")
+    os.replace(tmp, cfg)
+cb = out.get("capture_backup") or {}
+recips = [r for r in (cb.get("gpg_recipients") or []) if isinstance(r, str)] if cb.get("enabled") else []
+print("OK\t%s\t%s\t%s\t%s" % ("created" if created else "updated", old_role, machine, " ".join(recips)))
+PY
+)"
+  local status verb old machine recips
+  IFS="$(printf '\t')" read -r status verb old machine recips <<EOF
+$plan
+EOF
+  if [ "$status" != "OK" ]; then echo "error: ${verb:-could not configure role}" >&2; exit 2; fi
+  local pre=""; [ "$DRY_RUN" -eq 1 ] && pre="[dry-run] would have "
+  echo "• sync role : ${pre}${verb} $SYNC_CFG — role: ${old} -> ${ROLE}, machine: ${machine}"
+  if [ "$ROLE" = "central" ]; then
+    echo "  central = merge authority: it pushes curated knowledge straight to main, owns .telemetry.json,"
+    echo "  and is where satellite sync/* PRs get merged. Keep exactly ONE central — demote any other"
+    echo "  machine claiming it with: bootstrap.sh --role satellite (run there)."
+    if [ -n "$recips" ] && command -v gpg >/dev/null 2>&1; then
+      for fpr in $recips; do
+        gpg --list-secret-keys "$fpr" >/dev/null 2>&1 \
+          || echo "  ⚠ gpg SECRET key for $fpr is not on this machine — central cannot decrypt the capture pool until you restore it (gpg --import)."
+      done
+    fi
+  fi
+  [ "$verb" = "created" ] && echo "  New file: capture_backup is OFF and no gh account is pinned — review $SYNC_CFG (see .bailiwick-sync.example.json)."
+  echo "  Verify: scripts/doctor.sh"
+}
+if [ -n "$MACHINE_ARG" ] && [ -z "$ROLE" ]; then
+  echo "error: --machine only applies with --role" >&2; exit 2
+fi
+if [ -n "$ROLE" ]; then
+  if [ "$UNINSTALL" -eq 1 ]; then echo "error: --role conflicts with --uninstall" >&2; exit 2; fi
+  configure_role
+  # Standalone role change: nothing else was asked for.
+  if [ "$INSTALL_TOOLS" -ne 1 ] && [ -z "$TARGET_ARG" ]; then exit 0; fi
+fi
 
 GLOBAL_ONLY=0
 if [ "$INSTALL_TOOLS" -eq 1 ] && [ -z "$TARGET_ARG" ]; then GLOBAL_ONLY=1; fi
@@ -1438,9 +1535,18 @@ else
   CHATGPT_DT_STATUS="✗ ChatGPT Desktop config path not detected${DESKTOP_OS_NOTE:+ ($DESKTOP_OS_NOTE)}"
 fi
 
+# The per-machine role is gitignored, so it is the one piece of machine setup a reinstall or fresh
+# clone loses without a trace — say so here rather than let a former central run as a satellite.
+if [ -f "$SYNC_CFG" ]; then
+  SYNC_STATUS="sync role: $(grep -oE '"role"[[:space:]]*:[[:space:]]*"[^"]+"' "$SYNC_CFG" 2>/dev/null | head -1 | sed -E 's/.*"([^"]+)"$/\1/' || true) ($SYNC_CFG)"
+else
+  SYNC_STATUS="⚠ no .bailiwick-sync.json — this machine runs as a SATELLITE by default. Your central (e.g. after a reinstall)? $0 --role central   — otherwise: $0 --role satellite"
+fi
+
 if [ "$GLOBAL_ONLY" -eq 1 ]; then
   printf '\n✓ Global bailiwick prerequisites installed/validated (no repo wired).\n'
   printf 'Next:\n'
+  printf '  • %s\n' "$SYNC_STATUS"
   printf '  • %s\n' "$TF_STATUS"
   printf '  • %s\n' "$GH_MCP_STATUS"
   printf '  • %s\n' "$UV_STATUS"
@@ -1458,6 +1564,7 @@ elif [ "$SHADOW" -eq 1 ]; then
   # Reached only on a shadow run WITH --install-tools (plain shadow runs exit in the shadow block).
   printf '\n✓ Global bailiwick prerequisites installed/validated (%q shadow-wired above — no repo files).\n' "$REPO_NAME"
   printf 'Next:\n'
+  printf '  • %s\n' "$SYNC_STATUS"
   printf '  • %s\n' "$TF_STATUS"
   printf '  • %s\n' "$GH_MCP_STATUS"
   printf '  • %s\n' "$UV_STATUS"
@@ -1473,6 +1580,7 @@ elif [ "$SHADOW" -eq 1 ]; then
 else
   printf '\n✓ Bootstrapped %q.\n' "$REPO_NAME"
   printf 'Next:\n'
+  printf '  • %s\n' "$SYNC_STATUS"
   printf '  • %s\n' "$GH_STATUS_MSG"
   printf '  • %s\n' "$TF_STATUS"
   printf '  • %s\n' "$GH_MCP_STATUS"

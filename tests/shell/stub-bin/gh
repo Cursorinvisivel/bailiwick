@@ -4,6 +4,7 @@
 #   GH_STUB_NOTOKEN       accounts that must report NO token (auth token exits 1)
 #   GH_STUB_CANREAD       tokens allowed to read repos via `gh api repos/...` (space list)
 #   GH_STUB_PR_LIST       literal stdout for `gh pr list` (default: empty)
+#   GH_STUB_PR_MERGEABLE  literal stdout for `gh pr view` (the --jq'd mergeable; default MERGEABLE)
 #   GH_STUB_PR_CREATE_RC  exit code for `gh pr create` (default: 0)
 #   GH_STUB_LOG           file to append every invocation to, as: "GH_TOKEN=<v> :: <args>"
 # Token format: "tok_<account>". Everything else exits 0 quietly.
@@ -45,6 +46,10 @@ case "$1 ${2:-}" in
     ;;
   "pr list")
     printf '%s' "${GH_STUB_PR_LIST:-}"
+    exit 0
+    ;;
+  "pr view")
+    printf '%s\n' "${GH_STUB_PR_MERGEABLE:-MERGEABLE}"
     exit 0
     ;;
   "pr create")
