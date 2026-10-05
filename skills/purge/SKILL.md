@@ -45,6 +45,8 @@ first.
 
 2. **Scan — enumerate every trace** (report counts per surface):
    - `clients/<from>/` subtree.
+   - `$BAILIWICK/definitions/clients/<from>/` subtree — the client's document build specs (ADR-011).
+     Outside `knowledge/`, may hold binaries (draw.io, fonts, logos); count files, don't grep them.
    - Files carrying `scope: client:<from>` (or `external:<from>`).
    - `.telemetry.json` `distinct_projects_used[]` entries containing the id.
    - **Inline mentions** of any token across `knowledge/` (topics/patterns/context), `INDEX.md`, and
@@ -76,6 +78,8 @@ first.
      (`for wombat's landing zone` → `for a landing zone`) or re-home
      (`… for <target-org>'s landing zone`). Retag `scope:` to `--to` (or `generic`).
    - **DELETE** — clearly client/project-specific and not abstractable: the `clients/<from>/` files;
+     the whole `definitions/clients/<from>/` subtree (build specs are never abstracted — a reusable
+     rule inside one belongs in `knowledge/`, so surface it as a candidate instead of keeping the file);
      all captures for this origin (cannot be sanitized in place).
    - **SURFACE FOR DECISION** — `scope: client:<from>` files *outside* `clients/<from>/`: show each and
      let the user choose abstract-and-keep vs delete (reusable-but-mis-scoped vs purely client).
@@ -89,7 +93,7 @@ first.
 5. **Execute on approval, in this order:**
    1. Apply approved **abstractions** — rewrite files, retag `scope:` to `--to`/`generic`, fix any
       `## Related` links and INDEX rows that pointed at now-abstracted or deleted notes.
-   2. **Delete** the clearly-client-specific files (`clients/<from>/`, and any surfaced files the user
+   2. **Delete** the clearly-client-specific files (`clients/<from>/`, `definitions/clients/<from>/`, and any surfaced files the user
       chose to delete).
    3. **Scrub telemetry, then re-evaluate confidence.** Remove the id from every
       `distinct_projects_used[]`. Removing a client's project can drop a note below its graduation
@@ -99,7 +103,7 @@ first.
       under 3 distinct projects → `medium`, etc.). These downgrades were surfaced for approval in Step 4,
       not applied silently.
    4. **Remove the `org-shorthands.md` registry row LAST** (it was needed for detection during the run).
-   5. **Commit** the knowledge changes (`knowledge:` prefix) — requires approval. The clean, abstracted
+   5. **Commit** the knowledge and definitions changes (`knowledge:` prefix) — requires approval. The clean, abstracted
       library is now in git.
    6. **Committed-knowledge safety check → purge captures.** Verify the abstracted knowledge is
       committed (`git status` clean for the touched files / the commit exists). ONLY then delete the
@@ -123,7 +127,8 @@ first.
      any `capture/*` branch of the backup repo still holds pending blobs.
    - **Knowledge repo:** the `git filter-repo` invocation(s), e.g.
      `git filter-repo --replace-text <(printf '%s==><redacted>\n' <id> <org-token> "<org name>")`
-     (or `--path clients/<from>/ --invert-paths` to drop the client subtree from history).
+     (or `--path knowledge/clients/<from>/ --path definitions/clients/<from>/ --invert-paths` to drop
+     both client subtrees from history).
    - **Backup repo (the ciphertext) — do NOT skip if erasure matters.** The knowledge-repo rewrite does
      not touch the encrypted capture-backup repo, where the client's ciphertext still lives in history
      after Step 5's purge. Output the equivalent per matched subtree from Step 2:

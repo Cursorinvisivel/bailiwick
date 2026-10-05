@@ -74,7 +74,7 @@ combined checklist to the Quality stage.
 | Cloud Run / Functions | serverless.md | Memory → Implement → Quality |
 | Data pipeline / NiFi | data.md | Memory → Implement → Quality |
 | GitHub Actions / Atlantis | cicd.md | Memory → Implement → Quality |
-| ADR / HLD / LLD | domain as needed | Memory → Docs → Quality |
+| ADR / HLD / LLD | domain as needed | Memory → Docs → Quality (HLD/LLD for a client with `definitions/clients/<id>/` → Docs reports a hand-off to the documentation tool; ADR-011) |
 | Security review | domain as needed | Memory → Security Review |
 | Code review | domain as needed | Memory → Quality |
 | Module documentation | — | Memory → Docs |

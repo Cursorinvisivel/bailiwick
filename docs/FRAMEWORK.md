@@ -181,6 +181,8 @@ knowledge/
   indexes/ (0)       deeper index-tree nodes (empty until a domain grows past the shard threshold)
   runbooks/ workshops/   present for generated artifacts (empty until produced)
   # (Framework ADRs are NOT here — they live in docs/decisions/ as status-tracked design records.)
+  # (Per-client document build specs are NOT here either — they live in definitions/clients/<id>/,
+  #  authored by a documentation tool or by hand, reviewed by git diff, never curated. ADR-011.)
 ```
 
 ### Frontmatter schema (every `id`-bearing content file — topics, patterns, context, clients)
@@ -679,6 +681,7 @@ bailiwick/
   ROADMAP.md                                # non-goals & possibilities (team version, radar)
   scripts/        bootstrap.sh  bootstrap.ps1
   knowledge/      INDEX.md  .telemetry.json  topics/ patterns/ context/ clients/ templates/ …
+  definitions/    README.md — per-client document build specs (clients/<id>/), outside knowledge/ (ADR-011)
   agents/         lead + 5 domain + 7 execution (13 files)
   hooks/          session_start.sh  capture_session.py  capture_backup.sh  sync_knowledge.sh
                   guardrails.py  install_hooks.py  settings.template.json  health_common.sh

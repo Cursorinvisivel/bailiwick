@@ -22,7 +22,7 @@ Generation and maintenance of technical documentation and client materials.
 ### Technical documentation
 - Terraform module README.md
 - ADRs (use $BAILIWICK/knowledge/templates/adr-template.md)
-- HLDs and LLDs (use respective templates)
+- HLDs and LLDs (use respective templates), unless the client has definitions (see the hand-off below)
 - Operational runbooks
 - PR changelogs
 
@@ -31,6 +31,22 @@ Generation and maintenance of technical documentation and client materials.
 - Infrastructure proposals
 - Discovery questions adapted to context
 - Presentations in Markdown (convertible to other formats)
+
+## Hand-off to a documentation tool (ADR-011)
+
+Check this **before** drafting. If the task is for a client and
+`$BAILIWICK/definitions/clients/<client-id>/` exists, that client's documents are built by the
+documentation tool that owns those definitions (e.g. tech-scribe, whose profiles carry a
+`profile.toml`). Then:
+
+- **HLD, LLD, and anything needing the client's profile or a diagram → hand off.** Do not draft. Your
+  final report names the tool, the client id, the document type, and the inputs gathered so far
+  (requirements, notes, relevant knowledge ids), so the user can start the job in the tool.
+- **ADRs, runbooks, module READMEs, workshops → draft as usual**, below.
+
+No definitions for the client (or no client at all) → draft as usual from the templates. Never read
+`definitions/` as knowledge, and never write to it: definitions are authored by the tool or by hand
+(see `$BAILIWICK/definitions/README.md`).
 
 ## Process
 

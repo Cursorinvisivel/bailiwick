@@ -52,6 +52,10 @@ Rules:
 - Maximum 5 *content* files (topics/patterns) per task unless justified — index navigation nodes don't count, but keep the descent shallow (≤2–3 levels)
 - **Engineering defaults always apply** — `context/engineering-defaults.md` (reuse-first: scan repo + KB for code to extend before creating; least privilege; CAF naming + labels; pinned versions; no secrets; plan-before-apply; drafts for review)
 - Updates to the knowledge library require explicit human approval (via `/curate`)
+- `definitions/` (repo root, outside `knowledge/`) holds per-client document build specs for a
+  documentation tool such as tech-scribe: authored by the tool or by hand, reviewed by git diff, never
+  curated or indexed, purged with the client. HLD/LLD work for a client with definitions is handed off
+  to that tool. See definitions/README.md and ADR-011.
 
 ## Capture & Curation
 Enforced by harness hooks ($BAILIWICK/hooks/) — Claude Code, and Codex CLI for capture:

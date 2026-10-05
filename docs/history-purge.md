@@ -43,7 +43,7 @@ Use when the history is worth keeping and only the client must vanish:
 
 ```bash
 git filter-repo --replace-text <(printf '%s==>[redacted]\n' '<id>' '<org-token>' '<org name>') \
-                --path clients/<id>/ --invert-paths
+                --path knowledge/clients/<id>/ --path definitions/clients/<id>/ --invert-paths
 ```
 
 Every commit hash after the earliest touched commit changes. Commit *messages* containing the
