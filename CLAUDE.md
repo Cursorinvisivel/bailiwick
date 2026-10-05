@@ -193,9 +193,10 @@ The framework is cloned per machine; `.bailiwick-sync.json` (gitignored) sets ea
 (`central` | `satellite`, default satellite). **Preflight:** `scripts/doctor.sh` (read-only)
 verifies the wiring invariants that break silently — hook paths point at *this* clone, config
 present, gpg keys match the role, no satellite telemetry delta, no stranded or conflicting `sync/*`
-PR, no sign of a missing central, gh account reachable. **Role:** `scripts/bootstrap.sh --role
-central|satellite` writes the gitignored `.bailiwick-sync.json`. Re-run it after reinstalling the
-central machine, which otherwise comes back as a satellite. Run it after cloning/moving the framework or when sync looks off. **Inbound:** the SessionStart hook fast-forwards the
+PR, no sign of a missing central, gh account reachable. Run it after cloning/moving the framework
+or when sync looks off. **Role:** `scripts/bootstrap.sh --role central|satellite` writes the
+gitignored `.bailiwick-sync.json`. Re-run it after reinstalling the central machine, which otherwise
+comes back as a satellite. **Inbound:** the SessionStart hook fast-forwards the
 Bailiwick clone from `origin/main`. **Outbound:** after an approved `/curate`,
 `hooks/sync_knowledge.sh` propagates — central pushes `main`; a satellite pushes a
 `sync/<machine>` branch and opens a PR. `.telemetry.json` is **central-owned** (satellites skip it).
