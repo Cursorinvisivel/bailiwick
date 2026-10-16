@@ -63,6 +63,26 @@ Extract: Candidates for Promotion, Retrieval Feedback blocks.
 > SessionStart nag), and move any processed agent-output candidate (`.bailiwick-outputs/*.md`) to
 > `.bailiwick-outputs/.curated/` (drops it from the Step 1 gather). Never delete unreviewed inputs.
 
+### GCP freshness reports
+
+In `/curate`, also gather completed `gcp-freshness-*.md` reports from the **framework root's**
+`.bailiwick-outputs/`, per
+[the freshness procedure](../skills/curate/references/gcp-freshness.md). Snapshot inputs before
+new periodic research is dispatched. Only `status: completed` reports enter Collect; never retire
+running, partial, failed, or current-run reports. Compare each claim snapshot/hash with the current
+note before proposing changes. Changed notes need fresh comparison; reports are evidence and
+recommendations, not adopted KB instructions. Route confirmed contradictions through the normal
+explicit approval batch; revalidation and confidence changes also remain proposals. Do not count
+research reads as project reuse or manufacture Retrieval Feedback from freshness checks. Research
+itself writes no telemetry, `last_validated`, confidence, or knowledge content.
+
+**Telemetry exception:** captures may mechanically list freshness-only note reads as loaded
+or applied. Before Step 2, exclude those reads from `load_count`, `applied_count`, `useful_count`,
+their timestamps, and `distinct_projects_used` updates. Use the run ID and selected-note IDs
+recorded in the report/session output to identify maintenance-only activity. In a mixed session,
+retain a note's credits only where the transcript independently establishes actual project use;
+do not suppress unrelated work. Never infer a new project association from freshness validation.
+
 ### Step 2 — Update telemetry sidecar (no human gate)
 **Central machine only.** `.telemetry.json` is central-owned: if this machine's `.bailiwick-sync.json`
 role is not `central` (a satellite), **skip Step 2 entirely** — do not touch `.telemetry.json`, so
@@ -302,7 +322,13 @@ proactive staleness, non-blocking digest, and graduation review.
 3. **Archival candidates**: from `.telemetry.json`, surface files where `load_count` is high, `useful_count` is near zero, and `last_useful` is old. Present as "loaded repeatedly but rarely used — candidate for archival or rewrite."
 4. **Graduation review**: surface any topic eligible for pattern graduation (`confidence: high`, `distinct_projects_used.length >= 3`, `open_contradictions == 0`).
 5. **Confidence proposals**: propose `medium → high` for any topic where `distinct_projects_used.length >= 3` and `open_contradictions == 0`.
-6. **Index health**: recount topics **per node** across the index tree; propose shards for any node over threshold and merges for any node well under it (see **Index Health & Sharding**). Keep every node lean — and especially root `INDEX.md`, which is injected every session.
+6. **GCP freshness report**: after the public-origin gate and initial input snapshot, the
+   orchestrator dispatches the existing Cloud Research stage following
+   [the bounded GCP procedure](../skills/curate/references/gcp-freshness.md), even if captures are
+   empty. It may overlap independent capture processing where native delegation supports it;
+   otherwise disclose sequential/inline execution. Collect its final result before ending, or
+   record an incomplete run. The report waits for a later curation and never edits the library.
+7. **Index health**: recount topics **per node** across the index tree; propose shards for any node over threshold and merges for any node well under it (see **Index Health & Sharding**). Keep every node lean — and especially root `INDEX.md`, which is injected every session.
 
 Commit outputs of a curation session with `knowledge:` prefix after approval.
 

@@ -106,6 +106,12 @@ Gemini, Copilot, Antigravity, and other hosts can follow the same file by refere
 delegation depends on the current runtime, with any inline fallback disclosed. See
 [Lead operations](docs/operations.md#6-explicit-team-execution-lead).
 
+Periodic curation (`/curate periodic`; Codex: `$bailiwick-curate periodic`) also checks selected
+GCP knowledge against an indexed allowlist of official release notes and documentation. The bounded
+research produces a report for later human approval; it never updates knowledge automatically.
+Native research can run alongside capture processing within the active session; other hosts disclose
+sequential/inline fallback. See [GCP freshness operations](docs/operations.md#7-periodic-gcp-knowledge-freshness).
+
 ## Supported tools
 
 One Markdown knowledge base and role set, adapted to four tools of differing completeness:
