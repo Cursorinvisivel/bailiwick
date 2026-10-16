@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "provider": "gcp",
+  "checked_on": "2026-10-16",
+  "description": "Official product documentation only. Prefixes are Bailiwick policy, not a vendor-provided allowlist. Legacy and canonical documentation hosts are allowed; validate redirect destinations too. HTML discovery pages verified; no feeds or blogs enabled.",
+  "sources": [
+    {
+      "id": "iam",
+      "service": "IAM",
+      "tags": [
+        "gcp",
+        "iam",
+        "identity",
+        "wif"
+      ],
+      "discovery_urls": [
+        "https://docs.cloud.google.com/iam/docs/release-notes"
+      ],
+      "allowed_prefixes": [
+        "https://docs.cloud.google.com/iam/docs/",
+        "https://cloud.google.com/iam/docs/"
+      ]
+    },
+    {
+      "id": "gke",
+      "service": "GKE",
+      "tags": [
+        "gcp",
+        "gke",
+        "kubernetes",
+        "workload-identity"
+      ],
+      "discovery_urls": [
+        "https://docs.cloud.google.com/kubernetes-engine/docs/release-notes",
+        "https://docs.cloud.google.com/kubernetes-engine/docs/deprecations",
+        "https://docs.cloud.google.com/kubernetes-engine/docs/release-schedule"
+      ],
+      "allowed_prefixes": [
+        "https://docs.cloud.google.com/kubernetes-engine/docs/",
+        "https://cloud.google.com/kubernetes-engine/docs/"
+      ]
+    },
+    {
+      "id": "cloud-run",
+      "service": "Cloud Run",
+      "tags": [
+        "gcp",
+        "cloud-run",
+        "serverless"
+      ],
+      "discovery_urls": [
+        "https://docs.cloud.google.com/run/docs/release-notes"
+      ],
+      "allowed_prefixes": [
+        "https://docs.cloud.google.com/run/docs/",
+        "https://cloud.google.com/run/docs/"
+      ]
+    },
+    {
+      "id": "bigquery",
+      "service": "BigQuery",
+      "tags": [
+        "gcp",
+        "bigquery",
+        "data"
+      ],
+      "discovery_urls": [
+        "https://docs.cloud.google.com/bigquery/docs/release-notes"
+      ],
+      "allowed_prefixes": [
+        "https://docs.cloud.google.com/bigquery/docs/",
+        "https://cloud.google.com/bigquery/docs/"
+      ]
+    },
+    {
+      "id": "cloud-sql",
+      "service": "Cloud SQL",
+      "tags": [
+        "gcp",
+        "cloud-sql",
+        "sql",
+        "postgres"
+      ],
+      "discovery_urls": [
+        "https://docs.cloud.google.com/sql/docs/release-notes",
+        "https://docs.cloud.google.com/sql/docs/postgres/db-versions"
+      ],
+      "allowed_prefixes": [
+        "https://docs.cloud.google.com/sql/docs/",
+        "https://cloud.google.com/sql/docs/"
+      ]
+    },
+    {
+      "id": "vpc",
+      "service": "VPC",
+      "tags": [
+        "gcp",
+        "vpc",
+        "network",
+        "networking",
+        "firewall"
+      ],
+      "discovery_urls": [
+        "https://docs.cloud.google.com/vpc/docs/release-notes"
+      ],
+      "allowed_prefixes": [
+        "https://docs.cloud.google.com/vpc/docs/",
+        "https://cloud.google.com/vpc/docs/"
+      ]
+    },
+    {
+      "id": "storage",
+      "service": "Cloud Storage",
+      "tags": [
+        "gcp",
+        "storage",
+        "gcs"
+      ],
+      "discovery_urls": [
+        "https://docs.cloud.google.com/storage/docs/release-notes"
+      ],
+      "allowed_prefixes": [
+        "https://docs.cloud.google.com/storage/docs/",
+        "https://cloud.google.com/storage/docs/"
+      ]
+    }
+  ]
+}
