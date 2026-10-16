@@ -96,9 +96,15 @@ Windows PowerShell mirrors every flag with a single dash: `bootstrap.ps1 -Instal
 👉 **Full walkthrough** — prerequisites, verification, and your first knowledge cycle — in
 **[docs/getting-started.md](docs/getting-started.md)**.
 
-**Also included** (all covered in [Operations](docs/operations.md)): seven skills — `/curate`,
+**Also included** (all covered in [Operations](docs/operations.md)): eight skills — `/lead`, `/curate`,
 `/enrich`, `/learn`, `/metrics`, `/investigate`, `/purge`, `/sign` — plus an optional encrypted off-machine
 capture backup and multi-machine central/satellite sync over plain git.
+
+For explicit team execution, use **`/lead`** (Codex: **`$bailiwick-lead`**). The shared
+[Lead skill](skills/lead/SKILL.md) requires applicable stages, review, and an execution report.
+Gemini, Copilot, Antigravity, and other hosts can follow the same file by reference; native
+delegation depends on the current runtime, with any inline fallback disclosed. See
+[Lead operations](docs/operations.md#6-explicit-team-execution-lead).
 
 ## Supported tools
 
@@ -159,7 +165,7 @@ knowledge/   INDEX.md · topics/ patterns/ context/ templates/ · .telemetry.jso
 definitions/ per-client document build specs for a documentation tool (ADR-011; empty in the public repo)
 agents/      role definitions (lead orchestrator + 5 domain-context + 7 Quality Workflow stages)
 hooks/       guardrail + capture + sync + health hooks, and the installers
-skills/      /curate · /enrich · /learn · /metrics · /investigate · /purge · /sign  (+ codex-skills/ wrappers)
+skills/      /lead · /curate · /enrich · /learn · /metrics · /investigate · /purge · /sign  (+ codex-skills/ wrappers)
 scripts/     bootstrap.sh · bootstrap.ps1  (repo onboarding) · doctor.sh (wiring preflight)
 docs/        this documentation set · decisions/ (framework ADRs)
 ```
