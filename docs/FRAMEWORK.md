@@ -101,7 +101,7 @@ canonical files — Gemini `~/.gemini/agents/*.md`, Codex `~/.codex/agents/*.tom
 `~/.copilot/agents/*.agent.md` — so all four tools can dispatch the stages natively (ADR-010
 Amendment 1; trigger model per tool in §10). A stage's **final report** is its only channel back
 and the only part the capture hooks record, so outputs and knowledge signals go in it. See
-ADR-010. 13 files in three tiers.
+ADR-010. 14 files in three tiers.
 
 ### Tiers
 - **Orchestrator (1):** `lead.md` — entry point for substantial/multi-step work; drives the Quality
@@ -112,7 +112,8 @@ ADR-010. 13 files in three tiers.
 - **Stages (7):** `implementer.md` (code/IaC drafts), `quality.md` (technical review),
   `security-review.md` (security + CIS mapping), `docs.md` (ADR/HLD/runbook/workshop),
   `memory.md` (library query + collect), `cloud-research.md` (authoritative external research),
-  `federation.md` (external-brain consult + gated ingest).
+  `federation.md` (external-brain consult + gated ingest). Plus one restricted variant,
+  `cloud-research-freshness.md` (fetch-only, dispatched only by `/curate` periodic mode).
 
 ### Flow
 1. A task arrives. **Proportional routing:** trivial edits / direct questions are answered inline
@@ -687,7 +688,7 @@ bailiwick/
   scripts/        bootstrap.sh  bootstrap.ps1
   knowledge/      INDEX.md  .telemetry.json  topics/ patterns/ context/ clients/ templates/ …
   definitions/    README.md — per-client document build specs (clients/<id>/), outside knowledge/ (ADR-011)
-  agents/         lead + 5 domain + 7 execution (13 files)
+  agents/         lead + 5 domain + 7 execution + 1 restricted variant (14 files)
   hooks/          session_start.sh  capture_session.py  capture_backup.sh  sync_knowledge.sh
                   guardrails.py  install_hooks.py  settings.template.json  health_common.sh
                   install_global_layer.sh  install_adapter_hooks.py  install_desktop_mcp.py

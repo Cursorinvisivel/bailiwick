@@ -106,6 +106,12 @@ Gemini, Copilot, Antigravity, and other hosts can follow the same file by refere
 delegation depends on the current runtime, with any inline fallback disclosed. See
 [Lead operations](docs/operations.md#6-explicit-team-execution-lead).
 
+Periodic curation (`/curate periodic`; Codex: `$bailiwick-curate periodic`) also checks selected
+GCP knowledge against an indexed allowlist of official release notes and documentation. The bounded
+research produces a report for later human approval; it never updates knowledge automatically.
+Native research can run alongside capture processing within the active session; other hosts disclose
+sequential/inline fallback. See [GCP freshness operations](docs/operations.md#7-periodic-gcp-knowledge-freshness).
+
 ## Supported tools
 
 One Markdown knowledge base and role set, adapted to four tools of differing completeness:
@@ -163,7 +169,7 @@ A map of the whole set is in **[docs/README.md](docs/README.md)**.
 ```
 knowledge/   INDEX.md · topics/ patterns/ context/ templates/ · .telemetry.json
 definitions/ per-client document build specs for a documentation tool (ADR-011; empty in the public repo)
-agents/      role definitions (lead orchestrator + 5 domain-context + 7 Quality Workflow stages)
+agents/      role definitions (lead orchestrator + 5 domain-context + 7 Quality Workflow stages + a fetch-only freshness variant)
 hooks/       guardrail + capture + sync + health hooks, and the installers
 skills/      /lead · /curate · /enrich · /learn · /metrics · /investigate · /purge · /sign  (+ codex-skills/ wrappers)
 scripts/     bootstrap.sh · bootstrap.ps1  (repo onboarding) · doctor.sh (wiring preflight)

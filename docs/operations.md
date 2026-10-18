@@ -361,3 +361,36 @@ on that requirement if the host cannot provide them.
 The Lead preserves existing authorization gates. It collects knowledge candidates for later
 `/curate` or `/investigate` approval; invoking it does not authorize knowledge-library writes,
 commits, pushes, PRs, or deployments.
+
+
+## 7. Periodic GCP knowledge freshness
+
+Run `/curate periodic` (Codex: `$bailiwick-curate periodic`) from any wired repo. After the
+public-origin gate and initial input snapshot, and before off-machine captures are decrypted,
+the orchestrator launches `bailiwick-cloud-research-freshness` — a fetch-only Cloud Research
+variant with no file or search tools — to compare selected generic GCP claims with official vendor
+evidence. This runs
+even when there are no pending captures. Ordinary curation only gathers previously completed reports.
+
+The [canonical procedure](../skills/curate/references/gcp-freshness.md) caps each run at 5 generic
+notes, 10 distinct requested or tool-exposed URLs, and 15 minutes total. It reviews 90 days of announcements plus
+older still-effective lifecycle notices and current claim documentation. The
+[indexed source registry](../skills/curate/references/gcp-sources.json) defines permitted service
+sources; the [URL policy helper](../skills/curate/scripts/check_source.py) checks discovery and
+reported redirect/final URLs. It is a workflow check, not a network firewall. Evidence with
+an unverified final destination is inconclusive; hidden intermediate hops are disclosed as a
+transport limitation, not proof of chain enforcement. Client notes, identifiers and raw captures never go
+to research or web queries.
+
+When the host supports native asynchronous delegation, research overlaps independent capture
+processing. Otherwise the orchestrator discloses sequential or inline execution. No background
+daemon, external CLI, global installation, or durable scheduling is introduced. Collect the result
+before session end or explicitly record an incomplete run.
+
+Reports live in the ignored **framework-root** `.bailiwick-outputs/gcp-freshness-<run-id>.md`, with
+unique IDs and `running` → `completed`, `partial`, or `failed` status. They record claim snapshots,
+source/destination checks, dates, applicability, confidence and exact coverage gaps. A completed
+report can include inconclusive findings; partial reports have unassessed selected claims.
+Only completed reports present in a **later** curation's initial snapshot enter its approval batch.
+Never retire incomplete or current-run reports. Research does not write knowledge, telemetry,
+confidence or validation dates; no announcement found is never positive revalidation.
