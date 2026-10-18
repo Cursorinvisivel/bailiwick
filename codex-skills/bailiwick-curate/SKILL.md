@@ -25,8 +25,10 @@ prompt. This is a thin Codex wrapper; the canonical procedure remains in Bailiwi
    - Codex does not run the Claude Code slash-command UI; do the workflow directly in the current turn.
    - Codex does not run Claude Code Stop/SessionEnd hooks; include manual Codex session outputs from `.bailiwick-outputs/*.md` and shadow-mode `~/.bailiwick/captures/*/*.md`.
    - For periodic requests, follow `$BAILIWICK/skills/curate/references/gcp-freshness.md` even when
-     captures are empty. Dispatch `bailiwick-cloud-research` using native delegation if available,
-     alongside independent capture processing. Disclose sequential/inline fallback; no durable
+     captures are empty. Dispatch `bailiwick-cloud-research-freshness` (fetch-only; pass the
+     procedure and registry inline) using native delegation if available, before restoring
+     off-machine captures and alongside independent capture processing. The generated Codex
+     adapter does not carry its tool restriction, so disclose that weaker isolation. Disclose sequential/inline fallback; no durable
      background execution is implied. Persist the result in the framework root and collect it
      before session end or explicitly mark the run incomplete. Only previously completed reports
      in the initial gather snapshot are curation candidates.

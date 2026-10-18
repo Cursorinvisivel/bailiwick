@@ -24,7 +24,9 @@ You are a cloud infrastructure research specialist. Your job is to search the we
 
 ## GCP freshness mode (`/curate periodic`)
 
-When dispatched for this mode, follow
+This mode normally runs in the fetch-only
+[`bailiwick-cloud-research-freshness`](cloud-research-freshness.md) variant. If you are
+dispatched for it as a fallback, you hold file tools the variant lacks: do not use them. Follow
 [`skills/curate/references/gcp-freshness.md`](../skills/curate/references/gcp-freshness.md).
 Its constraints override the broader source policy above: use only the indexed official GCP
 allowlist, the supplied sanitized generic claim snapshots, and bounded discovery. Never read

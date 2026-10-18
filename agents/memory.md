@@ -322,8 +322,9 @@ proactive staleness, non-blocking digest, and graduation review.
 3. **Archival candidates**: from `.telemetry.json`, surface files where `load_count` is high, `useful_count` is near zero, and `last_useful` is old. Present as "loaded repeatedly but rarely used — candidate for archival or rewrite."
 4. **Graduation review**: surface any topic eligible for pattern graduation (`confidence: high`, `distinct_projects_used.length >= 3`, `open_contradictions == 0`).
 5. **Confidence proposals**: propose `medium → high` for any topic where `distinct_projects_used.length >= 3` and `open_contradictions == 0`.
-6. **GCP freshness report**: after the public-origin gate and initial input snapshot, the
-   orchestrator dispatches the existing Cloud Research stage following
+6. **GCP freshness report** (dispatched at curate Step 1, before off-machine captures are
+   restored; listed here for completeness): the orchestrator dispatches the fetch-only
+   `bailiwick-cloud-research-freshness` variant following
    [the bounded GCP procedure](../skills/curate/references/gcp-freshness.md), even if captures are
    empty. It may overlap independent capture processing where native delegation supports it;
    otherwise disclose sequential/inline execution. Collect its final result before ending, or

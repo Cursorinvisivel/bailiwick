@@ -366,8 +366,10 @@ commits, pushes, PRs, or deployments.
 ## 7. Periodic GCP knowledge freshness
 
 Run `/curate periodic` (Codex: `$bailiwick-curate periodic`) from any wired repo. After the
-public-origin gate and initial input snapshot, the orchestrator launches the existing Cloud
-Research stage to compare selected generic GCP claims with official vendor evidence. This runs
+public-origin gate and initial input snapshot, and before off-machine captures are decrypted,
+the orchestrator launches `bailiwick-cloud-research-freshness` — a fetch-only Cloud Research
+variant with no file or search tools — to compare selected generic GCP claims with official vendor
+evidence. This runs
 even when there are no pending captures. Ordinary curation only gathers previously completed reports.
 
 The [canonical procedure](../skills/curate/references/gcp-freshness.md) caps each run at 5 generic

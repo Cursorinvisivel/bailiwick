@@ -42,21 +42,25 @@ gpg private key, so full centralized curation runs on the machine that holds it.
    - List `.bailiwick-outputs/*.md` (agent session outputs, if any — including `learn-*.md`
      onboarding captures staged by `/learn`, which arrive pre-digested with a
      `## Candidates for Promotion` section and dedup hints).
-   - **Restore off-machine captures** (if `capture_backup` is enabled in `.bailiwick-sync.json`): run
-     `bash $BAILIWICK/hooks/capture_backup.sh pull` — decrypts every backed-up blob
-     (from any machine) into `$BAILIWICK/.bailiwick-inbox/raw/<machine>/<repo>/…` (needs the gpg private
-     key + passphrase). Include these in the candidate gather. `.bailiwick-inbox/` is gitignored — never commit it.
-   - Read `$BAILIWICK/knowledge/INDEX.md`.
    - Also snapshot completed GCP freshness reports from `$BAILIWICK/.bailiwick-outputs/gcp-freshness-*.md`
      in the **framework root**, even when invoked from a client repo. Include only `status: completed`;
      exclude `running`, `partial`, and `failed` reports from extraction and retirement. Take this
      snapshot **before** dispatching new research, so this run's report waits for a later curation.
      Apply this status filter to freshness reports encountered through **any** gather path,
      including the generic agent-output glob, and deduplicate resolved paths.
-   - If there is nothing pending, say so. Stop for ordinary curation; **periodic mode continues**.
-   - In periodic mode, launch the [GCP freshness check](references/gcp-freshness.md) after this
-     snapshot and the public-origin gate. Continue independent capture processing while it runs
-     when the host supports native asynchronous delegation; disclose sequential/inline fallback.
+   - **Periodic mode only — dispatch freshness research first.** After the public-origin gate
+     and the snapshot above, launch the
+     [GCP freshness check](references/gcp-freshness.md) **before** restoring off-machine captures,
+     so the research agent never runs alongside freshly decrypted plaintext. Continue independent
+     capture processing while it runs when the host supports native asynchronous delegation;
+     disclose sequential/inline fallback.
+   - **Restore off-machine captures** (if `capture_backup` is enabled in `.bailiwick-sync.json`): run
+     `bash $BAILIWICK/hooks/capture_backup.sh pull` — decrypts every backed-up blob
+     (from any machine) into `$BAILIWICK/.bailiwick-inbox/raw/<machine>/<repo>/…` (needs the gpg private
+     key + passphrase). Include these in the candidate gather. `.bailiwick-inbox/` is gitignored — never commit it.
+   - Read `$BAILIWICK/knowledge/INDEX.md`.
+   - If there is nothing pending, say so. Stop for ordinary curation; **periodic mode continues**
+     (freshness research was already dispatched above).
 
 2. **Extract candidates** — from each capture, pull decisions, non-obvious patterns, validated assumptions, pitfalls, and Retrieval Feedback (loaded / used / missed). Research-only and conversation-only sessions still count. **Federation ingest:** external knowledge consulted from a `.bailiwick-sources.json` source is also an ingest candidate — follow `agents/federation.md` (abstract, never transclude; add `source:` + `## Provenance` + `scope: external:<id>`; route through this same approval batch; never write back to the source).
 

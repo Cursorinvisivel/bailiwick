@@ -112,7 +112,8 @@ ADR-010. 13 files in three tiers.
 - **Stages (7):** `implementer.md` (code/IaC drafts), `quality.md` (technical review),
   `security-review.md` (security + CIS mapping), `docs.md` (ADR/HLD/runbook/workshop),
   `memory.md` (library query + collect), `cloud-research.md` (authoritative external research),
-  `federation.md` (external-brain consult + gated ingest).
+  `federation.md` (external-brain consult + gated ingest). Plus one restricted variant,
+  `cloud-research-freshness.md` (fetch-only, dispatched only by `/curate` periodic mode).
 
 ### Flow
 1. A task arrives. **Proportional routing:** trivial edits / direct questions are answered inline
