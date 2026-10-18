@@ -50,10 +50,13 @@ gpg private key, so full centralized curation runs on the machine that holds it.
      including the generic agent-output glob, and deduplicate resolved paths.
    - **Periodic mode only — dispatch freshness research first.** After the public-origin gate
      and the snapshot above, launch the
-     [GCP freshness check](references/gcp-freshness.md) **before** restoring off-machine captures,
-     so the research agent never runs alongside freshly decrypted plaintext. Continue independent
-     capture processing while it runs when the host supports native asynchronous delegation;
-     disclose sequential/inline fallback.
+     [GCP freshness check](references/gcp-freshness.md) **before** restoring off-machine captures.
+     Its procedure selects notes from the KB index before dispatch. Only the tool-restricted
+     `bailiwick-cloud-research-freshness` agent under Claude Code may overlap the restore and other
+     capture processing (native asynchronous delegation). With any agent that can read files — the
+     fallback stage, or a generated Gemini/Codex/Copilot adapter — **collect the freshness result
+     before running the restore**, so no file-reading agent with web access runs while decrypted
+     plaintext lands in `.bailiwick-inbox/`. Disclose sequential/inline fallback.
    - **Restore off-machine captures** (if `capture_backup` is enabled in `.bailiwick-sync.json`): run
      `bash $BAILIWICK/hooks/capture_backup.sh pull` — decrypts every backed-up blob
      (from any machine) into `$BAILIWICK/.bailiwick-inbox/raw/<machine>/<repo>/…` (needs the gpg private

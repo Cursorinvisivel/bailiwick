@@ -169,7 +169,7 @@ A map of the whole set is in **[docs/README.md](docs/README.md)**.
 ```
 knowledge/   INDEX.md · topics/ patterns/ context/ templates/ · .telemetry.json
 definitions/ per-client document build specs for a documentation tool (ADR-011; empty in the public repo)
-agents/      role definitions (lead orchestrator + 5 domain-context + 7 Quality Workflow stages)
+agents/      role definitions (lead orchestrator + 5 domain-context + 7 Quality Workflow stages + a fetch-only freshness variant)
 hooks/       guardrail + capture + sync + health hooks, and the installers
 skills/      /lead · /curate · /enrich · /learn · /metrics · /investigate · /purge · /sign  (+ codex-skills/ wrappers)
 scripts/     bootstrap.sh · bootstrap.ps1  (repo onboarding) · doctor.sh (wiring preflight)
