@@ -87,9 +87,9 @@ Options:
   --install-tools  Install the once-per-machine prerequisites when missing: the
                    terraform-mcp-server and github-mcp-server binaries (via 'go install', needs go), the
                    capture/curation + guardrail hooks (merged into ~/.claude/settings.json),
-                   the global Claude skill symlinks (~/.claude/skills/: /curate, /enrich, /learn, /metrics, /investigate, /purge, /sign), the
+                   the global Claude skill symlinks (~/.claude/skills/: /lead, /curate, /enrich, /learn, /metrics, /investigate, /purge, /sign), the
                    Quality Workflow stages as native Claude Code subagents (~/.claude/agents/: bailiwick-implement, bailiwick-quality, … — ADR-010), the
-                   Codex skill symlinks (~/.codex/skills/: bailiwick-curate, bailiwick-enrich, bailiwick-learn, bailiwick-investigate, bailiwick-purge), the global
+                   Codex skill symlinks (~/.codex/skills/: bailiwick-lead, bailiwick-curate, bailiwick-enrich, bailiwick-learn, bailiwick-investigate, bailiwick-purge, bailiwick-sign), the global
                    Codex + Gemini operator layers (managed blocks in ~/.codex/AGENTS.md and
                    ~/.gemini/GEMINI.md), and, only with --with-desktop, the knowledge-scoped Claude/ChatGPT
                    Desktop knowledge-reference MCP wiring (see --with-desktop above). Idempotent — no-op for anything already present. Off by
@@ -1462,7 +1462,7 @@ done
 if [ "$_codex_skill_total" -eq 0 ]; then
   CODEX_SKILL_STATUS="✗ no Codex skills found in \$BAILIWICK/codex-skills"
 elif [ "$_codex_skill_missing" -eq 0 ]; then
-  CODEX_SKILL_STATUS="✓ ${_codex_skill_total} Codex skill(s) linked globally (~/.codex/skills/: bailiwick-curate, bailiwick-enrich, …)"
+  CODEX_SKILL_STATUS="✓ ${_codex_skill_total} Codex skill(s) linked globally (~/.codex/skills/: bailiwick-lead, bailiwick-curate, bailiwick-enrich, …)"
 else
   CODEX_SKILL_STATUS="✗ ${_codex_skill_missing}/${_codex_skill_total} Codex skills not linked — re-run with --install-tools, or symlink each dir under \$BAILIWICK/codex-skills/ into ~/.codex/skills/"
 fi

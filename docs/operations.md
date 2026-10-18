@@ -329,3 +329,35 @@ CLAUDE.local.md
 Never list the team's own `CLAUDE.md` / `AGENTS.md` / `copilot-instructions.md` here — the framework
 does not touch them. For a shared-team setup that *wants* the framework tracked, bootstrap with
 `--visible` instead.
+
+
+## 6. Explicit team execution (`/lead`)
+
+The shared [Lead skill](../skills/lead/SKILL.md) turns a concrete task into an explicit
+Quality Workflow: Memory Query, selected execution stages, review, and Memory Collect. It
+requires an execution table showing actual agents or inline fallbacks, validation evidence,
+and unresolved issues. It is an instruction contract, not a runtime enforcement hook.
+
+After pulling this change, run `scripts/bootstrap.sh --install-tools` (Windows:
+`scripts/bootstrap.ps1 -InstallTools`) from the framework clone to install the new global
+skill links. Existing directory discovery picks up `skills/lead/` for Claude Code and
+`codex-skills/bailiwick-lead/` for Codex; no files are copied into client repositories.
+Start a fresh Claude Code session (or use `/clear`) after installation so it discovers
+the new skill.
+
+- Claude Code: `/lead Implement X and have the draft independently reviewed.`
+- Codex: `$bailiwick-lead Implement X and have the draft independently reviewed.`
+- Gemini, Copilot, Antigravity, or another host: `Follow $BAILIWICK/skills/lead/SKILL.md
+  as Lead for this task: implement X and review it.` Supply the actual framework path when
+  the host cannot expand the environment variable.
+
+The skill checks the current runtime for native delegation. The existing installer generates
+stage adapters for Gemini, Codex, and Copilot alongside Claude Code's symlinks; it does not
+install an Antigravity-specific adapter. Hosts without delegation can execute the stages
+inline, with the limitation stated before work and in the execution report. Inline review
+is not independent review; a task explicitly requiring independent agents remains blocked
+on that requirement if the host cannot provide them.
+
+The Lead preserves existing authorization gates. It collects knowledge candidates for later
+`/curate` or `/investigate` approval; invoking it does not authorize knowledge-library writes,
+commits, pushes, PRs, or deployments.

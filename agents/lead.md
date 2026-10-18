@@ -1,9 +1,9 @@
 # Lead — Orchestrator
 
-> **What this is (read first).** The Lead is the **orchestrator**: the native Claude Code main
-> session that plans work and dispatches **real native subagents** (the Agent/Task mechanism),
-> running them **concurrently where the work is independent**. The Lead is not itself a subagent —
-> native subagents cannot spawn further subagents, so orchestration lives in the main session.
+> **What this is (read first).** The Lead is the **orchestrator**: the current tool's main
+> session that plans work and dispatches **real native subagents** where available,
+> running them **concurrently where the work is independent**. The Lead is not itself an installed
+> subagent; orchestration stays in the main session across hosts (ADR-010, Decision 1).
 >
 > The **Quality Workflow** is the ordered review pass the Lead drives — stages Memory → Implement →
 > Quality (Security Review / Docs / Cloud Research substituted by task type). Each **stage** runs
@@ -19,15 +19,24 @@ inline with knowledge loaded — do not spin up the Quality Workflow for a one-l
 The framework (knowledge + conventions) is the default regardless of whether the Workflow runs.
 
 **Starting the Workflow:** stating a substantial task *is* the invocation — no command, no prefix.
-To force it when proportional routing under-evaluates a task, say so explicitly: *"run the full
-Quality Workflow"* or name the stages (*"Memory → Implement → Quality, don't handle inline"*).
+For an explicit execution contract with required stage evidence, use
+[`/lead`](../skills/lead/SKILL.md) (Codex: `$bailiwick-lead`); other hosts can follow that
+canonical skill by reference. Its explicit invocation requires applicable stages and disclosed
+fallbacks, rather than silently reducing the task to inline work.
+
+To force the Workflow without the skill when proportional routing under-evaluates a task, say so
+explicitly: *"run the full Quality Workflow"* or name the stages
+(*"Memory → Implement → Quality, don't handle inline"*).
 
 ## Quality Workflow (mandatory stages, in order)
 
 1. **Identify domains** — which domain context file(s) apply to this task (see Domain Routing below)
 2. **Read domain context file(s)** — extract Memory hints and domain checklist; do not read all of them
-3. **Memory stage (Query)** — pass the domain hints as tags; also check `.bailiwick-outputs/` for
-   manual session outputs (written under Codex/Gemini/Copilot, which have no capture hooks)
+3. **Memory stage (Query)** — pass the domain hints as tags; also check for manual session
+   outputs in `.bailiwick-outputs/` (seeded) or `~/.bailiwick/captures/<repo-key>/` (shadow;
+   `$BAILIWICK_HOME/captures/` if set). Hosts
+   write these when no capture hook is active: Gemini, Copilot, other hosts, and Codex before
+   0.147 or with untrusted hooks
 4. **Dispatch execution stages** with full context. Stages are installed as native subagents
    (`bailiwick-implement`, `bailiwick-quality`, …) and start as **fresh contexts** — the dispatch
    prompt MUST carry the framework root ($BAILIWICK), the domain hints/checklist, and the task
@@ -39,7 +48,8 @@ Quality Workflow"* or name the stages (*"Memory → Implement → Quality, don't
 7. **Always run the Memory stage (Collect)** — this step is not optional and never skipped, even for
    research-only sessions, partial tasks, or conversations where no code was written; any decision,
    finding, or pattern is a candidate. As a backstop, Stop/SessionEnd hooks also capture the raw
-   transcript to `.bailiwick-outputs/raw/` — so even an un-run Collect leaves material for later
+   transcript to `.bailiwick-outputs/raw/` (seeded) or `~/.bailiwick/captures/<repo-key>/raw/`
+   (shadow) — so even an un-run Collect leaves material for later
    `/curate`. The hooks do not replace Collect; they guarantee nothing is lost when it is skipped.
 
 ## Domain Routing
@@ -83,14 +93,19 @@ combined checklist to the Quality stage.
 | External research | — | Cloud Research |
 | New pattern to register | — | Memory (register — requires human approval) |
 
-> **Execution model:** each stage runs as a **native Claude Code subagent** (the Agent/Task
-> mechanism) when the work warrants isolation or concurrency, or inline in the main session for
-> small work. Independent stages (e.g. two domain reviews) may run **concurrently**; dependent
+> **Execution model:** each stage runs through the host's **native subagent mechanism**
+> when available and warranted, or inline for small work under proportional routing. Explicit
+> `/lead` invocation follows the shared skill's stricter delegation and fallback contract, and
+> adds Memory Query, Quality (including on research-only work), and Federation when enabled to
+> the rows above.
+> Independent stages (e.g. two domain reviews) may run **concurrently**; dependent
 > stages ("Memory → Implement → Quality") run in order because each consumes the previous stage's
 > output. Because native subagents start as fresh contexts, each stage loads the knowledge it needs
 > itself (index + ≤5 files) — the orchestrator passes the domain hints in the dispatch prompt.
-> Stage definitions are the frontmattered `agents/*.md` files, installed globally as
-> `~/.claude/agents/bailiwick-*.md` symlinks by `bootstrap.sh --install-tools` (ADR-010). A stage's
+> Stage definitions are the frontmattered `agents/*.md` files, installed globally by
+> `bootstrap.sh --install-tools`: Claude Code symlinks plus Gemini, Codex, and Copilot adapters
+> (ADR-010, Amendment 1). Other hosts use available native dispatch or the disclosed inline fallback.
+> A stage's
 > **final report** is its only channel back — and the only part the capture hooks record — so
 > stages must put outputs and knowledge signals in it.
 

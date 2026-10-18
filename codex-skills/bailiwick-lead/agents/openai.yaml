@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bailiwick Lead"
+  short_description: "Coordinate a task through Bailiwick stages"
+  default_prompt: "Use $bailiwick-lead to coordinate this task through the Bailiwick Quality Workflow stages with an execution report."
