@@ -122,7 +122,8 @@ ADR-010. 13 files in three tiers.
    contract with required stage evidence.
 2. Lead identifies relevant **domain context file(s)**, reads them for Memory tags + checklist.
 3. Lead dispatches the **Memory stage (Query)** with those tags — it descends the `INDEX.md` tree
-   on-demand, loads ≤5 content files, checks `.bailiwick-outputs/` for prior session outputs.
+   on-demand, loads ≤5 content files, checks manual session outputs (seeded `.bailiwick-outputs/`
+   or shadow `~/.bailiwick/captures/<repo-key>/`; `$BAILIWICK_HOME/captures/` if set).
    Because each subagent starts as a fresh context, the stage loads this knowledge itself. If
    federation is enabled, the **Federation stage** also consults external indexes read-only (≤2
    files, tagged `[external:<id>]`; resolve conflicts by the source-authority precedence, §11 — a
@@ -132,7 +133,8 @@ ADR-010. 13 files in three tiers.
    Independent stages run **concurrently**; dependent stages run in order. Each surfaces knowledge
    signals back to the Lead in real time — where capture hooks are active (Claude Code; Codex CLI
    0.147+ once trusted) they record the transcript; otherwise a manual session output in
-   `.bailiwick-outputs/` (seeded) or `~/.bailiwick/captures/<repo-key>/` (shadow) is the channel.
+   `.bailiwick-outputs/` (seeded) or `~/.bailiwick/captures/<repo-key>/` (shadow;
+   `$BAILIWICK_HOME/captures/` if set) is the channel.
 5. Lead integrates, presents **drafts for human review**, and always closes with the **Memory stage
    (Collect)**. Stop/SessionEnd hooks capture the raw transcript as a backstop.
 
@@ -617,7 +619,8 @@ Key consequences (the four tools do not share one uniform integration):
   gemini-cli's scheduler but undocumented; re-verify on upgrades). The **Code Assist VS Code agent's**
   hook support is **unverified** — there, keep **`geminicodeassist.agentYoloMode` disabled** (the
   approval dialog) as the control. Capture is
-  **manual** (no session hooks): the agent writes a `.bailiwick-outputs/` session output, same as Codex/Copilot.
+  **manual** (no session hooks): the agent writes a manual session output (seeded `.bailiwick-outputs/`,
+  shadow `~/.bailiwick/captures/<repo-key>/`), same as Copilot and Codex before 0.147 or with untrusted hooks.
 - **The Copilot adapter is local-VS-Code-only.** The hidden, gitignored complement is filesystem-
   discovered in the IDE, but the GitHub-hosted **Copilot cloud agent cannot see untracked files**, so
   the framework does **not** reach it (that would require committing a shared instruction file).

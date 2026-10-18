@@ -33,7 +33,8 @@ explicitly: *"run the full Quality Workflow"* or name the stages
 1. **Identify domains** — which domain context file(s) apply to this task (see Domain Routing below)
 2. **Read domain context file(s)** — extract Memory hints and domain checklist; do not read all of them
 3. **Memory stage (Query)** — pass the domain hints as tags; also check for manual session
-   outputs in `.bailiwick-outputs/` (seeded) or `~/.bailiwick/captures/<repo-key>/` (shadow). Hosts
+   outputs in `.bailiwick-outputs/` (seeded) or `~/.bailiwick/captures/<repo-key>/` (shadow;
+   `$BAILIWICK_HOME/captures/` if set). Hosts
    write these when no capture hook is active: Gemini, Copilot, other hosts, and Codex before
    0.147 or with untrusted hooks
 4. **Dispatch execution stages** with full context. Stages are installed as native subagents
