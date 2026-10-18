@@ -119,10 +119,12 @@ ADR-010. 14 files in three tiers.
 1. A task arrives. **Proportional routing:** trivial edits / direct questions are answered inline
    with knowledge loaded; substantial work routes through the **Lead**. Stating a substantial task
    *is* the invocation; explicit phrasing forces the full Quality Workflow when routing
-   under-evaluates a task.
+   under-evaluates a task, and `/lead` (Codex: `$bailiwick-lead`) adds the explicit execution
+   contract with required stage evidence.
 2. Lead identifies relevant **domain context file(s)**, reads them for Memory tags + checklist.
 3. Lead dispatches the **Memory stage (Query)** with those tags — it descends the `INDEX.md` tree
-   on-demand, loads ≤5 content files, checks `.bailiwick-outputs/` for prior session outputs.
+   on-demand, loads ≤5 content files, checks manual session outputs (seeded `.bailiwick-outputs/`
+   or shadow `~/.bailiwick/captures/<repo-key>/`; `$BAILIWICK_HOME/captures/` if set).
    Because each subagent starts as a fresh context, the stage loads this knowledge itself. If
    federation is enabled, the **Federation stage** also consults external indexes read-only (≤2
    files, tagged `[external:<id>]`; resolve conflicts by the source-authority precedence, §11 — a
@@ -130,8 +132,10 @@ ADR-010. 14 files in three tiers.
 4. Lead dispatches the **execution stages** via the Stage Matrix (commonly
    Memory → Implement → Quality; Security Review / Docs / Cloud Research substituted by task type).
    Independent stages run **concurrently**; dependent stages run in order. Each surfaces knowledge
-   signals back to the Lead in real time — under Claude Code the capture hooks record the transcript;
-   `.bailiwick-outputs/*.md` is the manual channel for Codex/Gemini/Copilot.
+   signals back to the Lead in real time — where capture hooks are active (Claude Code; Codex CLI
+   0.147+ once trusted) they record the transcript; otherwise a manual session output in
+   `.bailiwick-outputs/` (seeded) or `~/.bailiwick/captures/<repo-key>/` (shadow;
+   `$BAILIWICK_HOME/captures/` if set) is the channel.
 5. Lead integrates, presents **drafts for human review**, and always closes with the **Memory stage
    (Collect)**. Stop/SessionEnd hooks capture the raw transcript as a backstop.
 
@@ -411,7 +415,7 @@ seeded variant:
 - **Global prerequisites (`--install-tools`):** installs the once-per-machine pieces when missing —
   terraform-mcp-server (`go install`), the capture/curation **+ guardrail** hooks
   (`~/.claude/settings.json`), the global **Claude Code skill symlinks** (`~/.claude/skills/`:
-  `/curate`, `/enrich`, `/learn`, `/metrics`, `/investigate`, `/purge`, `/sign`), the global **Codex skill symlinks** (`~/.codex/skills/`: `$bailiwick-curate`,
+  `/lead`, `/curate`, `/enrich`, `/learn`, `/metrics`, `/investigate`, `/purge`, `/sign`), the global **Codex skill symlinks** (`~/.codex/skills/`: `$bailiwick-lead`, `$bailiwick-curate`,
   `$bailiwick-enrich`, `$bailiwick-learn`, `$bailiwick-investigate`, `$bailiwick-purge`, `$bailiwick-sign`), and the global **Codex + Gemini operator layers** (managed blocks in
   `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md` that activate per-repo on the
   `.bailiwick.local.md` marker). Without it,
@@ -590,12 +594,12 @@ Key consequences (the four tools do not share one uniform integration):
   --with-agents`, which injects an idempotent user-scope `bailiwick-*` MCP block into
   `~/.codex/config.toml`. The github server resolves its token via a spawn shell (gh-auth or
   `$GITHUB_TOKEN`), independent of Codex env expansion.
-- **Codex skills mirror the Claude Code skills.** `codex-skills/bailiwick-curate`,
+- **Codex skills mirror the Claude Code skills.** `codex-skills/bailiwick-lead`, `codex-skills/bailiwick-curate`,
   `codex-skills/bailiwick-enrich`, `codex-skills/bailiwick-learn`, `codex-skills/bailiwick-investigate`,
   `codex-skills/bailiwick-purge`, and `codex-skills/bailiwick-sign` are Codex-native wrappers installed
   into `~/.codex/skills/` by
   `--install-tools`. They intentionally point back to the canonical `skills/*/SKILL.md` files, so the
-  procedure stays single-source while Codex gets a native `$bailiwick-curate` / `$bailiwick-enrich` /
+  procedure stays single-source while Codex gets a native `$bailiwick-lead` / `$bailiwick-curate` / `$bailiwick-enrich` /
   `$bailiwick-learn` / `$bailiwick-investigate` / `$bailiwick-purge` / `$bailiwick-sign` trigger
   instead of a copied prompt. `bailiwick-sign` diverges on exactly one point, and deliberately: the
   key-unlock handshake cannot use Claude Code's `!` prefix, so it directs the user to any terminal on
@@ -616,7 +620,8 @@ Key consequences (the four tools do not share one uniform integration):
   gemini-cli's scheduler but undocumented; re-verify on upgrades). The **Code Assist VS Code agent's**
   hook support is **unverified** — there, keep **`geminicodeassist.agentYoloMode` disabled** (the
   approval dialog) as the control. Capture is
-  **manual** (no session hooks): the agent writes a `.bailiwick-outputs/` session output, same as Codex/Copilot.
+  **manual** (no session hooks): the agent writes a manual session output (seeded `.bailiwick-outputs/`,
+  shadow `~/.bailiwick/captures/<repo-key>/`), same as Copilot and Codex before 0.147 or with untrusted hooks.
 - **The Copilot adapter is local-VS-Code-only.** The hidden, gitignored complement is filesystem-
   discovered in the IDE, but the GitHub-hosted **Copilot cloud agent cannot see untracked files**, so
   the framework does **not** reach it (that would require committing a shared instruction file).
@@ -688,8 +693,8 @@ bailiwick/
                   guardrails.py  install_hooks.py  settings.template.json  health_common.sh
                   install_global_layer.sh  install_adapter_hooks.py  install_desktop_mcp.py
                   codex-global-agents.tmpl.md  gemini-global.tmpl.md
-  skills/         curate/  enrich/  learn/  metrics/{SKILL.md,report.py}  investigate/  purge/  sign/{SKILL.md,check_message.py}   (each a SKILL.md)
-  codex-skills/   bailiwick-curate/  bailiwick-enrich/  bailiwick-learn/  bailiwick-investigate/  bailiwick-purge/  bailiwick-sign/  (SKILL.md wrappers)
+  skills/         lead/  curate/  enrich/  learn/  metrics/{SKILL.md,report.py}  investigate/  purge/  sign/{SKILL.md,check_message.py}   (each a SKILL.md)
+  codex-skills/   bailiwick-lead/  bailiwick-curate/  bailiwick-enrich/  bailiwick-learn/  bailiwick-investigate/  bailiwick-purge/  bailiwick-sign/  (SKILL.md wrappers)
   copilot-instructions/   terraform-gcp(.gke/.data/.project-stack).md
   prompts/        iam-review · pr-review · module-docs · cost-estimate · security-pr-report
   vscode/         mcp.json (template) · terraform.code-snippets

@@ -23,8 +23,10 @@ Two distinct operations, both dispatched by the orchestrator (ADR-010).
 ## Operation: Query (dispatched by the orchestrator at task start)
 
 1. Check session context — identify what is already loaded (do not re-read)
-2. Check `{workspaceFolder}/.bailiwick-outputs/` for manual session outputs from this project (written
-   under Codex/Gemini/Copilot, which have no capture hooks) — read any relevant to the current task
+2. Check for manual session outputs from this project — `{workspaceFolder}/.bailiwick-outputs/`
+   (seeded) or `~/.bailiwick/captures/<repo-key>/` (shadow; `$BAILIWICK_HOME/captures/` if set) — and
+   read any relevant to the current task. Hosts write these when no capture hook is active: Gemini,
+   Copilot, other hosts, and Codex before 0.147 or with untrusted hooks
 3. Read $BAILIWICK/knowledge/INDEX.md (if not already in context)
 4. Identify relevant files: topics/ first (accumulated knowledge), then patterns/ (canonical reference)
 5. Load only missing files via MCP filesystem — never the entire library
@@ -33,7 +35,7 @@ Two distinct operations, both dispatched by the orchestrator (ADR-010).
 8. **Federated consult (if enabled).** If `.bailiwick-sources.json` has an `enabled` source, hand off to the Federation stage (`agents/federation.md`) to consult external/company indexes **read-only** (index-first, ≤2 external content files, each fact tagged `[external:<id>]`). Resolve conflicts by the **source-authority precedence** (FRAMEWORK.md §11): the local KB wins for method/conventions but never overrides project decisions, authoritative docs, or legal/contractual/security constraints. Ingesting an external item into our library is gated through `/curate`, never automatic.
 
 ### Load Priority
-1. `.bailiwick-outputs/` manual session outputs (Codex/Gemini/Copilot channel) — pre-digested when present
+1. Manual session outputs (seeded `.bailiwick-outputs/` or shadow `~/.bailiwick/captures/<repo-key>/`, `$BAILIWICK_HOME/captures/` if set; hosts without active capture hooks) — pre-digested when present
 2. `topics/` — accumulated working knowledge, stays current
 3. `patterns/` — canonical reference, use when topic file doesn't cover the detail
 4. `templates/` — only when the final output is the document itself
@@ -48,8 +50,10 @@ where no code was written — extract reusable knowledge from agent session outp
 Any decision, finding, non-obvious pattern, or validated assumption is a candidate.
 
 ### Step 1 — Read session outputs
-Read all `.bailiwick-outputs/*.md` files written during this task.
-Also read any enforced raw captures in `.bailiwick-outputs/raw/*.jsonl` (written by the Stop/SessionEnd
+Read all manual session outputs written during this task: `.bailiwick-outputs/*.md` (seeded) or
+`~/.bailiwick/captures/<repo-key>/*.md` (shadow; `$BAILIWICK_HOME/captures/` if set).
+Also read any enforced raw captures in `.bailiwick-outputs/raw/*.jsonl` or the shadow
+`~/.bailiwick/captures/<repo-key>/raw/*.jsonl` (written by the Stop/SessionEnd
 hooks) that have not yet been curated — these are the safety net for sessions where no agent
 output was written. If `capture_backup` is enabled (`.bailiwick-sync.json`), first restore off-machine
 captures with `capture_backup.sh pull` (decrypts to `.bailiwick-inbox/`) and include those too. Raw
@@ -344,7 +348,7 @@ The context window is a finite resource. Manage proactively.
 - Before each load, check if content is already in this session's context
 - If already loaded: reference by name without re-reading — report to the orchestrator: "X already in context"
 - Do not reload INDEX.md if already read this session
-- Agent output files from `.bailiwick-outputs/` take priority — they are pre-digested context
+- Manual session outputs (seeded `.bailiwick-outputs/` or shadow `~/.bailiwick/captures/<repo-key>/`) take priority — they are pre-digested context
 
 ### Context Pressure
 When context approaches its limit:

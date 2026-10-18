@@ -3,7 +3,7 @@
 > **What this is (read first).** The Lead is the **orchestrator**: the current tool's main
 > session that plans work and dispatches **real native subagents** where available,
 > running them **concurrently where the work is independent**. The Lead is not itself an installed
-> subagent; orchestration stays in the main session across hosts (ADR-010, Amendment 1).
+> subagent; orchestration stays in the main session across hosts (ADR-010, Decision 1).
 >
 > The **Quality Workflow** is the ordered review pass the Lead drives — stages Memory → Implement →
 > Quality (Security Review / Docs / Cloud Research substituted by task type). Each **stage** runs
@@ -32,8 +32,11 @@ explicitly: *"run the full Quality Workflow"* or name the stages
 
 1. **Identify domains** — which domain context file(s) apply to this task (see Domain Routing below)
 2. **Read domain context file(s)** — extract Memory hints and domain checklist; do not read all of them
-3. **Memory stage (Query)** — pass the domain hints as tags; also check `.bailiwick-outputs/` for
-   manual session outputs (written under Codex/Gemini/Copilot, which have no capture hooks)
+3. **Memory stage (Query)** — pass the domain hints as tags; also check for manual session
+   outputs in `.bailiwick-outputs/` (seeded) or `~/.bailiwick/captures/<repo-key>/` (shadow;
+   `$BAILIWICK_HOME/captures/` if set). Hosts
+   write these when no capture hook is active: Gemini, Copilot, other hosts, and Codex before
+   0.147 or with untrusted hooks
 4. **Dispatch execution stages** with full context. Stages are installed as native subagents
    (`bailiwick-implement`, `bailiwick-quality`, …) and start as **fresh contexts** — the dispatch
    prompt MUST carry the framework root ($BAILIWICK), the domain hints/checklist, and the task
@@ -45,7 +48,8 @@ explicitly: *"run the full Quality Workflow"* or name the stages
 7. **Always run the Memory stage (Collect)** — this step is not optional and never skipped, even for
    research-only sessions, partial tasks, or conversations where no code was written; any decision,
    finding, or pattern is a candidate. As a backstop, Stop/SessionEnd hooks also capture the raw
-   transcript to `.bailiwick-outputs/raw/` — so even an un-run Collect leaves material for later
+   transcript to `.bailiwick-outputs/raw/` (seeded) or `~/.bailiwick/captures/<repo-key>/raw/`
+   (shadow) — so even an un-run Collect leaves material for later
    `/curate`. The hooks do not replace Collect; they guarantee nothing is lost when it is skipped.
 
 ## Domain Routing
@@ -91,7 +95,9 @@ combined checklist to the Quality stage.
 
 > **Execution model:** each stage runs through the host's **native subagent mechanism**
 > when available and warranted, or inline for small work under proportional routing. Explicit
-> `/lead` invocation follows the shared skill's stricter delegation and fallback contract.
+> `/lead` invocation follows the shared skill's stricter delegation and fallback contract, and
+> adds Memory Query, Quality (including on research-only work), and Federation when enabled to
+> the rows above.
 > Independent stages (e.g. two domain reviews) may run **concurrently**; dependent
 > stages ("Memory → Implement → Quality") run in order because each consumes the previous stage's
 > output. Because native subagents start as fresh contexts, each stage loads the knowledge it needs

@@ -89,7 +89,7 @@ Options:
                    capture/curation + guardrail hooks (merged into ~/.claude/settings.json),
                    the global Claude skill symlinks (~/.claude/skills/: /lead, /curate, /enrich, /learn, /metrics, /investigate, /purge, /sign), the
                    Quality Workflow stages as native Claude Code subagents (~/.claude/agents/: bailiwick-implement, bailiwick-quality, … — ADR-010), the
-                   Codex skill symlinks (~/.codex/skills/: bailiwick-lead, bailiwick-curate, bailiwick-enrich, bailiwick-learn, bailiwick-investigate, bailiwick-purge), the global
+                   Codex skill symlinks (~/.codex/skills/: bailiwick-lead, bailiwick-curate, bailiwick-enrich, bailiwick-learn, bailiwick-investigate, bailiwick-purge, bailiwick-sign), the global
                    Codex + Gemini operator layers (managed blocks in ~/.codex/AGENTS.md and
                    ~/.gemini/GEMINI.md), and, only with --with-desktop, the knowledge-scoped Claude/ChatGPT
                    Desktop knowledge-reference MCP wiring (see --with-desktop above). Idempotent — no-op for anything already present. Off by
