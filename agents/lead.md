@@ -3,7 +3,7 @@
 > **What this is (read first).** The Lead is the **orchestrator**: the current tool's main
 > session that plans work and dispatches **real native subagents** where available,
 > running them **concurrently where the work is independent**. The Lead is not itself an installed
-> subagent; orchestration stays in the main session across hosts (ADR-010, Amendment 1).
+> subagent; orchestration stays in the main session across hosts (ADR-010, Decision 1).
 >
 > The **Quality Workflow** is the ordered review pass the Lead drives — stages Memory → Implement →
 > Quality (Security Review / Docs / Cloud Research substituted by task type). Each **stage** runs
@@ -91,7 +91,9 @@ combined checklist to the Quality stage.
 
 > **Execution model:** each stage runs through the host's **native subagent mechanism**
 > when available and warranted, or inline for small work under proportional routing. Explicit
-> `/lead` invocation follows the shared skill's stricter delegation and fallback contract.
+> `/lead` invocation follows the shared skill's stricter delegation and fallback contract, and
+> adds Memory Query, Quality (including on research-only work), and Federation when enabled to
+> the rows above.
 > Independent stages (e.g. two domain reviews) may run **concurrently**; dependent
 > stages ("Memory → Implement → Quality") run in order because each consumes the previous stage's
 > output. Because native subagents start as fresh contexts, each stage loads the knowledge it needs

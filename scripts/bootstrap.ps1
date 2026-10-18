@@ -40,7 +40,7 @@
   the capture/curation + guardrail hooks (merged into ~/.claude/settings.json), the global Claude
   skill symlinks (~/.claude/skills/: /lead, /curate, /enrich, /learn, /metrics, /investigate, /purge, /sign), the Quality Workflow
   stages as native Claude Code subagents (~/.claude/agents/: bailiwick-implement, bailiwick-quality, ... - ADR-010), the Codex skill symlinks
-  (~/.codex/skills/: bailiwick-lead, bailiwick-curate, bailiwick-enrich, bailiwick-learn, bailiwick-investigate, bailiwick-purge), and the global Codex + Gemini operator layers
+  (~/.codex/skills/: bailiwick-lead, bailiwick-curate, bailiwick-enrich, bailiwick-learn, bailiwick-investigate, bailiwick-purge, bailiwick-sign), and the global Codex + Gemini operator layers
   (managed blocks in ~/.codex/AGENTS.md and ~/.gemini/GEMINI.md). Idempotent; off by default.
   Run with NO <target-repo-path> for a global-only install (nothing per-repo is written).
   -WithGemini generates .gemini/settings.json (Gemini MCP + advisory excludeTools) and seeds the
