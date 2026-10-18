@@ -58,11 +58,26 @@ def test_canonical_and_legacy_urls_have_same_policy():
     "https://cloud.google.com/blog/products/identity-security/example",
     "https://docs.cloud.google.com/secret-manager/docs/release-notes",
     "https://[invalid/iam/docs/",
+    "https://docs.cloud.google.com/iam/docs/..;/x",
+    "https://cloud.google.com/iam/docs/..;/..;/blog/products/identity-security",
+    "https://docs.cloud.google.com/iam/docs/.;/page",
+    "https://docs.cloud.google.com/iam/docs/x;y",
+    "https://docs.cloud.google.com/iam/docs/.../x",
+    "https://docs.cloud.google.com/iam/docs/x@evil.test",
 ])
 def test_unsafe_or_out_of_scope_urls_are_denied(url):
     result = run(url)
     assert result.returncode == 1, result.stderr
     assert json.loads(result.stdout)[0]["allowed"] is False
+
+
+def test_host_and_scheme_case_is_normalized():
+    result = run("HTTPS://DOCS.CLOUD.GOOGLE.COM/iam/docs/release-notes")
+    assert result.returncode == 0, result.stderr
+
+
+def test_missing_urls_is_an_invocation_error():
+    assert run().returncode == 2
 
 
 def test_mixed_batch_is_not_reported_as_allowed():
@@ -71,7 +86,10 @@ def test_mixed_batch_is_not_reported_as_allowed():
     assert [r["allowed"] for r in json.loads(result.stdout)] == [True, False]
 
 
-@pytest.mark.parametrize("mutation", ["empty", "duplicate", "outside", "bad-host", "bad-type", "version"])
+@pytest.mark.parametrize("mutation", [
+    "empty", "duplicate", "outside", "bad-host", "bad-type", "bad-tags", "version", "bool-version",
+    "root-prefix", "fragment-prefix",
+])
 def test_broken_registry_is_distinct_from_denied_url(tmp_path, mutation):
     data = json.loads(REGISTRY.read_text(encoding="utf-8"))
     if mutation == "empty":
@@ -84,6 +102,14 @@ def test_broken_registry_is_distinct_from_denied_url(tmp_path, mutation):
         data["sources"][0]["allowed_prefixes"] = ["https://evil.test/"]
     elif mutation == "bad-type":
         data["sources"][0]["allowed_prefixes"] = "https://docs.cloud.google.com/"
+    elif mutation == "bad-tags":
+        data["sources"][0]["tags"] = "iam"
+    elif mutation == "bool-version":
+        data["version"] = True
+    elif mutation == "root-prefix":
+        data["sources"][0]["allowed_prefixes"].append("https://cloud.google.com/")
+    elif mutation == "fragment-prefix":
+        data["sources"][0]["allowed_prefixes"].append("https://cloud.google.com/iam/docs/#x")
     else:
         data["version"] = 2
     registry = tmp_path / "sources.json"

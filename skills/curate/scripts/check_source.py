@@ -7,12 +7,17 @@ This validates supplied URLs, not a web tool's undisclosed redirect chain.
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
 
 REGISTRY = Path(__file__).resolve().parent.parent / "references" / "gcp-sources.json"
+# Allowlist, not blocklist: servers normalize forms like "..;" into traversal (observed live).
+SEGMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~-]*")
+# Registry prefixes must name a product docs tree, never a whole host.
+PREFIX_PATH = re.compile(r"(/[a-z0-9-]+)+/docs/")
 
 
 def parse_url(url):
@@ -29,7 +34,10 @@ def parse_url(url):
     if parts.query or "?" in url:
         raise ValueError("query strings are not permitted by this policy")
     path = parts.path or "/"
-    if "%" in path or "//" in path or any(p in (".", "..") for p in path.split("/")):
+    segments = path.split("/")[1:]
+    if segments and segments[-1] == "":
+        segments.pop()
+    if not all(SEGMENT.fullmatch(segment) for segment in segments):
         raise ValueError("encoded or ambiguous paths are forbidden")
     return parts.hostname, path
 
@@ -49,7 +57,8 @@ def matching_sources(url, sources):
 
 def load_registry(path):
     data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or data.get("version") != 1 or data.get("provider") != "gcp":
+    if (not isinstance(data, dict) or type(data.get("version")) is not int or data["version"] != 1
+            or data.get("provider") != "gcp"):
         raise ValueError("expected GCP registry version 1")
     sources = data.get("sources")
     if not isinstance(sources, list) or not sources:
@@ -67,8 +76,9 @@ def load_registry(path):
             if not isinstance(values, list) or not values or not all(isinstance(v, str) and v for v in values):
                 raise ValueError(f"{source_id}: expected nonempty {field} string list")
         for prefix in source["allowed_prefixes"]:
-            host, _ = parse_url(prefix)
-            if host not in ("docs.cloud.google.com", "cloud.google.com") or "#" in prefix:
+            host, prefix_path = parse_url(prefix)
+            if (host not in ("docs.cloud.google.com", "cloud.google.com") or "#" in prefix
+                    or not PREFIX_PATH.fullmatch(prefix_path)):
                 raise ValueError(f"{source_id}: prefix must be an official Google Cloud documentation URL")
         for url in source["discovery_urls"]:
             if not matching_sources(url, [source]):

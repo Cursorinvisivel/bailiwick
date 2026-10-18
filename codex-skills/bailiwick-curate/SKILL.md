@@ -34,7 +34,7 @@ prompt. This is a thin Codex wrapper; the canonical procedure remains in Bailiwi
 4. When encrypted dirty-zone backup is enabled in `$BAILIWICK/.bailiwick-sync.json`, run the canonical restore command only when needed:
    - `bash $BAILIWICK/hooks/capture_backup.sh pull`
    - If decryption needs a passphrase or pinentry and fails, report the blocker and continue with local pending inputs.
-5. At the end, write or update a short Codex session output in `.bailiwick-outputs/` unless the user explicitly asked not to.
+5. At the end, write or update a short Codex session output in `.bailiwick-outputs/` unless the user explicitly asked not to. When a freshness run happened, include its run ID and `freshness_only_ids` so a later curation excludes those maintenance reads from telemetry.
 
 ## Guardrails
 
