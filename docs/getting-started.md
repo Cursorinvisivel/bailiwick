@@ -171,7 +171,7 @@ paper trail.
 
 ## 5. Your first task
 
-There is **no command to "start a workflow."** Stating a substantial task in Claude Code *is* the
+No command is **required** to start a workflow: stating a substantial task in Claude Code *is* the
 invocation. The **Lead** is the orchestrator — the native main session — and for substantial or
 multi-step work it drives the **Quality Workflow**: the ordered Memory → Implement → Quality review
 pass, dispatched as native subagents (concurrently where the work is independent). See ADR-010 and
@@ -202,6 +202,10 @@ Run the full Quality Workflow: Memory → Implement → Quality. Don't handle th
 Naming the stages is the most reliable form — it pins the steps rather than relying on the model to
 expand "Lead" into the whole pass. (This is a policy directive the session follows, not a
 runtime-enforced switch like the guardrails.)
+
+For the strictest form, invoke **`/lead`** (Codex: `$bailiwick-lead`): the session coordinates the
+stages as real subagents, requires independent review, discloses any inline fallback, and ends with
+an execution table of what actually ran.
 
 **Under the other tools** the same stages are installed as native agents (ADR-010 Amendment 1) —
 same names, different trigger conventions (mechanics: each tool's official subagent docs):

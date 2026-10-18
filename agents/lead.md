@@ -32,8 +32,10 @@ explicitly: *"run the full Quality Workflow"* or name the stages
 
 1. **Identify domains** — which domain context file(s) apply to this task (see Domain Routing below)
 2. **Read domain context file(s)** — extract Memory hints and domain checklist; do not read all of them
-3. **Memory stage (Query)** — pass the domain hints as tags; also check `.bailiwick-outputs/` for
-   manual session outputs (written under Codex/Gemini/Copilot, which have no capture hooks)
+3. **Memory stage (Query)** — pass the domain hints as tags; also check for manual session
+   outputs in `.bailiwick-outputs/` (seeded) or `~/.bailiwick/captures/<repo-key>/` (shadow). Hosts
+   write these when no capture hook is active: Gemini, Copilot, other hosts, and Codex before
+   0.147 or with untrusted hooks
 4. **Dispatch execution stages** with full context. Stages are installed as native subagents
    (`bailiwick-implement`, `bailiwick-quality`, …) and start as **fresh contexts** — the dispatch
    prompt MUST carry the framework root ($BAILIWICK), the domain hints/checklist, and the task
@@ -45,7 +47,8 @@ explicitly: *"run the full Quality Workflow"* or name the stages
 7. **Always run the Memory stage (Collect)** — this step is not optional and never skipped, even for
    research-only sessions, partial tasks, or conversations where no code was written; any decision,
    finding, or pattern is a candidate. As a backstop, Stop/SessionEnd hooks also capture the raw
-   transcript to `.bailiwick-outputs/raw/` — so even an un-run Collect leaves material for later
+   transcript to `.bailiwick-outputs/raw/` (seeded) or `~/.bailiwick/captures/<repo-key>/raw/`
+   (shadow) — so even an un-run Collect leaves material for later
    `/curate`. The hooks do not replace Collect; they guarantee nothing is lost when it is skipped.
 
 ## Domain Routing

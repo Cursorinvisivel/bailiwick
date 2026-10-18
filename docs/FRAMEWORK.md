@@ -118,7 +118,8 @@ ADR-010. 13 files in three tiers.
 1. A task arrives. **Proportional routing:** trivial edits / direct questions are answered inline
    with knowledge loaded; substantial work routes through the **Lead**. Stating a substantial task
    *is* the invocation; explicit phrasing forces the full Quality Workflow when routing
-   under-evaluates a task.
+   under-evaluates a task, and `/lead` (Codex: `$bailiwick-lead`) adds the explicit execution
+   contract with required stage evidence.
 2. Lead identifies relevant **domain context file(s)**, reads them for Memory tags + checklist.
 3. Lead dispatches the **Memory stage (Query)** with those tags — it descends the `INDEX.md` tree
    on-demand, loads ≤5 content files, checks `.bailiwick-outputs/` for prior session outputs.
@@ -129,8 +130,9 @@ ADR-010. 13 files in three tiers.
 4. Lead dispatches the **execution stages** via the Stage Matrix (commonly
    Memory → Implement → Quality; Security Review / Docs / Cloud Research substituted by task type).
    Independent stages run **concurrently**; dependent stages run in order. Each surfaces knowledge
-   signals back to the Lead in real time — under Claude Code the capture hooks record the transcript;
-   `.bailiwick-outputs/*.md` is the manual channel for Codex/Gemini/Copilot.
+   signals back to the Lead in real time — where capture hooks are active (Claude Code; Codex CLI
+   0.147+ once trusted) they record the transcript; otherwise a manual session output in
+   `.bailiwick-outputs/` (seeded) or `~/.bailiwick/captures/<repo-key>/` (shadow) is the channel.
 5. Lead integrates, presents **drafts for human review**, and always closes with the **Memory stage
    (Collect)**. Stop/SessionEnd hooks capture the raw transcript as a backstop.
 
