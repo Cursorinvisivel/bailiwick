@@ -74,6 +74,15 @@ def test_unwritable_launcher_home_still_installs_hooks(tmp_path):
     assert any("fetch_guard.py" in c for c in commands(s)), "settings written despite the launcher failure"
 
 
+def test_launcher_owner_line_is_plain_text_on_windows_paths():
+    sys.path.insert(0, HOOKS_DIR)
+    import install_hooks
+    content = install_hooks.launcher_content(r"C:\Users\me\bailiwick\hooks\fetch_guard.py")
+    # bootstrap.ps1 matches this line; the TARGET repr doubles every backslash.
+    assert "# bailiwick-launcher-target: C:/Users/me/bailiwick/hooks/fetch_guard.py\n" in content
+    assert "TARGET = 'C:\\\\Users" in content
+
+
 def test_agent_frontmatter_hook_calls_the_launcher_path():
     agent = open(os.path.join(ROOT, "agents", "cloud-research-freshness.md")).read().split("\n---\n")[0]
     assert "matcher: \"WebFetch\"" in agent
