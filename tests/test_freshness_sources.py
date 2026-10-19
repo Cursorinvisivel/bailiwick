@@ -30,7 +30,7 @@ def test_all_registered_discovery_urls_are_allowed():
 
 def test_canonical_and_legacy_urls_have_same_policy():
     result = run(
-        "https://docs.cloud.google.com/kubernetes-engine/docs/concepts/workload-identity#overview",
+        "https://docs.cloud.google.com/kubernetes-engine/docs/concepts/workload-identity",
         "https://cloud.google.com/kubernetes-engine/docs/concepts/workload-identity",
     )
     assert result.returncode == 0, result.stderr
@@ -64,6 +64,8 @@ def test_canonical_and_legacy_urls_have_same_policy():
     "https://docs.cloud.google.com/iam/docs/x;y",
     "https://docs.cloud.google.com/iam/docs/.../x",
     "https://docs.cloud.google.com/iam/docs/x@evil.test",
+    "https://docs.cloud.google.com/iam/docs/release-notes#overview",
+    "https://docs.cloud.google.com/iam/docs/release-notes#",
 ])
 def test_unsafe_or_out_of_scope_urls_are_denied(url):
     result = run(url)

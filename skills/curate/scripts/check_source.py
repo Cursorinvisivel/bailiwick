@@ -33,6 +33,8 @@ def parse_url(url):
         raise ValueError("credentials and explicit ports are forbidden")
     if parts.query or "?" in url:
         raise ValueError("query strings are not permitted by this policy")
+    if parts.fragment or "#" in url:
+        raise ValueError("fragments are not permitted by this policy")
     path = parts.path or "/"
     segments = path.split("/")[1:]
     if segments and segments[-1] == "":
@@ -77,7 +79,7 @@ def load_registry(path):
                 raise ValueError(f"{source_id}: expected nonempty {field} string list")
         for prefix in source["allowed_prefixes"]:
             host, prefix_path = parse_url(prefix)
-            if (host not in ("docs.cloud.google.com", "cloud.google.com") or "#" in prefix
+            if (host not in ("docs.cloud.google.com", "cloud.google.com")
                     or not PREFIX_PATH.fullmatch(prefix_path)):
                 raise ValueError(f"{source_id}: prefix must be an official Google Cloud documentation URL")
         for url in source["discovery_urls"]:

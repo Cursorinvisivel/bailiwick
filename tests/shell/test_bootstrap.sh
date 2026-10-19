@@ -149,4 +149,18 @@ out="$(bash "$RI/scripts/bootstrap.sh" --role central 2>&1)"; rc=$?
 assert_exit "invalid JSON -> exit 2" 2 "$rc"
 assert_eq "broken file left as-is" "{ broken" "$(cat "$RCFG")"
 
+echo "== global uninstall removes this clone's fetch-guard launcher, never another clone's"
+LAUNCHER="$BAILIWICK_HOME/hooks/fetch_guard.py"
+mkdir -p "$HOME/.claude"
+python3 "$REPO_ROOT/hooks/install_hooks.py" "$HOME/.claude/settings.json" \
+  "$REPO_ROOT/hooks/settings.template.json" >/dev/null 2>&1
+assert_file "installer wrote the launcher" "$LAUNCHER"
+bash "$BOOTSTRAP" --uninstall >/dev/null 2>&1
+[ -e "$LAUNCHER" ]; assert_exit "own launcher removed" 1 "$?"
+python3 -I -c 'import sys; sys.path.append(sys.argv[1]); import install_hooks as m
+open(sys.argv[2], "w").write(m.launcher_content("/elsewhere/bailiwick/hooks/fetch_guard.py"))' \
+  "$REPO_ROOT/hooks" "$LAUNCHER"
+bash "$BOOTSTRAP" --uninstall >/dev/null 2>&1
+assert_file "another clone's launcher kept" "$LAUNCHER"
+
 t_summary

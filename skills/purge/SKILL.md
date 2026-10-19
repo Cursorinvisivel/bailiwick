@@ -63,7 +63,8 @@ first.
      both hold client identifiers in plaintext and an attestation that omits them is false:
      - `$BAILIWICK_HOME/guardrail-audit.log` (default `~/.bailiwick/guardrail-audit.log`) — every
        ask/deny line carries the **absolute project path** and the first 500 chars of the raw
-       command, so project names, bucket URIs, and hostnames appear verbatim.
+       command, so project names, bucket URIs, and hostnames appear verbatim. `fetch-deny*` lines
+       from the freshness fetch guard carry the agent name and a URL host plus hash instead.
      - `$BAILIWICK_HOME/health/*.jsonl` **and** `health/remote/*` — health detail strings embed repo
        keys and push targets. Remote shards are re-materialised by `capture_backup.sh pull`, so
        purge the local shard *and* note that the encrypted `health/<machine>.jsonl.gpg` blobs on the
