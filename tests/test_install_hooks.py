@@ -17,10 +17,67 @@ HOOKS_DIR = os.path.join(ROOT, "hooks")
 
 
 def run_installer(settings_path):
+    # The installer also writes the fetch-guard launcher under BAILIWICK_HOME — keep it in tmp.
+    env = dict(os.environ, BAILIWICK_HOME=str(launcher_home(settings_path)))
     return subprocess.run(
         [sys.executable, os.path.join(HOOKS, "install_hooks.py"), str(settings_path), TEMPLATE],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=env,
     )
+
+
+def launcher_home(settings_path):
+    return os.path.join(os.path.dirname(str(settings_path)), "bw-home")
+
+
+def run_launcher(settings_path, payload):
+    launcher = os.path.join(launcher_home(settings_path), "hooks", "fetch_guard.py")
+    env = dict(os.environ, BAILIWICK_HOME=launcher_home(settings_path))
+    r = subprocess.run([sys.executable, "-I", launcher, "--scoped"], input=json.dumps(payload),
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"] if r.stdout.strip() else None
+
+
+OFF_REGISTRY = {"tool_name": "WebFetch", "tool_input": {"url": "https://evil.test/", "prompt": "x"}}
+
+
+def test_fetch_launcher_runs_this_clones_guard_without_agent_type(tmp_path):
+    s = tmp_path / "settings.json"
+    r = run_installer(s)
+    assert "LAUNCHER: " in r.stdout
+    assert run_launcher(s, OFF_REGISTRY) == "deny"
+    allowed = {"tool_name": "WebFetch",
+               "tool_input": {"url": "https://docs.cloud.google.com/iam/docs/release-notes"}}
+    assert run_launcher(s, allowed) is None
+    assert "LAUNCHER: " not in run_installer(s).stdout, "unchanged launcher is not rewritten"
+
+
+def test_fetch_launcher_denies_when_the_clone_is_gone(tmp_path):
+    s = tmp_path / "settings.json"
+    run_installer(s)
+    launcher = os.path.join(launcher_home(s), "hooks", "fetch_guard.py")
+    text = open(launcher).read().replace(os.path.join(HOOKS_DIR, "fetch_guard.py"),
+                                         str(tmp_path / "moved" / "fetch_guard.py"))
+    open(launcher, "w").write(text)
+    assert run_launcher(s, OFF_REGISTRY) == "deny"
+    log = open(os.path.join(launcher_home(s), "guardrail-audit.log")).read()
+    assert "fetch-deny-launcher:scoped" in log, "launcher failures are audited"
+
+
+def test_unwritable_launcher_home_still_installs_hooks(tmp_path):
+    s = tmp_path / "settings.json"
+    os.makedirs(launcher_home(s))
+    open(os.path.join(launcher_home(s), "hooks"), "w").write("a file where the directory goes")
+    r = run_installer(s)
+    assert r.returncode == 0, r.stderr
+    assert "WARN: fetch-guard launcher not written" in r.stdout and "INSTALLED" in r.stdout
+    assert any("fetch_guard.py" in c for c in commands(s)), "settings written despite the launcher failure"
+
+
+def test_agent_frontmatter_hook_calls_the_launcher_path():
+    agent = open(os.path.join(ROOT, "agents", "cloud-research-freshness.md")).read().split("\n---\n")[0]
+    assert "matcher: \"WebFetch\"" in agent
+    assert '"${BAILIWICK_HOME:-$HOME/.bailiwick}/hooks/fetch_guard.py" --scoped' in agent
 
 
 def commands(settings_path):

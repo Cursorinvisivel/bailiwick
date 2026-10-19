@@ -10,12 +10,12 @@ only has to catch live-machine drift.
 | `test_capture_session.py` | pytest | Capture gating (wired/shadow/inert), `repo_key` collision-resistance, the capture itself via the real hook protocol, **both transcript shapes** (Claude Code `tool_use` blocks and Codex rollout records, incl. the code-mode patch floor and the anti-false-positive on quoted text/output) |
 | `test_traffic_counter.py` | pytest | Traffic ledger accumulation |
 | `test_freshness_sources.py` | pytest | GCP freshness source policy: official discovery URLs, legacy aliases, host/path confusion, mixed batches, and fail-closed malformed registries |
-| `test_fetch_guard.py` | pytest | Freshness fetch guard: registry URLs pass silently; out-of-registry, fragment, query and empty URLs are denied; other agents and tools are untouched; malformed payloads and broken registries fail closed |
+| `test_fetch_guard.py` | pytest | Freshness fetch guard: registry URLs pass silently; out-of-registry, fragment, query and empty URLs are denied; other agents and tools are untouched; malformed payloads and broken registries fail closed; `--scoped` mode (agent frontmatter layer) needs no `agent_type` |
 | `test_install_adapter_hooks.py` | pytest | Codex/Gemini hook wiring: managed block/entry only, legacy-marker sweep, refuse-on-malformed, Codex capture events (`Stop`/`SessionEnd`) with PreToolUse kept first, hook trust preserved across reinstall |
 | `shell/test_capture_backup.sh` | bash | **A capture is never lost**: source survives every failure mode *and* success (only `/curate` purges); unusable key / unreachable remote fail loudly into the health log; ciphertext round-trips back byte-identical; purge is surgical |
 | `shell/test_gh_account.sh` | bash | Account resolution (override > map > probe > ambiguous) and per-call token pinning, against a stub `gh` |
 | `shell/test_sync_knowledge.sh` | bash | Central/satellite propagation, exit-code contract (2 = PR-less stranding), PR reuse, ADR-009 public-origin refusal |
-| `shell/test_doctor.sh` | bash | Every doctor invariant driven to its broken state must ✗ and exit 1 |
+| `shell/test_doctor.sh` | bash | Every doctor invariant driven to its broken state must ✗ and exit 1, including a fetch guard that is installed but not enforcing the registry |
 | `shell/test_bootstrap.sh` | bash | `--dry-run` writes NOTHING (full state fingerprint); uninstall never un-hides preserved captures; the shadow gate matches symlinked allowlist entries |
 | `shell/test_purge_verify.sh` | bash | Deep-removal measurements: history residuals stay loud after a tree purge; preflight blocks while ANY pending capture exists (backup branches, inbox, local staging) |
 | `shell/test_public_origin.sh` | bash | ADR-009 Amendment 1: cache hit/expiry/URL-change/malformed-miss, public never cached, timeout fails open without caching — and the critical one: enforcement (`check`) probes LIVE even with a warm cache |

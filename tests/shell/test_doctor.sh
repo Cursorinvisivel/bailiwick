@@ -54,6 +54,23 @@ assert_exit "missing hook script -> exit 1" 1 "$rc"
 assert_contains "names the missing script" "moved-away/hooks/fetch_guard.py" "$out"
 own_settings
 
+echo "== fetch guard canary: both installed layers must refuse an off-registry URL"
+out="$(doctor)"; rc=$?
+assert_contains "global layer enforces the registry" "refuses off-registry URLs: global settings hook" "$out"
+assert_contains "missing launcher is flagged" "freshness fetch launcher missing" "$out"
+python3 "$INST/hooks/install_hooks.py" "$T_SANDBOX/scratch-settings.json" "$INST/hooks/settings.template.json" >/dev/null
+out="$(doctor)"; rc=$?
+assert_exit "both layers enforcing -> exit 0" 0 "$rc"
+assert_contains "launcher layer enforces the registry" "refuses off-registry URLs: agent-scoped launcher" "$out"
+assert_not_contains "launcher no longer missing" "freshness fetch launcher missing" "$out"
+[ ! -e "$BAILIWICK_HOME/guardrail-audit.log" ]; assert_exit "canary leaves the real audit log untouched" 0 "$?"
+cp "$INST/skills/curate/references/gcp-sources.json" "$T_SANDBOX/sources.bak"
+echo '{' > "$INST/skills/curate/references/gcp-sources.json"
+out="$(doctor)"; rc=$?
+assert_exit "a guard that denies everything is BROKEN (exit 1)" 1 "$rc"
+assert_contains "names the non-enforcing guard" "not enforcing the registry" "$out"
+cp "$T_SANDBOX/sources.bak" "$INST/skills/curate/references/gcp-sources.json"
+
 echo "== missing per-machine config is only degraded (warn), not broken"
 rm "$INST/.bailiwick-sync.json"
 out="$(doctor)"; rc=$?

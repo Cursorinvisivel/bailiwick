@@ -2,11 +2,20 @@
 name: bailiwick-cloud-research-freshness
 description: Fetch-only variant of the Cloud Research stage for the /curate periodic GCP freshness check — compares supplied sanitized claim snapshots against allowlisted official GCP documentation and release notes. Dispatched only by /curate in periodic mode, with the procedure and source registry inline; never for general research.
 tools: WebFetch
+hooks:
+  PreToolUse:
+    - matcher: "WebFetch"
+      hooks:
+        - type: command
+          command: 'python3 -I "${BAILIWICK_HOME:-$HOME/.bailiwick}/hooks/fetch_guard.py" --scoped'
 ---
 <!-- tools: WebFetch only. No Read/Grep/Glob (nothing local to read or leak), no WebSearch (discovery starts
      from allowlisted URLs), no Edit/Write/Bash — the orchestrator validates URLs and persists the report.
      The restriction is enforced under Claude Code; generated Gemini/Codex/Copilot adapters drop `tools:`.
-     Under Claude Code, hooks/fetch_guard.py also checks every WebFetch URL against the registry. -->
+     Under Claude Code, hooks/fetch_guard.py also checks every WebFetch URL against the registry, twice:
+     the frontmatter hook above runs only while this agent is active (no reliance on the payload's
+     agent_type) through the launcher install_hooks.py writes, and blocks every fetch if that launcher
+     is missing; the global settings.json hook is the second layer. -->
 
 # Cloud Research (freshness) — stage variant
 

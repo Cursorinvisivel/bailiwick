@@ -108,3 +108,21 @@ def test_broken_registry_fails_closed(tmp_path):
         (ROOT / "skills/curate/scripts/check_source.py").read_text())
     (fake / "skills/curate/references/gcp-sources.json").write_text("{")
     assert decision(run(fetch(ALLOWED), hook=fake / "hooks/fetch_guard.py")) == "deny"
+
+
+def run_scoped(payload):
+    stdin = payload if isinstance(payload, str) else json.dumps(payload)
+    return subprocess.run([sys.executable, "-I", str(HOOK), "--scoped"], input=stdin,
+                          capture_output=True, text=True, env=dict(os.environ))
+
+
+@pytest.mark.parametrize("agent_type", [None, "", "renamed-in-a-future-release"])
+def test_scoped_mode_does_not_need_agent_type(agent_type):
+    assert decision(run_scoped(fetch("https://evil.test/", agent_type=agent_type))) == "deny"
+    assert decision(run_scoped(fetch(ALLOWED, agent_type=agent_type))) is None
+
+
+def test_scoped_mode_fails_closed_on_malformed_payload_and_missing_tool_name():
+    assert decision(run_scoped("not json")) == "deny"
+    assert decision(run_scoped({"tool_input": {"url": "https://evil.test/"}})) == "deny"
+    assert decision(run_scoped({"tool_name": "SomeRenamedFetch", "tool_input": {"url": "https://evil.test/"}})) == "deny"

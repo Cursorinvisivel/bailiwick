@@ -77,6 +77,77 @@ PY
   esac
 fi
 
+# ---- 1b. Freshness fetch guard canary: both layers must actually refuse an off-registry URL ------
+# Presence is not enough: a guard that cannot import its policy denies everything (fail-closed) and
+# one that cannot see its caller allows everything. Each installed layer gets a synthetic call and
+# must deny an off-registry URL AND allow a registry URL. This proves the installed commands and
+# the policy; it cannot prove that Claude Code still sends `agent_type` (scripts/smoke_fetch_guard.sh).
+if [ "$HAVE_PY" -eq 1 ]; then
+  canary="$(python3 - "$SETTINGS" "$BAILIWICK_ROOT" <<'PY'
+import json, os, subprocess, sys, tempfile
+OFF = "https://evil.test/doctor-canary"
+AGENT = "bailiwick-cloud-research-freshness"
+root = sys.argv[2]
+try:  # a registry URL that must pass: the first discovery URL, so a registry edit cannot fake a fault
+    ON = json.load(open(os.path.join(root, "skills/curate/references/gcp-sources.json")))["sources"][0]["discovery_urls"][0]
+except Exception:
+    ON = "https://docs.cloud.google.com/iam/docs/release-notes"
+# Synthetic denials must not land in the real audit log: doctor writes nothing.
+SCRATCH = tempfile.mkdtemp(prefix="bw-doctor-canary-")
+
+def decide(argv, url, shell=False):
+    payload = {"agent_type": AGENT, "tool_name": "WebFetch", "tool_input": {"url": url, "prompt": "x"}}
+    try:
+        r = subprocess.run(argv, shell=shell, input=json.dumps(payload), capture_output=True,
+                           text=True, timeout=20, env=dict(os.environ, BAILIWICK_HOME=SCRATCH))
+    except Exception as exc:
+        return "error:" + type(exc).__name__
+    if r.returncode == 2:
+        return "blocked"  # Claude Code treats exit 2 as a deny
+    if r.returncode != 0:
+        return "rc%d" % r.returncode
+    try:
+        return json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"] if r.stdout.strip() else "allow"
+    except Exception:
+        return "garbled"
+
+def verdict(label, run):
+    off, on = run(OFF), run(ON)
+    if off in ("deny", "blocked") and on == "allow":
+        print("OK\t" + label)
+    else:
+        print("BAD\t%s (off-registry: %s, registry: %s)" % (label, off, on))
+
+home = os.environ.get("BAILIWICK_HOME") or os.path.join(os.path.expanduser("~"), ".bailiwick")
+launcher = os.path.join(home, "hooks", "fetch_guard.py")
+if os.path.isfile(launcher):
+    verdict("agent-scoped launcher " + launcher,
+            lambda url: decide([sys.executable, "-I", launcher, "--scoped"], url))
+else:
+    print("NOLAUNCHER\t" + launcher)
+try:
+    groups = json.load(open(sys.argv[1])).get("hooks", {}).get("PreToolUse", [])
+except Exception:
+    groups = []
+cmds = [h.get("command", "") for g in groups if g.get("matcher") == "WebFetch"
+        for h in g.get("hooks", []) if "fetch_guard.py" in h.get("command", "")]
+for cmd in cmds:
+    verdict("global settings hook", lambda url, c=cmd: decide(c, url, shell=True))
+import shutil
+shutil.rmtree(SCRATCH, ignore_errors=True)
+PY
+)"
+  while IFS="$(printf '\t')" read -r state detail; do
+    case "$state" in
+      OK)         ok "freshness fetch guard refuses off-registry URLs: $detail" ;;
+      BAD)        fail "freshness fetch guard is not enforcing the registry: $detail — re-run bootstrap.sh --install-tools" ;;
+      NOLAUNCHER) warn "freshness fetch launcher missing ($detail) — the freshness agent's fetches are all blocked until bootstrap.sh --install-tools" ;;
+    esac
+  done <<EOF
+$canary
+EOF
+fi
+
 # ---- 2. Per-machine config ---------------------------------------------------------------------
 # .bailiwick-sync.json is gitignored by design, so a fresh clone silently loses it — and with it
 # the machine role, encrypted capture backup, and gh account pinning, all reverting to defaults.
