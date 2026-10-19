@@ -59,7 +59,7 @@ else:
     if foreign:
         print(";".join(foreign))
     # Added after the first hook generation: a machine installed before it has every other hook,
-    # and the /curate freshness agent's WebFetch calls then run without the fetch-time allowlist.
+    # and the /curate WebFetch calls of the freshness agent then run without the fetch-time allowlist.
     elif not any(os.path.basename(m) == "fetch_guard.py" for m in scripts):
         print("OK-NOFETCH")
     else:
