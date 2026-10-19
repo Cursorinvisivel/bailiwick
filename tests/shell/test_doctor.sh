@@ -13,7 +13,8 @@ SETTINGS="$T_SANDBOX/claude-settings.json"
 
 own_settings() {  # settings whose hooks run from THIS instance
   cat > "$SETTINGS" <<EOF
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "python3 $INST/hooks/capture_session.py" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "python3 $INST/hooks/capture_session.py" } ] } ],
+             "PreToolUse": [ { "matcher": "WebFetch", "hooks": [ { "type": "command", "command": "python3 $INST/hooks/fetch_guard.py" } ] } ] } }
 EOF
 }
 doctor() { CLAUDE_SETTINGS="$SETTINGS" bash "$INST/scripts/doctor.sh" 2>&1; }
@@ -34,6 +35,24 @@ out="$(doctor)"; rc=$?
 assert_exit "healthy -> exit 0" 0 "$rc"
 assert_contains "hook wiring passes" "execute this clone" "$out"
 assert_contains "config recognised" "role: satellite, machine: doctest" "$out"
+assert_not_contains "fetch guard counted as installed" "fetch guard hook not installed" "$out"
+
+echo "== a pre-fetch-guard install is degraded (warn), not broken"
+cat > "$SETTINGS" <<EOF
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "python3 $INST/hooks/capture_session.py" } ] } ] } }
+EOF
+out="$(doctor)"; rc=$?
+assert_exit "missing fetch guard still exits 0" 0 "$rc"
+assert_contains "warns about the missing fetch guard" "fetch guard hook not installed" "$out"
+
+echo "== a hook script that no longer exists is BROKEN (exit 1) — Claude Code blocks the tool"
+cat > "$SETTINGS" <<EOF
+{ "hooks": { "PreToolUse": [ { "matcher": "WebFetch", "hooks": [ { "type": "command", "command": "python3 -I $T_SANDBOX/moved-away/hooks/fetch_guard.py" } ] } ] } }
+EOF
+out="$(doctor)"; rc=$?
+assert_exit "missing hook script -> exit 1" 1 "$rc"
+assert_contains "names the missing script" "moved-away/hooks/fetch_guard.py" "$out"
+own_settings
 
 echo "== missing per-machine config is only degraded (warn), not broken"
 rm "$INST/.bailiwick-sync.json"

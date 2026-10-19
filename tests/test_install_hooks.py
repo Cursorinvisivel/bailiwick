@@ -44,6 +44,28 @@ def test_fresh_install_then_idempotent(tmp_path):
     assert any(HOOKS_DIR in c for c in commands(s)), "commands must point at this clone"
     r = run_installer(s)
     assert r.returncode == 0 and "PRESENT" in r.stdout, "second run must be a no-op"
+    cfg = json.load(open(s))
+    guard = [g for g in cfg["hooks"]["PreToolUse"]
+             if any("fetch_guard.py" in h.get("command", "") for h in g["hooks"])]
+    assert [g.get("matcher") for g in guard] == ["WebFetch"], "fetch guard must stay WebFetch-scoped"
+
+
+def test_pre_fetch_guard_install_gains_the_guard_once(tmp_path):
+    s = tmp_path / "settings.json"
+    guard_group = {"matcher": "Bash", "hooks": [{"type": "command",
+                   "command": f"python3 {HOOKS_DIR}/guardrails.py"}]}
+    write_settings(s, {
+        "Stop": [{"hooks": [{"type": "command", "command": f"python3 {HOOKS_DIR}/capture_session.py"}]}],
+        "PreToolUse": [guard_group],
+    })
+    r = run_installer(s)
+    assert r.returncode == 0 and "INSTALLED" in r.stdout
+    cfg = json.load(open(s))
+    assert cfg["model"] == "keep-me"
+    pre = cfg["hooks"]["PreToolUse"]
+    assert pre[0] == guard_group, "existing group untouched"
+    assert [g["matcher"] for g in pre if "fetch_guard.py" in g["hooks"][0]["command"]] == ["WebFetch"]
+    assert "PRESENT" in run_installer(s).stdout
 
 
 def test_foreign_clone_and_old_layout_are_adopted(tmp_path):

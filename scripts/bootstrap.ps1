@@ -1309,7 +1309,9 @@ function Test-HooksPresent {
 # Windows PowerShell 5.1 has no '??' null-coalescing operator — use a plain fallback.
 $pyExe = Get-Command python3 -ErrorAction SilentlyContinue
 if (-not $pyExe) { $pyExe = Get-Command python -ErrorAction SilentlyContinue }
-if ((-not (Test-HooksPresent)) -and $InstallTools -and $pyExe -and (Test-Path $hookTmpl)) {
+# The merge is idempotent (PRESENT when nothing changed), so -InstallTools always runs it: gating
+# on Test-HooksPresent left machines without any hook added to the template after their first install.
+if ($InstallTools -and $pyExe -and (Test-Path $hookTmpl)) {
   Write-Host "  -InstallTools: merging capture/curation hooks into ~/.claude/settings.json..."
   & $pyExe.Source (Join-Path $BailiwickRoot "hooks/install_hooks.py") $userSettings $hookTmpl 2>&1 | ForEach-Object { "    $_" }
 }

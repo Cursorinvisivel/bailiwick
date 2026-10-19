@@ -10,6 +10,7 @@ only has to catch live-machine drift.
 | `test_capture_session.py` | pytest | Capture gating (wired/shadow/inert), `repo_key` collision-resistance, the capture itself via the real hook protocol, **both transcript shapes** (Claude Code `tool_use` blocks and Codex rollout records, incl. the code-mode patch floor and the anti-false-positive on quoted text/output) |
 | `test_traffic_counter.py` | pytest | Traffic ledger accumulation |
 | `test_freshness_sources.py` | pytest | GCP freshness source policy: official discovery URLs, legacy aliases, host/path confusion, mixed batches, and fail-closed malformed registries |
+| `test_fetch_guard.py` | pytest | Freshness fetch guard: registry URLs pass silently; out-of-registry, fragment, query and empty URLs are denied; other agents and tools are untouched; malformed payloads and broken registries fail closed |
 | `test_install_adapter_hooks.py` | pytest | Codex/Gemini hook wiring: managed block/entry only, legacy-marker sweep, refuse-on-malformed, Codex capture events (`Stop`/`SessionEnd`) with PreToolUse kept first, hook trust preserved across reinstall |
 | `shell/test_capture_backup.sh` | bash | **A capture is never lost**: source survives every failure mode *and* success (only `/curate` purges); unusable key / unreachable remote fail loudly into the health log; ciphertext round-trips back byte-identical; purge is surgical |
 | `shell/test_gh_account.sh` | bash | Account resolution (override > map > probe > ambiguous) and per-call token pinning, against a stub `gh` |

@@ -43,22 +43,36 @@ except Exception:
     print("UNPARSEABLE"); sys.exit()
 cmds = [h.get("command", "") for v in (d.get("hooks") or {}).values()
         for g in v for h in g.get("hooks", [])]
-owned = re.compile(r'(\S+/hooks/(?:capture_session\.py|session_start\.sh|capture_backup\.sh|guardrails\.py))')
-homes = set()
-for c in cmds:
-    for m in owned.findall(c):
-        homes.add(os.path.realpath(os.path.dirname(m)))
-if not homes:
+owned = re.compile(r'(\S+/hooks/(?:capture_session\.py|session_start\.sh|capture_backup\.sh|guardrails\.py|fetch_guard\.py))')
+scripts = [m for c in cmds for m in owned.findall(c)]
+here = os.path.realpath(os.path.join(root, "hooks"))
+# A hook script that no longer exists makes python3 exit 2, which Claude Code treats as BLOCKING:
+# every call of that tool (Bash, WebFetch) fails machine-wide until the hooks are reinstalled.
+missing = sorted(set(m for m in scripts if not os.path.exists(m)))
+homes = set(os.path.realpath(os.path.dirname(m)) for m in scripts)
+if missing:
+    print("MISSING " + ";".join(missing))
+elif not homes:
     print("NONE")
 else:
-    foreign = sorted(h for h in homes if h != os.path.realpath(os.path.join(root, "hooks")))
-    print(";".join(foreign) if foreign else "OK")
+    foreign = sorted(h for h in homes if h != here)
+    if foreign:
+        print(";".join(foreign))
+    # Added after the first hook generation: a machine installed before it has every other hook,
+    # and the /curate freshness agent's WebFetch calls then run without the fetch-time allowlist.
+    elif not any(os.path.basename(m) == "fetch_guard.py" for m in scripts):
+        print("OK-NOFETCH")
+    else:
+        print("OK")
 PY
 )"
   case "$hook_state" in
     OK)          ok "hooks in ~/.claude/settings.json execute this clone" ;;
+    OK-NOFETCH)  ok "hooks in ~/.claude/settings.json execute this clone"
+                 warn "freshness fetch guard hook not installed — re-run bootstrap.sh --install-tools to merge it" ;;
     NONE)        warn "no Bailiwick hooks in $SETTINGS — capture/guardrails not installed (bootstrap.sh --install-tools)" ;;
     UNPARSEABLE) warn "$SETTINGS is not valid JSON — cannot verify hook wiring" ;;
+    MISSING\ *)  fail "hook scripts no longer exist (${hook_state#MISSING }) — Claude Code treats a missing hook script as a blocking hook error (for PreToolUse, every call of that tool fails); re-run bootstrap.sh --install-tools from this clone" ;;
     *)           fail "hooks execute a DIFFERENT clone (${hook_state}) — this clone's code is not live and its /curate cannot see what those hooks capture; re-run bootstrap.sh --install-tools from here" ;;
   esac
 fi

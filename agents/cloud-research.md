@@ -26,7 +26,8 @@ You are a cloud infrastructure research specialist. Your job is to search the we
 
 This mode normally runs in the fetch-only
 [`bailiwick-cloud-research-freshness`](cloud-research-freshness.md) variant. If you are
-dispatched for it as a fallback, you hold file tools the variant lacks: do not use them. Follow
+dispatched for it as a fallback (only with the user's explicit go-ahead for that run), you hold
+file tools the variant lacks and no fetch-time guard covers you: do not use them. Follow
 the procedure supplied inline in the dispatch prompt
 ([`skills/curate/references/gcp-freshness.md`](../skills/curate/references/gcp-freshness.md)).
 Its constraints override the broader source policy above: use only the indexed official GCP
