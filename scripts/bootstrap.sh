@@ -1383,7 +1383,11 @@ fi
 # Gemini (~/.gemini/agents/<name>.md), Codex (~/.codex/agents/<name>.toml) and Copilot
 # (~/.copilot/agents/<name>.agent.md), produced from the canonical frontmattered agents/*.md.
 # The Claude-specific `tools:` field is dropped (each tool's defaults apply); a canonical toolset
-# without Edit/Write maps to Codex `sandbox_mode = "read-only"`. Regenerated on every
+# without Edit/Write maps to Codex `sandbox_mode = "read-only"`. Stage sizing (ADR-010 Amendment 2):
+# `model:` is Claude-specific and never translated (other hosts inherit the session model);
+# `effort:` maps to Codex `model_reasoning_effort` and Copilot `reasoning-effort`. A Codex agent
+# file overrides spawn-time values, so a task-sized stage (`model: inherit`) omits effort there and
+# the Lead passes it at spawn. Gemini has no effort field. Regenerated on every
 # --install-tools run; a same-name file WITHOUT the GENERATED marker is never overwritten.
 if [ "$INSTALL_TOOLS" -eq 1 ]; then
   if command -v python3 >/dev/null 2>&1; then
@@ -1402,23 +1406,28 @@ for fn in sorted(os.listdir(os.path.join(root, "agents"))):
         continue
     end = text.index("\n---\n", 4)
     fm, body = text[4:end], text[end + 5:]
-    fields = dict(re.findall(r"^(name|description|tools):[ \t]*(.+)$", fm, re.M))
+    fields = dict(re.findall(r"^(name|description|tools|model|effort):[ \t]*(.+)$", fm, re.M))
     name, desc = fields.get("name"), fields.get("description")
     if not name or not desc:
         continue
     tools = fields.get("tools", "")
     read_only = bool(tools) and not re.search(r"\b(Edit|Write)\b", tools)
+    effort = fields.get("effort", "").strip()
+    task_sized = fields.get("model", "").strip() == "inherit"
     note = "%s from $BAILIWICK/agents/%s -- edit the source and re-run --install-tools; do not edit here." % (MARK, fn)
     md_adapter = "---\n# %s\nname: %s\ndescription: %s\n---\n%s" % (note, name, desc, body)
+    copilot_adapter = "---\n# %s\nname: %s\ndescription: %s\n%s---\n%s" % (
+        note, name, desc, ("reasoning-effort: %s\n" % effort) if effort else "", body)
     toml_desc = desc.replace("\\", "\\\\").replace('"', '\\"')
     toml_adapter = ("# %s\n" % note
                     + 'name = "%s"\n' % name
                     + 'description = "%s"\n' % toml_desc
                     + ('sandbox_mode = "read-only"\n' if read_only else "")
+                    + ('model_reasoning_effort = "%s"\n' % effort if effort and not task_sized else "")
                     + 'developer_instructions = """\n%s\n"""\n' % body.replace('"""', '\\"\\"\\"'))
     outs = [
         (os.path.join(home, ".gemini", "agents", name + ".md"), md_adapter),
-        (os.path.join(home, ".copilot", "agents", name + ".agent.md"), md_adapter),
+        (os.path.join(home, ".copilot", "agents", name + ".agent.md"), copilot_adapter),
         (os.path.join(codex_home, "agents", name + ".toml"), toml_adapter),
     ]
     for dest, content in outs:

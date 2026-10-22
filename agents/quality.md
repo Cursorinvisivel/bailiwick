@@ -1,6 +1,8 @@
 ---
 name: bailiwick-quality
 description: Quality stage of the Bailiwick Quality Workflow — technical review of code, IaC, and documentation against the framework checklists (operations, blast radius, conventions). Dispatched by the Lead orchestrator after the Implement stage; use for reviewing drafts before they reach the user. Read-and-validate only.
+model: opus
+effort: high
 tools: Read, Grep, Glob, Bash
 ---
 <!-- tools: read + validation commands only (terraform validate/plan, linters). No Edit/Write — review, don't fix; guardrails.py additionally blocks mutations. -->

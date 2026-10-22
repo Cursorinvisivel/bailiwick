@@ -1,6 +1,8 @@
 ---
 name: bailiwick-cloud-research-freshness
 description: Fetch-only variant of the Cloud Research stage for the /curate periodic GCP freshness check — compares supplied sanitized claim snapshots against allowlisted official GCP documentation and release notes. Dispatched only by /curate in periodic mode, with the procedure and source registry inline; never for general research.
+model: haiku
+effort: low
 tools: WebFetch
 hooks:
   PreToolUse:

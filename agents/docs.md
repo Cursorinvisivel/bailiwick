@@ -1,6 +1,8 @@
 ---
 name: bailiwick-docs
 description: Docs stage of the Bailiwick Quality Workflow — technical documentation and client materials (module READMEs, ADRs, HLD/LLD, runbooks, workshops) from the framework templates. Dispatched by the Lead orchestrator for documentation tasks; all output is drafts for human review.
+model: sonnet
+effort: medium
 tools: Read, Grep, Glob, Edit, Write
 ---
 <!-- tools: read + draft-writing. No Bash — documentation needs no command execution. -->

@@ -40,8 +40,9 @@ real agents or independent review, complete safe preparation and report that req
 ## Plan the stages
 
 State the requested outcome, acceptance criteria, and a compact stage plan before execution.
-For each stage record its owner, inputs/dependencies, expected output, and execution mode
-(`delegated`, `inline fallback`, or `not applicable` with reason). Include:
+For each stage record its owner, inputs/dependencies, expected output, sizing (model tier and
+effort, see "Size the stages"), and execution mode (`delegated`, `inline fallback`, or
+`not applicable` with reason). Include:
 
 Start from the Lead's matrix row for the task type, then apply these additions. They are
 deliberate: explicit invocation is stricter than proportional routing, so rows that omit Memory
@@ -66,9 +67,44 @@ that depend on them, and review must consume the completed draft. Parallelize on
 work within runtime limits. An explicitly requested narrower scope still takes precedence;
 record the omitted stages and the user's constraint.
 
+## Size the stages
+
+Rate the task before dispatch and add model tier and effort to each stage's plan entry. This
+skill explicitly instructs per-dispatch sizing: pass both on every delegated stage where the
+host accepts them, never leaving them to the session default by omission.
+
+| Task rating | Signals | Implement | Docs / Cloud Research | Quality / Security Review |
+|---|---|---|---|---|
+| **Trivial** | One file, no IAM/network/state impact, pattern already in KB | standard, low | standard, low | deep, medium |
+| **Standard** | Default; a module or document, bounded blast radius | session model, medium | standard, medium | deep, high |
+| **Complex / high-risk** | Multi-module, IAM, networking, state moves, prod, unfamiliar API | deep, high | standard, high | deep, high |
+
+Memory, Federation, and freshness checks stay **light, low** regardless of rating; they navigate
+and read. A reviewer never runs below the implementer's tier or effort. The canonical frontmatter
+(`model:`/`effort:` in `agents/*.md`) holds the Standard defaults. A stage with `model: inherit`
+(Implement) is task-sized and must always be sized explicitly.
+
+Tiers map per host. Honour what the current runtime actually exposes, and record anything it
+cannot express:
+
+| Host | Light / standard / deep | Effort | Per-dispatch override |
+|---|---|---|---|
+| Claude Code | `haiku` / `sonnet` / `opus` (`inherit` = session model) | `low`/`medium`/`high` | Agent tool `model` and `effort` override frontmatter |
+| Codex | Not mapped; the session model is used unless the user names one | `model_reasoning_effort` | Spawn values apply only where the agent file sets none; Implement's adapter omits it, so pass effort at spawn. Other stages' file values are fixed |
+| GitHub Copilot | Not mapped; uses the selected model | `reasoning-effort` in the adapter | None; adapter values are fixed. Record Implement as "file default" |
+| Gemini CLI / Antigravity | Not mapped; inherits the session model | No field | None; record sizing as "host default" |
+
+Never invent another vendor's model names to fill a tier; record "inherit" instead. Do not
+raise or lower sizing to save time once the plan is stated. If a stage proves harder than
+rated (failed validation, material review findings), re-dispatch it one level up and record
+the change.
+
 ## Dispatch and integrate
 
-For each delegated stage, send a self-contained brief containing:
+Pass each stage's planned sizing through the host's dispatch parameters (for example, the
+Agent tool's `model` and `effort`, or Codex spawn values), not as prose in the brief. A
+model cannot change its own size. For each delegated stage, send a self-contained brief
+containing:
 
 - Framework root and canonical role file (`agents/implementer.md`, `quality.md`, `memory.md`,
   `security-review.md`, `docs.md`, `cloud-research.md`, or `federation.md` as appropriate).
@@ -98,11 +134,12 @@ Before reporting completion, confirm applicable stages returned results, review 
 addressed or explicitly remain unresolved, and validation supports the acceptance criteria.
 Include a concise execution table:
 
-| Stage | Agent/thread or inline mode | Result / evidence | Outstanding issue |
-|---|---|---|---|
+| Stage | Agent/thread or inline mode | Model / effort | Result / evidence | Outstanding issue |
+|---|---|---|---|---|
 
 Populate it with actual executions, including failures, inline fallbacks, and reasons for
-omissions. Planning a stage is not evidence it ran. Distinguish completed work from blocked or
+omissions. Record the sizing actually applied (`opus / high`, `inherit / file default`,
+`host default`), not the planned one. Planning a stage is not evidence it ran. Distinguish completed work from blocked or
 unverified requirements; retain that distinction when context is compacted or the task resumes.
 
 Run Memory Collect on the integrated outputs and unresolved questions. Use its read-only

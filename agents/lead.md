@@ -102,6 +102,8 @@ combined checklist to the Quality stage.
 > stages ("Memory → Implement → Quality") run in order because each consumes the previous stage's
 > output. Because native subagents start as fresh contexts, each stage loads the knowledge it needs
 > itself (index + ≤5 files) — the orchestrator passes the domain hints in the dispatch prompt.
+> Each stage's frontmatter carries a default model tier + effort (ADR-010 Amendment 2). Under `/lead`,
+> the orchestrator sizes every dispatch by task rating (see the skill's "Size the stages").
 > Stage definitions are the frontmattered `agents/*.md` files, installed globally by
 > `bootstrap.sh --install-tools`: Claude Code symlinks plus Gemini, Codex, and Copilot adapters
 > (ADR-010, Amendment 1). Other hosts use available native dispatch or the disclosed inline fallback.
