@@ -128,4 +128,6 @@ else
   bw_health sync_knowledge warn "gh not installed — PR for $branch must be opened manually"
   echo "[sync] pushed ${branch}. 'gh' not installed — open a PR to main manually."
 fi
-echo "[sync] done. You remain on ${branch}; local main mirrors origin/main."
+echo "[sync] done. You remain on ${branch} (your new knowledge stays visible here) until central"
+echo "[sync] merges the PR — then SessionStart switches this clone back to main automatically."
+echo "[sync] Prefer 'Create a merge commit' for sync PRs (docs/operations.md → Multi-machine sync)."

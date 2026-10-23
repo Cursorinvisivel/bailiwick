@@ -176,6 +176,22 @@ unset GH_STUB_PR_LIST GH_STUB_PR_MERGEABLE
 assert_exit "stale mergeable PR -> exit 0" 0 "$rc"
 assert_contains "asks whether a central exists" "is there an active central" "$out"
 
+echo "== on sync/<machine> awaiting its merge is expected (#37), not a stall"
+git -C "$INST" checkout -q sync/doctest
+export GH_STUB_PR_LIST="9" GH_STUB_PR_MERGEABLE="MERGEABLE"
+out="$(doctor)"; rc=$?
+assert_exit "awaiting merge -> exit 0" 0 "$rc"
+assert_contains "explains SessionStart will return it to main" "awaiting its PR merge" "$out"
+
+echo "== a clone left on any other branch has a stalled inbound sync (degraded)"
+git -C "$INST" checkout -q -b feature
+out="$(doctor)"; rc=$?
+unset GH_STUB_PR_LIST GH_STUB_PR_MERGEABLE
+assert_exit "off-main clone -> exit 0 (warn)" 0 "$rc"
+assert_contains "names the stall and the fix" "not main" "$out"
+assert_contains "gives the recovery command" "git checkout main && git merge --ff-only origin/main" "$out"
+git -C "$INST" checkout -q main && git -C "$INST" branch -q -D feature
+
 echo "== central sweeps OTHER machines' parked branches too"
 cat > "$INST/.bailiwick-sync.json" <<'EOF'
 { "role": "central", "machine": "doccentral" }

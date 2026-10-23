@@ -89,14 +89,29 @@ sync_inbound() {
   fh="$(git -C "$BAILIWICK_ROOT" rev-parse --git-path FETCH_HEAD 2>/dev/null || echo '')"
   now="$(date +%s)"; last=0
   [ -n "$fh" ] && [ -f "$BAILIWICK_ROOT/$fh" ] && last="$(stat -c %Y "$BAILIWICK_ROOT/$fh" 2>/dev/null || echo 0)"
-  [ -n "$fh" ] && [ -f "$fh" ] && last="$(stat -c %Y "$fh" 2>/dev/null || echo "$last")"
+  # An absolute git-path (worktrees) is used as-is. A relative one must NOT be: it would resolve
+  # against the session's cwd — the project repo — whose fresh FETCH_HEAD silently skipped this fetch.
+  case "$fh" in /*) [ -f "$fh" ] && last="$(stat -c %Y "$fh" 2>/dev/null || echo "$last")" ;; esac
   if [ $(( now - last )) -gt 1800 ]; then
     timeout 8 git -C "$BAILIWICK_ROOT" fetch origin main --quiet >/dev/null 2>&1 || return 0
   fi
   branch="$(git -C "$BAILIWICK_ROOT" symbolic-ref --short -q HEAD || echo DETACHED)"
+  dirty="$(git -C "$BAILIWICK_ROOT" status --porcelain 2>/dev/null | head -1)"
+  # Self-heal (#37): sync_knowledge.sh leaves a satellite checked out on sync/<machine>. Once
+  # central has merged it (bw_sync_merged: by SHA, patch, or squashed content) return to main,
+  # or this clone never fast-forwards again. Runs before the behind-count check: a rebase-merged
+  # branch can sit level with origin/main.
+  case "$branch" in
+    sync/*)
+      if [ -z "$dirty" ] && command -v bw_sync_merged >/dev/null 2>&1 \
+         && bw_sync_merged "$BAILIWICK_ROOT" \
+         && git -C "$BAILIWICK_ROOT" checkout -q main 2>/dev/null; then
+        printf '\n[bailiwick] %s is merged into origin/main — switched the framework clone back to main.\n' "$branch"
+        branch="main"
+      fi ;;
+  esac
   behind="$(git -C "$BAILIWICK_ROOT" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
   [ "${behind:-0}" -eq 0 ] && return 0
-  dirty="$(git -C "$BAILIWICK_ROOT" status --porcelain 2>/dev/null | head -1)"
   if [ "$branch" = "main" ] && [ -z "$dirty" ]; then
     if timeout 8 git -C "$BAILIWICK_ROOT" merge --ff-only --quiet origin/main >/dev/null 2>&1; then
       printf '\n[bailiwick] Knowledge library updated: fast-forwarded %s commit(s) from origin/main.\n' "$behind"
