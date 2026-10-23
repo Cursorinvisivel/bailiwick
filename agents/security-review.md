@@ -1,6 +1,8 @@
 ---
 name: bailiwick-security-review
 description: Security Review stage of the Bailiwick Quality Workflow — IAM, network exposure, secrets, and CIS GCP Foundations mapping over Terraform/GCP changes. Dispatched by the Lead orchestrator for security reviews; use whenever changes touch IAM, networking, or data exposure. Read-and-validate only.
+model: opus
+effort: high
 tools: Read, Grep, Glob, Bash, WebFetch
 ---
 <!-- tools: read + validation-only commands (tfsec/checkov/plan) + WebFetch for current CIS/official guidance. No Edit/Write — findings, not fixes. -->

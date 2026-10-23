@@ -68,7 +68,7 @@ This is idempotent (re-run it any time — e.g. after adding a new skill) and in
 - The **capture + guardrail hooks**, merged into `~/.claude/settings.json` (existing keys are
   preserved). These fire in *every* project but self-gate — they stay inert unless the repo is
   Bailiwick-wired.
-- The **global Claude Code skills** as symlinks in `~/.claude/skills/`: `/curate`, `/enrich`,
+- The **global Claude Code skills** as symlinks in `~/.claude/skills/`: `/lead`, `/curate`, `/enrich`,
   `/learn`, `/metrics`, `/investigate`, `/purge`, `/sign`.
 - The **Quality Workflow stages as native Claude Code subagents** — symlinks in `~/.claude/agents/`
   (`bailiwick-implement`, `bailiwick-quality`, `bailiwick-memory`, `bailiwick-security-review`,
@@ -78,7 +78,7 @@ This is idempotent (re-run it any time — e.g. after adding a new skill) and in
   Codex (`~/.codex/agents/`, TOML) and Copilot (`~/.copilot/agents/`), produced from the canonical
   files and refreshed on every re-run (ADR-010 Amendment 1). Files you created yourself in those
   dirs are never overwritten.
-- The **Codex skill wrappers** (`$bailiwick-curate`, `$bailiwick-enrich`, `$bailiwick-learn`,
+- The **Codex skill wrappers** (`$bailiwick-lead`, `$bailiwick-curate`, `$bailiwick-enrich`, `$bailiwick-learn`,
   `$bailiwick-investigate`, `$bailiwick-purge`, `$bailiwick-sign`) in `~/.codex/skills/`.
 - The **Codex and Gemini operator layers** — managed blocks in `~/.codex/AGENTS.md` and
   `~/.gemini/GEMINI.md` that teach those tools to read a repo's framework marker without shadowing
@@ -171,7 +171,7 @@ paper trail.
 
 ## 5. Your first task
 
-There is **no command to "start a workflow."** Stating a substantial task in Claude Code *is* the
+No command is **required** to start a workflow: stating a substantial task in Claude Code *is* the
 invocation. The **Lead** is the orchestrator — the native main session — and for substantial or
 multi-step work it drives the **Quality Workflow**: the ordered Memory → Implement → Quality review
 pass, dispatched as native subagents (concurrently where the work is independent). See ADR-010 and
@@ -202,6 +202,10 @@ Run the full Quality Workflow: Memory → Implement → Quality. Don't handle th
 Naming the stages is the most reliable form — it pins the steps rather than relying on the model to
 expand "Lead" into the whole pass. (This is a policy directive the session follows, not a
 runtime-enforced switch like the guardrails.)
+
+For the strictest form, invoke **`/lead`** (Codex: `$bailiwick-lead`): the session coordinates the
+stages as real subagents, requires independent review, discloses any inline fallback, and ends with
+an execution table of what actually ran.
 
 **Under the other tools** the same stages are installed as native agents (ADR-010 Amendment 1) —
 same names, different trigger conventions (mechanics: each tool's official subagent docs):
@@ -250,7 +254,7 @@ The other global skills round out the workflow:
   destruction); `--attest` drafts a safety-net attestation of what was scrubbed. Pairs with
   `/curate --sanitized` (de-identified mode — stores no client/project identifiers).
 
-Codex users get thin native wrappers: `$bailiwick-curate`, `$bailiwick-enrich`, `$bailiwick-learn`, `$bailiwick-investigate`, `$bailiwick-purge`, `$bailiwick-sign`.
+Codex users get thin native wrappers: `$bailiwick-lead`, `$bailiwick-curate`, `$bailiwick-enrich`, `$bailiwick-learn`, `$bailiwick-investigate`, `$bailiwick-purge`, `$bailiwick-sign`.
 
 ---
 

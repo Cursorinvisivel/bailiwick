@@ -101,7 +101,7 @@ canonical files — Gemini `~/.gemini/agents/*.md`, Codex `~/.codex/agents/*.tom
 `~/.copilot/agents/*.agent.md` — so all four tools can dispatch the stages natively (ADR-010
 Amendment 1; trigger model per tool in §10). A stage's **final report** is its only channel back
 and the only part the capture hooks record, so outputs and knowledge signals go in it. See
-ADR-010. 13 files in three tiers.
+ADR-010. 14 files in three tiers.
 
 ### Tiers
 - **Orchestrator (1):** `lead.md` — entry point for substantial/multi-step work; drives the Quality
@@ -112,16 +112,19 @@ ADR-010. 13 files in three tiers.
 - **Stages (7):** `implementer.md` (code/IaC drafts), `quality.md` (technical review),
   `security-review.md` (security + CIS mapping), `docs.md` (ADR/HLD/runbook/workshop),
   `memory.md` (library query + collect), `cloud-research.md` (authoritative external research),
-  `federation.md` (external-brain consult + gated ingest).
+  `federation.md` (external-brain consult + gated ingest). Plus one restricted variant,
+  `cloud-research-freshness.md` (fetch-only, dispatched only by `/curate` periodic mode).
 
 ### Flow
 1. A task arrives. **Proportional routing:** trivial edits / direct questions are answered inline
    with knowledge loaded; substantial work routes through the **Lead**. Stating a substantial task
    *is* the invocation; explicit phrasing forces the full Quality Workflow when routing
-   under-evaluates a task.
+   under-evaluates a task, and `/lead` (Codex: `$bailiwick-lead`) adds the explicit execution
+   contract with required stage evidence.
 2. Lead identifies relevant **domain context file(s)**, reads them for Memory tags + checklist.
 3. Lead dispatches the **Memory stage (Query)** with those tags — it descends the `INDEX.md` tree
-   on-demand, loads ≤5 content files, checks `.bailiwick-outputs/` for prior session outputs.
+   on-demand, loads ≤5 content files, checks manual session outputs (seeded `.bailiwick-outputs/`
+   or shadow `~/.bailiwick/captures/<repo-key>/`; `$BAILIWICK_HOME/captures/` if set).
    Because each subagent starts as a fresh context, the stage loads this knowledge itself. If
    federation is enabled, the **Federation stage** also consults external indexes read-only (≤2
    files, tagged `[external:<id>]`; resolve conflicts by the source-authority precedence, §11 — a
@@ -129,8 +132,10 @@ ADR-010. 13 files in three tiers.
 4. Lead dispatches the **execution stages** via the Stage Matrix (commonly
    Memory → Implement → Quality; Security Review / Docs / Cloud Research substituted by task type).
    Independent stages run **concurrently**; dependent stages run in order. Each surfaces knowledge
-   signals back to the Lead in real time — under Claude Code the capture hooks record the transcript;
-   `.bailiwick-outputs/*.md` is the manual channel for Codex/Gemini/Copilot.
+   signals back to the Lead in real time — where capture hooks are active (Claude Code; Codex CLI
+   0.147+ once trusted) they record the transcript; otherwise a manual session output in
+   `.bailiwick-outputs/` (seeded) or `~/.bailiwick/captures/<repo-key>/` (shadow;
+   `$BAILIWICK_HOME/captures/` if set) is the channel.
 5. Lead integrates, presents **drafts for human review**, and always closes with the **Memory stage
    (Collect)**. Stop/SessionEnd hooks capture the raw transcript as a backstop.
 
@@ -181,6 +186,8 @@ knowledge/
   indexes/ (0)       deeper index-tree nodes (empty until a domain grows past the shard threshold)
   runbooks/ workshops/   present for generated artifacts (empty until produced)
   # (Framework ADRs are NOT here — they live in docs/decisions/ as status-tracked design records.)
+  # (Per-client document build specs are NOT here either — they live in definitions/clients/<id>/,
+  #  authored by a documentation tool or by hand, reviewed by git diff, never curated. ADR-011.)
 ```
 
 ### Frontmatter schema (every `id`-bearing content file — topics, patterns, context, clients)
@@ -296,6 +303,7 @@ apply exactly as they would in a seeded repo. Capture/session hooks are **Claude
 | Hook | Event | Role |
 |---|---|---|
 | `guardrails.py` | **PreToolUse** (`Bash`) | **Runtime guardrail (ADR-006).** Three tiers, each resolving to an in-the-moment gate — a **forced confirmation** under Claude Code and Gemini CLI, a **hard deny with break-glass** under Codex (no confirm dialog; §10) — so nothing dangerous runs silently or on agent initiative: **EXEMPT** (dirty-zone capture plumbing always passes — data-loss prevention); **ASK-IMPACT** (real-world impact re-confirms *even when user-instructed*: terraform/terragrunt `apply`/`destroy`, kubectl/helm mutations, gcloud/gsutil/az/aws mutating verbs incl. `update`/`patch`/`rm`, recursive/forced `rm`, `git merge`, `gh repo delete`); **ASK-GO-AHEAD** (`git commit`/`push`, `gh pr create`/`merge`/`close` need a clear user go-ahead; AI attribution signatures in the message get their own confirmation). Validation-only commands (plan/validate/fmt, `--dry-run`, read-only CLI) pass untouched; line-continuations folded before matching. Self-gated. **Tiered failure mode (ADR-005):** on evaluation error it fails **closed** (deny) for commands that trip a destructive pre-filter, else fails **open**; `BAILIWICK_BREAK_GLASS=1` downgrades that error-path deny to ask. **Direct-command patterns only — not a complete security boundary** (misses `make apply`, wrapper scripts, aliases, Terraform-MCP actions). Every decision is logged to `~/.bailiwick/guardrail-audit.log`. |
+| `fetch_guard.py` | **PreToolUse** (`WebFetch`) | Fetch-time allowlist for the `/curate` freshness agent only, in two layers — the agent's own frontmatter hook (via a launcher `install_hooks.py` writes; fails closed when missing) and the global hook (payload `agent_type`): denies URLs outside the GCP source registry using the same `check_source.py` policy as the orchestrator's post-hoc check. Claude Code only. See hooks/README.md for its fail-closed/fail-open edges. |
 | `session_start.sh` | SessionStart | Assert framework defaults; **inject `INDEX.md`**; **inbound ff-pull** of the Bailiwick clone (throttled, clean-`main`-only, non-fatal); nag on pending captures; nag on framework-health **errors in the last ~24h** (this machine's shard); warn loudly if `python3` is missing (guardrail+capture inactive); nag if INDEX > ~20 KB (shard). |
 | `capture_session.py` | Stop, SessionEnd | Copy the transcript to `<project>/.bailiwick-outputs/raw/<id>.jsonl` when the session did substantive work (mutations or ≥3 tool calls). No intelligence, no promotion. |
 | `capture_backup.sh` | Stop, SessionEnd (push); `/curate` (pull/purge) | **Optional** durable backup: gpg-encrypts new captures and pushes **ciphertext** to a per-machine branch of a dedicated private repo (`capture_backup` in `.bailiwick-sync.json`; off + `confidentiality_ack: false` by default). `pull` decrypts to `.bailiwick-inbox/raw/` for curate (runnable from any wired repo); `purge` drops a blob from the **current tree** (not history — ciphertext persists in git history until rewritten/key-destroyed). Blobs are keyed by the collision-resistant `repo_key` (origin-based), so same-basename repos never commingle. Private key never leaves the curating machine. **Best-effort / fail-open**, local-mirror-first — a failed push lags the remote copy but never loses the capture; push success/failure (with unpushed-commit count) is logged to the framework-health shard, surfaced by `/metrics` and the SessionStart error nag. Also transports each machine's **health shard** (encrypted) on `push` and refreshes the fleet's shards into `~/.bailiwick/health/remote/` on `pull`. |
@@ -304,7 +312,7 @@ Helpers (not hook events): `sync_knowledge.sh` (outbound knowledge sync — §8)
 (idempotent safe-merge of the hooks block into `~/.claude/settings.json`, matcher-preserving;
 **rewrites the baked canonical Bailiwick path to the machine's real Bailiwick root** and migrates stale
 installs — satellites need no manual path edits), `install_global_layer.sh`
-(+ `codex-global-agents.tmpl.md`, `gemini-global.tmpl.md`) — installs the global Codex / Gemini
+(+ `codex-global-agents.tmpl.md`, `antigravity-global.tmpl.md`) — installs the global Codex / Gemini
 operator layers into `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md` (§10), and `health_common.sh` —
 **framework-health logging**: every component appends failures (best-effort, never blocking) to the
 per-machine shard `~/.bailiwick/health/<machine>.jsonl`; shards travel encrypted on the
@@ -408,7 +416,7 @@ seeded variant:
 - **Global prerequisites (`--install-tools`):** installs the once-per-machine pieces when missing —
   terraform-mcp-server (`go install`), the capture/curation **+ guardrail** hooks
   (`~/.claude/settings.json`), the global **Claude Code skill symlinks** (`~/.claude/skills/`:
-  `/curate`, `/enrich`, `/learn`, `/metrics`, `/investigate`, `/purge`, `/sign`), the global **Codex skill symlinks** (`~/.codex/skills/`: `$bailiwick-curate`,
+  `/lead`, `/curate`, `/enrich`, `/learn`, `/metrics`, `/investigate`, `/purge`, `/sign`), the global **Codex skill symlinks** (`~/.codex/skills/`: `$bailiwick-lead`, `$bailiwick-curate`,
   `$bailiwick-enrich`, `$bailiwick-learn`, `$bailiwick-investigate`, `$bailiwick-purge`, `$bailiwick-sign`), and the global **Codex + Gemini operator layers** (managed blocks in
   `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md` that activate per-repo on the
   `.bailiwick.local.md` marker). Without it,
@@ -548,7 +556,7 @@ as **four adapters of differing completeness**, all reading the framework live (
 | Adapter | Instruction delivery | Global private layer | MCP config | Capture | Dangerous-command control |
 |---|---|---|---|---|---|
 | **Claude Code** (full) | `CLAUDE.local.md` — native personal memory, **merges** after `CLAUDE.md` | `~/.claude/CLAUDE.md` | `.mcp.json` | **Automatic** (Stop/SessionEnd hooks) | **Enforced** — PreToolUse `guardrails.py` (§5) |
-| **Gemini** (VS Code agent) | global `~/.gemini/GEMINI.md` layer + `.bailiwick.local.md` marker (best-effort read) | `~/.gemini/GEMINI.md` (loaded first → repo `GEMINI.md` keeps precedence) | **`.gemini/settings.json`** (`mcpServers`, generated by `--with-gemini`) | **Manual** (no hooks) — agent writes to `.bailiwick-outputs/` | **Enforced (Gemini CLI)** — `BeforeTool` hook wired to the guardrail (`ask` tiers, mirrors Claude Code; `install_adapter_hooks.py`). VS Code Code Assist agent hook support **unverified** → policy there; `excludeTools` stays advisory; still don't enable YOLO |
+| **Antigravity** (agy, IDE, 2.0) | global `~/.gemini/GEMINI.md` layer + `.bailiwick.local.md` marker | `~/.gemini/GEMINI.md` (loaded first → repo `GEMINI.md`/`AGENTS.md` keeps precedence) | **`~/.gemini/config/mcp_config.json`** (shadow) / `.agents/mcp_config.json` (seeded) | **Automatic** — `Stop` hook in `~/.gemini/config/hooks.json` runs `capture_session.py` + `capture_backup.sh` | **Enforced** — `PreToolUse` hook (`run_command`) wired to the guardrail (`ask`/`deny` tiers; `install_adapter_hooks.py`). Replaces legacy Gemini CLI (sunset June 2026; `--with-gemini` routes here). |
 | **Codex** (global-layer + marker) | global `~/.codex/AGENTS.md` layer + `.bailiwick.local.md` marker; native workflow skills in `~/.codex/skills/` | `~/.codex/AGENTS.md` (loaded first → repo `AGENTS.md` keeps precedence) | **`~/.codex/config.toml`** for active MCP; `.codex/config.toml` is a repo-local draft/reference generated by `--with-agents` | **Automatic** — `Stop`/`SessionEnd` hooks (codex-cli >= 0.147) run the same `capture_session.py` + `capture_backup.sh` pair as Claude Code; inert until each hook is trusted once | **Enforced** — `PreToolUse` hook wired to the guardrail (**deny** + `BAILIWICK_BREAK_GLASS=1` allow-once; one-time trust prompted on first fire in the `codex` CLI, persisted in config) |
 | **Copilot** (local VS Code only) | `.github/instructions/bailiwick.instructions.md` (`applyTo:"**"`) | VS Code user instruction dirs | `.vscode/mcp.json` (local); cloud uses hosted config | Manual | Policy |
 
@@ -568,7 +576,7 @@ delegation rule, and the user forces by asking for an agent by name; Copilot is 
 Codex subagents span the CLI **and the IDE extension** (same `~/.codex/agents/`); Gemini is
 **CLI-verified only** — Code Assist agent mode exposes a subset of the CLI and subagent support
 there is unverified; Copilot's covered surfaces are VS Code + CLI. Guardrail-hook coverage inside
-Codex/Gemini subagent threads is **unverified** — policy posture applies there. Mechanics: each
+Codex/Gemini subagent threads is **unverified** — policy posture applies there. **Sizing (Amendment 2):** canonical `model:`/`effort:` frontmatter sets per-stage defaults; `/lead` sizes each dispatch by task rating; adapters carry effort only (Codex `model_reasoning_effort`, Copilot `reasoning-effort`; none for Gemini). Mechanics: each
 tool's official subagent docs.
 
 Key consequences (the four tools do not share one uniform integration):
@@ -587,33 +595,28 @@ Key consequences (the four tools do not share one uniform integration):
   --with-agents`, which injects an idempotent user-scope `bailiwick-*` MCP block into
   `~/.codex/config.toml`. The github server resolves its token via a spawn shell (gh-auth or
   `$GITHUB_TOKEN`), independent of Codex env expansion.
-- **Codex skills mirror the Claude Code skills.** `codex-skills/bailiwick-curate`,
+- **Codex skills mirror the Claude Code skills.** `codex-skills/bailiwick-lead`, `codex-skills/bailiwick-curate`,
   `codex-skills/bailiwick-enrich`, `codex-skills/bailiwick-learn`, `codex-skills/bailiwick-investigate`,
   `codex-skills/bailiwick-purge`, and `codex-skills/bailiwick-sign` are Codex-native wrappers installed
   into `~/.codex/skills/` by
   `--install-tools`. They intentionally point back to the canonical `skills/*/SKILL.md` files, so the
-  procedure stays single-source while Codex gets a native `$bailiwick-curate` / `$bailiwick-enrich` /
+  procedure stays single-source while Codex gets a native `$bailiwick-lead` / `$bailiwick-curate` / `$bailiwick-enrich` /
   `$bailiwick-learn` / `$bailiwick-investigate` / `$bailiwick-purge` / `$bailiwick-sign` trigger
   instead of a copied prompt. `bailiwick-sign` diverges on exactly one point, and deliberately: the
   key-unlock handshake cannot use Claude Code's `!` prefix, so it directs the user to any terminal on
   the machine — `gpg-agent` is per-user, so the passphrase cache is shared across processes.
   `tests/test_sign_skill.py` asserts that divergence in both directions, so the wrapper cannot quietly
   drift back into a copy or lose a safety boundary.
-- **Gemini gets a global layer + shared marker, and (CLI) a wired guardrail.** `--install-tools` installs a
-  managed block in `~/.gemini/GEMINI.md` (loaded first, so a repo `GEMINI.md` keeps precedence; the
-  framework defaults are stated *in* the global file since the VS Code agent has no guaranteed loader
-  for an arbitrary marker filename). `--with-gemini` generates a hidden **`.gemini/settings.json`**
-  (`mcpServers`, same servers as `.mcp.json`) — the **one file** both Gemini CLI and the Code Assist
-  VS Code agent read; a **team-tracked** `.gemini/settings.json` is left untouched. Its `excludeTools`
-  entries are **advisory only** — Google's docs call command-specific shell restriction *"simple
-  string matching,"* *"easily bypassed,"* *"not a security mechanism."* The real control under
-  **Gemini CLI** is now the wired **`BeforeTool` guardrail hook** (`~/.gemini/settings.json` `hooks`
-  block installed by `install_adapter_hooks.py`): the shared engine returns `decision: "ask"` for the
-  ADR-006 tiers — the same forced confirmation as Claude Code (`ask` is source-verified in
-  gemini-cli's scheduler but undocumented; re-verify on upgrades). The **Code Assist VS Code agent's**
-  hook support is **unverified** — there, keep **`geminicodeassist.agentYoloMode` disabled** (the
-  approval dialog) as the control. Capture is
-  **manual** (no session hooks): the agent writes a `.bailiwick-outputs/` session output, same as Codex/Copilot.
+- **Antigravity gets a global layer + shared marker, wired guardrails, and automatic capture.**
+  `--install-tools` installs a managed block in `~/.gemini/GEMINI.md` (loaded first, so a repo `GEMINI.md`/`AGENTS.md`
+  keeps precedence). `--with-antigravity` generates `.agents/mcp_config.json` (seeded) or merges into
+  `~/.gemini/config/mcp_config.json` (shadow). Antigravity CLI (`agy`) and Antigravity IDE supersede the legacy
+  Gemini CLI and Code Assist (sunset by Google on June 18, 2026). `--with-gemini` routes to `--with-antigravity`
+  with a console deprecation warning and is scheduled for removal in April 2027. The guardrail hook is wired as
+  `PreToolUse` (matcher `run_command`, returning `{"decision": "ask"}` for ADR-006 tiers) in `~/.gemini/config/hooks.json`.
+  Unlike legacy Gemini CLI, Antigravity supports the `Stop` lifecycle event, enabling **automatic session capture**
+  via `capture_session.py` and `capture_backup.sh push`. Obsolete Gemini `BeforeTool` hooks in `~/.gemini/settings.json`
+  are pruned automatically upon reinstall.
 - **The Copilot adapter is local-VS-Code-only.** The hidden, gitignored complement is filesystem-
   discovered in the IDE, but the GitHub-hosted **Copilot cloud agent cannot see untracked files**, so
   the framework does **not** reach it (that would require committing a shared instruction file).
@@ -679,13 +682,14 @@ bailiwick/
   ROADMAP.md                                # non-goals & possibilities (team version, radar)
   scripts/        bootstrap.sh  bootstrap.ps1
   knowledge/      INDEX.md  .telemetry.json  topics/ patterns/ context/ clients/ templates/ …
-  agents/         lead + 5 domain + 7 execution (13 files)
+  definitions/    README.md — per-client document build specs (clients/<id>/), outside knowledge/ (ADR-011)
+  agents/         lead + 5 domain + 7 execution + 1 restricted variant (14 files)
   hooks/          session_start.sh  capture_session.py  capture_backup.sh  sync_knowledge.sh
                   guardrails.py  install_hooks.py  settings.template.json  health_common.sh
                   install_global_layer.sh  install_adapter_hooks.py  install_desktop_mcp.py
-                  codex-global-agents.tmpl.md  gemini-global.tmpl.md
-  skills/         curate/  enrich/  learn/  metrics/{SKILL.md,report.py}  investigate/  purge/  sign/{SKILL.md,check_message.py}   (each a SKILL.md)
-  codex-skills/   bailiwick-curate/  bailiwick-enrich/  bailiwick-learn/  bailiwick-investigate/  bailiwick-purge/  bailiwick-sign/  (SKILL.md wrappers)
+                  codex-global-agents.tmpl.md  antigravity-global.tmpl.md
+  skills/         lead/  curate/  enrich/  learn/  metrics/{SKILL.md,report.py}  investigate/  purge/  sign/{SKILL.md,check_message.py}   (each a SKILL.md)
+  codex-skills/   bailiwick-lead/  bailiwick-curate/  bailiwick-enrich/  bailiwick-learn/  bailiwick-investigate/  bailiwick-purge/  bailiwick-sign/  (SKILL.md wrappers)
   copilot-instructions/   terraform-gcp(.gke/.data/.project-stack).md
   prompts/        iam-review · pr-review · module-docs · cost-estimate · security-pr-report
   vscode/         mcp.json (template) · terraform.code-snippets

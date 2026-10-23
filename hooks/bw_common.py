@@ -61,10 +61,17 @@ def is_shadow_repo(project_dir):
 
 
 def resolve_project_dir(payload):
-    """CLAUDE_PROJECT_DIR > payload cwd > getcwd — the chain every hook uses."""
+    """CLAUDE_PROJECT_DIR > payload cwd > payload workspacePaths > getcwd — the chain every hook uses."""
+    cwd = None
+    if isinstance(payload, dict):
+        cwd = payload.get("cwd")
+        if not cwd:
+            ws = payload.get("workspacePaths")
+            if isinstance(ws, list) and ws:
+                cwd = ws[0]
     return (
         os.environ.get("CLAUDE_PROJECT_DIR")
-        or (payload.get("cwd") if isinstance(payload, dict) else None)
+        or cwd
         or os.getcwd()
     )
 

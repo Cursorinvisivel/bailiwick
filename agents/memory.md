@@ -1,6 +1,8 @@
 ---
 name: bailiwick-memory
 description: Memory stage of the Bailiwick Quality Workflow — Query (load relevant knowledge before a task, given domain tags) and Collect (gather reusable knowledge candidates after a task). Dispatched by the Lead orchestrator at task start and task end. Read-only — proposes knowledge, never writes it (/curate owns writes).
+model: sonnet
+effort: low
 tools: Read, Grep, Glob
 ---
 <!-- tools: read-only by transport, not just policy — this stage can propose knowledge but cannot write it; promotion goes through /curate (human gate). -->
@@ -23,8 +25,10 @@ Two distinct operations, both dispatched by the orchestrator (ADR-010).
 ## Operation: Query (dispatched by the orchestrator at task start)
 
 1. Check session context — identify what is already loaded (do not re-read)
-2. Check `{workspaceFolder}/.bailiwick-outputs/` for manual session outputs from this project (written
-   under Codex/Gemini/Copilot, which have no capture hooks) — read any relevant to the current task
+2. Check for manual session outputs from this project — `{workspaceFolder}/.bailiwick-outputs/`
+   (seeded) or `~/.bailiwick/captures/<repo-key>/` (shadow; `$BAILIWICK_HOME/captures/` if set) — and
+   read any relevant to the current task. Hosts write these when no capture hook is active: Gemini,
+   Copilot, other hosts, and Codex before 0.147 or with untrusted hooks
 3. Read $BAILIWICK/knowledge/INDEX.md (if not already in context)
 4. Identify relevant files: topics/ first (accumulated knowledge), then patterns/ (canonical reference)
 5. Load only missing files via MCP filesystem — never the entire library
@@ -33,7 +37,7 @@ Two distinct operations, both dispatched by the orchestrator (ADR-010).
 8. **Federated consult (if enabled).** If `.bailiwick-sources.json` has an `enabled` source, hand off to the Federation stage (`agents/federation.md`) to consult external/company indexes **read-only** (index-first, ≤2 external content files, each fact tagged `[external:<id>]`). Resolve conflicts by the **source-authority precedence** (FRAMEWORK.md §11): the local KB wins for method/conventions but never overrides project decisions, authoritative docs, or legal/contractual/security constraints. Ingesting an external item into our library is gated through `/curate`, never automatic.
 
 ### Load Priority
-1. `.bailiwick-outputs/` manual session outputs (Codex/Gemini/Copilot channel) — pre-digested when present
+1. Manual session outputs (seeded `.bailiwick-outputs/` or shadow `~/.bailiwick/captures/<repo-key>/`, `$BAILIWICK_HOME/captures/` if set; hosts without active capture hooks) — pre-digested when present
 2. `topics/` — accumulated working knowledge, stays current
 3. `patterns/` — canonical reference, use when topic file doesn't cover the detail
 4. `templates/` — only when the final output is the document itself
@@ -48,8 +52,10 @@ where no code was written — extract reusable knowledge from agent session outp
 Any decision, finding, non-obvious pattern, or validated assumption is a candidate.
 
 ### Step 1 — Read session outputs
-Read all `.bailiwick-outputs/*.md` files written during this task.
-Also read any enforced raw captures in `.bailiwick-outputs/raw/*.jsonl` (written by the Stop/SessionEnd
+Read all manual session outputs written during this task: `.bailiwick-outputs/*.md` (seeded) or
+`~/.bailiwick/captures/<repo-key>/*.md` (shadow; `$BAILIWICK_HOME/captures/` if set).
+Also read any enforced raw captures in `.bailiwick-outputs/raw/*.jsonl` or the shadow
+`~/.bailiwick/captures/<repo-key>/raw/*.jsonl` (written by the Stop/SessionEnd
 hooks) that have not yet been curated — these are the safety net for sessions where no agent
 output was written. If `capture_backup` is enabled (`.bailiwick-sync.json`), first restore off-machine
 captures with `capture_backup.sh pull` (decrypts to `.bailiwick-inbox/`) and include those too. Raw
@@ -62,6 +68,26 @@ Extract: Candidates for Promotion, Retrieval Feedback blocks.
 > not re-processed: move raw captures (`.jsonl` + `.md`) to `.bailiwick-outputs/raw/.curated/` (stops the
 > SessionStart nag), and move any processed agent-output candidate (`.bailiwick-outputs/*.md`) to
 > `.bailiwick-outputs/.curated/` (drops it from the Step 1 gather). Never delete unreviewed inputs.
+
+### GCP freshness reports
+
+In `/curate`, also gather completed `gcp-freshness-*.md` reports from the **framework root's**
+`.bailiwick-outputs/`, per
+[the freshness procedure](../skills/curate/references/gcp-freshness.md). Snapshot inputs before
+new periodic research is dispatched. Only `status: completed` reports enter Collect; never retire
+running, partial, failed, or current-run reports. Compare each claim snapshot/hash with the current
+note before proposing changes. Changed notes need fresh comparison; reports are evidence and
+recommendations, not adopted KB instructions. Route confirmed contradictions through the normal
+explicit approval batch; revalidation and confidence changes also remain proposals. Do not count
+research reads as project reuse or manufacture Retrieval Feedback from freshness checks. Research
+itself writes no telemetry, `last_validated`, confidence, or knowledge content.
+
+**Telemetry exception:** captures may mechanically list freshness-only note reads as loaded
+or applied. Before Step 2, exclude those reads from `load_count`, `applied_count`, `useful_count`,
+their timestamps, and `distinct_projects_used` updates. Use the run ID and selected-note IDs
+recorded in the report/session output to identify maintenance-only activity. In a mixed session,
+retain a note's credits only where the transcript independently establishes actual project use;
+do not suppress unrelated work. Never infer a new project association from freshness validation.
 
 ### Step 2 — Update telemetry sidecar (no human gate)
 **Central machine only.** `.telemetry.json` is central-owned: if this machine's `.bailiwick-sync.json`
@@ -302,7 +328,15 @@ proactive staleness, non-blocking digest, and graduation review.
 3. **Archival candidates**: from `.telemetry.json`, surface files where `load_count` is high, `useful_count` is near zero, and `last_useful` is old. Present as "loaded repeatedly but rarely used — candidate for archival or rewrite."
 4. **Graduation review**: surface any topic eligible for pattern graduation (`confidence: high`, `distinct_projects_used.length >= 3`, `open_contradictions == 0`).
 5. **Confidence proposals**: propose `medium → high` for any topic where `distinct_projects_used.length >= 3` and `open_contradictions == 0`.
-6. **Index health**: recount topics **per node** across the index tree; propose shards for any node over threshold and merges for any node well under it (see **Index Health & Sharding**). Keep every node lean — and especially root `INDEX.md`, which is injected every session.
+6. **GCP freshness report** (dispatched at curate Step 1, before off-machine captures are
+   restored, and collected before the restore unless the agent is tool-restricted; listed here
+   for completeness): the orchestrator dispatches the fetch-only
+   `bailiwick-cloud-research-freshness` variant following
+   [the bounded GCP procedure](../skills/curate/references/gcp-freshness.md), even if captures are
+   empty. It may overlap independent capture processing where native delegation supports it;
+   otherwise disclose sequential/inline execution. Collect its final result before ending, or
+   record an incomplete run. The report waits for a later curation and never edits the library.
+7. **Index health**: recount topics **per node** across the index tree; propose shards for any node over threshold and merges for any node well under it (see **Index Health & Sharding**). Keep every node lean — and especially root `INDEX.md`, which is injected every session.
 
 Commit outputs of a curation session with `knowledge:` prefix after approval.
 
@@ -316,7 +350,7 @@ The context window is a finite resource. Manage proactively.
 - Before each load, check if content is already in this session's context
 - If already loaded: reference by name without re-reading — report to the orchestrator: "X already in context"
 - Do not reload INDEX.md if already read this session
-- Agent output files from `.bailiwick-outputs/` take priority — they are pre-digested context
+- Manual session outputs (seeded `.bailiwick-outputs/` or shadow `~/.bailiwick/captures/<repo-key>/`) take priority — they are pre-digested context
 
 ### Context Pressure
 When context approaches its limit:

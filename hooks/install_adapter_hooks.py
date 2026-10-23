@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Install the bailiwick hooks into Codex + Gemini (global, per machine).
+"""Install the bailiwick hooks into Codex + Antigravity (global, per machine).
 
-Usage: install_adapter_hooks.py            # install/refresh both adapters
-       install_adapter_hooks.py codex      # just one
-       install_adapter_hooks.py gemini
+Usage: install_adapter_hooks.py                # install/refresh both adapters (codex + antigravity)
+       install_adapter_hooks.py codex          # just codex
+       install_adapter_hooks.py antigravity    # just antigravity
+       install_adapter_hooks.py gemini         # deprecated: routes to antigravity with warning
 
 Wires the same scripts Claude Code runs into:
   - Codex CLI:  a managed block in ~/.codex/config.toml ->
@@ -13,13 +14,15 @@ Wires the same scripts Claude Code runs into:
                 (Codex requires a one-time interactive trust PER hook definition — it prompts on
                  the hook's first fire in a trusted project, in the `codex` CLI (`/hooks` manages
                  trust); until trusted, a hook is configured but does not run.)
-  - Gemini CLI: a named entry in ~/.gemini/settings.json -> hooks.BeforeTool
-                (matcher "run_shell_command"; decision "ask" mirrors the Claude Code tiers).
+  - Antigravity: ~/.gemini/config/hooks.json ->
+                   * bailiwick-guardrail (PreToolUse, matcher "run_command", decision "ask" / "deny")
+                   * bailiwick-capture   (Stop, capture_session.py + capture_backup.sh push)
+                 Also cleans up legacy Gemini CLI hooks in ~/.gemini/settings.json (sunset June 2026).
 
 Idempotent and non-destructive: the Codex block is marker-delimited and replaced in place;
-the Gemini entry is identified by hook name "bailiwick-guardrail" and updated in place.
-Everything else in both files is preserved. Refuses to touch a malformed settings.json.
-Both hooks self-gate (wired/shadow repos only), so installing globally is safe.
+the Antigravity hooks are managed entries in hooks.json.
+Refuses to touch malformed JSON or TOML. Both hooks self-gate (wired/shadow repos only),
+so installing globally is safe.
 
 Prints one line per adapter: INSTALLED | UPDATED | PRESENT | ERROR: <msg>
 Exit 0 unless an ERROR occurred.
@@ -136,63 +139,148 @@ def install_codex():
     return 0
 
 
-def install_gemini():
+def install_antigravity(gemini_alias=False):
     home = os.environ.get("GEMINI_HOME") or os.path.join(os.path.expanduser("~"), ".gemini")
-    cfg = os.path.join(home, "settings.json")
-    os.makedirs(home, exist_ok=True)
+    config_dir = os.environ.get("ANTIGRAVITY_CONFIG_DIR") or os.path.join(home, "config")
+    cfg = os.path.join(config_dir, "hooks.json")
+    os.makedirs(config_dir, exist_ok=True)
+
+    if gemini_alias:
+        print("gemini: WARNING: 'gemini' adapter is DEPRECATED (Gemini CLI sunset June 2026) "
+              "and will be removed in April 2027 (in 6 months). Routing to 'antigravity'...")
+
     data = {}
     if os.path.exists(cfg):
         try:
             with open(cfg, encoding="utf-8") as fh:
                 data = json.load(fh)
         except Exception as e:
-            print("gemini: ERROR: existing settings.json is invalid JSON ({}); not modifying".format(e))
+            print("antigravity: ERROR: existing hooks.json is invalid JSON ({}); not modifying".format(e))
             return 3
         if not isinstance(data, dict):
-            print("gemini: ERROR: settings.json is not a JSON object; not modifying")
+            print("antigravity: ERROR: hooks.json is not a JSON object; not modifying")
             return 3
-    hooks = data.setdefault("hooks", {})
-    if not isinstance(hooks, dict):
-        print("gemini: ERROR: settings 'hooks' is not an object; not modifying")
-        return 3
-    before = hooks.setdefault("BeforeTool", [])
-    if not isinstance(before, list):
-        print("gemini: ERROR: hooks.BeforeTool is not a list; not modifying")
-        return 3
 
-    entry = {
-        "matcher": "run_shell_command",
-        "hooks": [{
-            "name": GEMINI_HOOK_NAME,
-            "type": "command",
-            "command": 'python3 "{}" gemini'.format(GUARDRAIL),
-            "timeout": 10000,
-            "description": "bailiwick guardrail (ADR-006 confirmation tiers; self-gates to wired repos)",
-        }],
+    guardrail_entry = {
+        "PreToolUse": [
+            {
+                "matcher": "run_command",
+                "hooks": [{
+                    "type": "command",
+                    "command": 'python3 "{}" antigravity'.format(GUARDRAIL),
+                    "timeout": 30,
+                    "description": "bailiwick guardrail (ADR-006 confirmation tiers; self-gates to wired repos)",
+                }],
+            }
+        ]
     }
-    status = "INSTALLED"
-    for i, grp in enumerate(before):
-        if isinstance(grp, dict) and any(
-                isinstance(h, dict) and h.get("name") == GEMINI_HOOK_NAME for h in grp.get("hooks", [])):
-            status = "PRESENT" if grp == entry else "UPDATED"
-            before[i] = entry
-            break
+
+    capture_entry = {
+        "Stop": [
+            {
+                "type": "command",
+                "command": 'python3 "{}"'.format(CAPTURE),
+                "timeout": 60,
+                "description": "bailiwick capture (automatic raw session capture for /curate)",
+            },
+            {
+                "type": "command",
+                "command": 'bash "{}" push'.format(CAPTURE_BACKUP),
+                "timeout": 60,
+                "description": "bailiwick capture backup (encrypted off-machine copy)",
+            },
+        ]
+    }
+
+    had_guardrail = "bailiwick-guardrail" in data
+    had_capture = "bailiwick-capture" in data
+    same_guardrail = data.get("bailiwick-guardrail") == guardrail_entry
+    same_capture = data.get("bailiwick-capture") == capture_entry
+
+    if not had_guardrail and not had_capture:
+        status = "INSTALLED"
+    elif same_guardrail and same_capture:
+        status = "PRESENT"
     else:
-        before.append(entry)
+        status = "UPDATED"
+
+    data["bailiwick-guardrail"] = guardrail_entry
+    data["bailiwick-capture"] = capture_entry
+
     if status != "PRESENT":
         with open(cfg + ".tmp", "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2)
             fh.write("\n")
         os.replace(cfg + ".tmp", cfg)
-    print("gemini: {} ({})".format(status, cfg))
+
+    # Legacy cleanup: safely remove BeforeTool hook from ~/.gemini/settings.json
+    gemini_cfg = os.path.join(home, "settings.json")
+    if os.path.exists(gemini_cfg):
+        try:
+            with open(gemini_cfg, encoding="utf-8") as fh:
+                gdata = json.load(fh)
+            if isinstance(gdata, dict):
+                ghooks = gdata.get("hooks")
+                if isinstance(ghooks, dict):
+                    before = ghooks.get("BeforeTool")
+                    if isinstance(before, list):
+                        new_before = []
+                        removed = False
+                        for grp in before:
+                            if isinstance(grp, dict):
+                                kept = [h for h in grp.get("hooks", [])
+                                        if not (isinstance(h, dict) and h.get("name") == "bailiwick-guardrail")]
+                                if len(kept) != len(grp.get("hooks", [])):
+                                    removed = True
+                                if kept:
+                                    grp["hooks"] = kept
+                                    new_before.append(grp)
+                            else:
+                                new_before.append(grp)
+                        if removed:
+                            if new_before:
+                                ghooks["BeforeTool"] = new_before
+                            else:
+                                del ghooks["BeforeTool"]
+                            if not ghooks:
+                                del gdata["hooks"]
+                            with open(gemini_cfg + ".tmp", "w", encoding="utf-8") as fh:
+                                json.dump(gdata, fh, indent=2)
+                                fh.write("\n")
+                            os.replace(gemini_cfg + ".tmp", gemini_cfg)
+                            print("antigravity: NOTE — Removed legacy Gemini CLI 'bailiwick-guardrail' hook from "
+                                  "{} (Gemini CLI was sunset in June 2026; hooks now active in {})".format(gemini_cfg, cfg))
+        except Exception:
+            pass  # Do not block Antigravity hook installation if legacy settings.json is unreadable
+
+    print("antigravity: {} ({})".format(status, cfg))
     return 0
 
 
+def install_gemini():
+    return install_antigravity(gemini_alias=True)
+
+
 def main():
-    targets = [a for a in sys.argv[1:] if a in ("codex", "gemini")] or ["codex", "gemini"]
+    raw_targets = sys.argv[1:]
+    if not raw_targets:
+        targets = ["codex", "antigravity"]
+    else:
+        targets = []
+        for a in raw_targets:
+            if a in ("codex", "antigravity", "gemini") and a not in targets:
+                targets.append(a)
+        if not targets:
+            targets = ["codex", "antigravity"]
+
     rc = 0
     for t in targets:
-        rc = max(rc, install_codex() if t == "codex" else install_gemini())
+        if t == "codex":
+            rc = max(rc, install_codex())
+        elif t == "antigravity":
+            rc = max(rc, install_antigravity(gemini_alias=False))
+        elif t == "gemini":
+            rc = max(rc, install_gemini())
     return rc
 
 

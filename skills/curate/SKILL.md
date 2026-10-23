@@ -42,14 +42,35 @@ gpg private key, so full centralized curation runs on the machine that holds it.
    - List `.bailiwick-outputs/*.md` (agent session outputs, if any — including `learn-*.md`
      onboarding captures staged by `/learn`, which arrive pre-digested with a
      `## Candidates for Promotion` section and dedup hints).
+   - Also snapshot completed GCP freshness reports from `$BAILIWICK/.bailiwick-outputs/gcp-freshness-*.md`
+     in the **framework root**, even when invoked from a client repo. Include only `status: completed`;
+     exclude `running`, `partial`, and `failed` reports from extraction and retirement. Take this
+     snapshot **before** dispatching new research, so this run's report waits for a later curation.
+     Apply this status filter to freshness reports encountered through **any** gather path,
+     including the generic agent-output glob, and deduplicate resolved paths.
+   - **Periodic mode only — dispatch freshness research first.** After the public-origin gate
+     and the snapshot above, launch the
+     [GCP freshness check](references/gcp-freshness.md) **before** restoring off-machine captures.
+     Its procedure selects notes from the KB index before dispatch. Only the tool-restricted
+     `bailiwick-cloud-research-freshness` agent under Claude Code may overlap the restore and other
+     capture processing (native asynchronous delegation). Never fall back to the general Cloud
+     Research stage without the user's explicit go-ahead for this run (see the procedure). With any
+     agent that can read files — that fallback, or a generated Gemini/Codex/Copilot adapter — **collect the freshness result
+     before running the restore**, so no file-reading agent with web access runs while decrypted
+     plaintext lands in `.bailiwick-inbox/`. Disclose sequential/inline fallback.
    - **Restore off-machine captures** (if `capture_backup` is enabled in `.bailiwick-sync.json`): run
      `bash $BAILIWICK/hooks/capture_backup.sh pull` — decrypts every backed-up blob
      (from any machine) into `$BAILIWICK/.bailiwick-inbox/raw/<machine>/<repo>/…` (needs the gpg private
      key + passphrase). Include these in the candidate gather. `.bailiwick-inbox/` is gitignored — never commit it.
    - Read `$BAILIWICK/knowledge/INDEX.md`.
-   - If there is nothing pending, say so and stop.
+   - If there is nothing pending, say so. Stop for ordinary curation; **periodic mode continues**
+     (freshness research was already dispatched above).
 
 2. **Extract candidates** — from each capture, pull decisions, non-obvious patterns, validated assumptions, pitfalls, and Retrieval Feedback (loaded / used / missed). Research-only and conversation-only sessions still count. **Federation ingest:** external knowledge consulted from a `.bailiwick-sources.json` source is also an ingest candidate — follow `agents/federation.md` (abstract, never transclude; add `source:` + `## Provenance` + `scope: external:<id>`; route through this same approval batch; never write back to the source).
+
+   Distinguish freshness-maintenance reads from project reuse before applying feedback. The
+   capture hook can mechanically credit any KB read; exclude freshness-only IDs from reuse
+   credits per Memory's freshness exception, retaining independently evidenced project usage.
 
 3. **Update telemetry + reconcile (no gate)** — **central machine only; on a satellite (`.bailiwick-sync.json` role ≠ `central`) skip this entire step — telemetry is central-owned (see docs/operations.md → Multi-machine sync).** Apply `Retrieval Feedback` to `.telemetry.json` per memory.md Step 2, then **reconcile**: every `id`-bearing content file (`topics/`, `patterns/`, `context/`, `clients/`) must have a telemetry row — seed a zero-row for any missing id, and flag orphan rows (a row whose id has no file) for removal. This is the only unattended write. (The framework's own ADRs live outside the library in `docs/decisions/` — status-tracked, not part of this reconcile.)
 
@@ -65,12 +86,19 @@ gpg private key, so full centralized curation runs on the machine that holds it.
 
 7. **Write on approval only** — write approved files, update `last_validated`, **author/refresh each written file's `## Related` section** (1–5 peer notes as relative markdown links, not `[[wikilinks]]` — see memory.md Step 6; grows the visual knowledge graph as a curation byproduct; at the 5-link cap, replace the weakest edge rather than skipping a stronger new tie), and update the relevant index node (root `INDEX.md`, or the domain sub-index if sharded) for new files. **Seed a `.telemetry.json` row for every new `id`-bearing content file** (Step 3 reconciliation catches any miss). If adding entries pushes a node over its shard threshold (> 15 topics), surface a shard proposal (memory.md → Index Health & Sharding). Stage knowledge changes for a commit with the `knowledge:` prefix (separate from project code; the telemetry row is a separate `telemetry:` commit). Do not commit without approval.
 
-8. **Retire processed inputs** — after an input's candidates are handled (promoted, held, or rejected), retire it so it is not re-processed: move raw captures (`.jsonl` + `.md`) to `.bailiwick-outputs/raw/.curated/` (stops the SessionStart nag) — or, for a **shadow-mode capture**, an auto `.jsonl` to `~/.bailiwick/captures/<repo-key>/raw/.curated/` and a manual Codex/Gemini `.md` to `~/.bailiwick/captures/<repo-key>/.curated/` (same effect for its central nag; `<repo-key>` is the `<repo>-<hash>` staging folder) — and move any processed agent-output candidate (`.bailiwick-outputs/*.md`) to `.bailiwick-outputs/.curated/` (drops it from the Step 1 gather). For an input restored from the encrypted backup, also **purge its blob**: `bash $BAILIWICK/hooks/capture_backup.sh purge <machine>/<repo>/<file>.gpg` (relevant content is now in the clean zone; the blob is ciphertext, so this is hygiene, not a security-critical erase). Delete the decrypted copy from `.bailiwick-inbox/`. Never delete unreviewed inputs.
+8. **Retire processed inputs** — after an input's candidates are handled (promoted, held, or rejected), retire it so it is not re-processed: move raw captures (`.jsonl` + `.md`) to `.bailiwick-outputs/raw/.curated/` (stops the SessionStart nag) — or, for a **shadow-mode capture**, an auto `.jsonl` to `~/.bailiwick/captures/<repo-key>/raw/.curated/` and a manual Codex/Gemini `.md` to `~/.bailiwick/captures/<repo-key>/.curated/` (same effect for its central nag; `<repo-key>` is the `<repo>-<hash>` staging folder) — and move any processed agent-output candidate (`.bailiwick-outputs/*.md`) to `.bailiwick-outputs/.curated/` (drops it from the Step 1 gather). For an input restored from the encrypted backup, also **purge its blob**: `bash $BAILIWICK/hooks/capture_backup.sh purge <machine>/<repo>/<file>.gpg` (relevant content is now in the clean zone; the blob is ciphertext, so this is hygiene, not a security-critical erase). Delete the decrypted copy from `.bailiwick-inbox/`. Never delete unreviewed inputs. For freshness reports, retire only completed reports in the Step 1 snapshot after their candidates are handled; never retire running, partial, failed, or newly dispatched reports.
 
 9. **Propagate (after the approved commit)** — run `$BAILIWICK/hooks/sync_knowledge.sh`. On the **central** machine it pushes the commit to `origin/main`. On a **satellite** it parks the new commits on `sync/<machine>`, pushes (`--force-with-lease`), and opens/refreshes a PR to `main` — keeping local `main` a clean fast-forward mirror; telemetry is excluded (central reconciles rows when the PR merges). Inbound currency is automatic via the SessionStart hook's ff-only pull. See docs/operations.md → Multi-machine sync.
 
 ## Periodic Curation mode
 If the user invokes `/curate periodic` (or asks for the periodic session), additionally run memory.md's Periodic Curation Session: proactive staleness scan (all `last_validated` > 9 months), apply the held EXPAND/IMPROVE digest, surface archival candidates (high `load_count`, low `useful_count`), and propose confidence graduations (`distinct_projects_used >= 3`, `open_contradictions == 0`).
+
+Periodic mode also runs a bounded, report-only **GCP knowledge freshness check**, even with no
+pending captures. Follow [the detailed procedure](references/gcp-freshness.md): existing Cloud
+Research stage, indexed official-source allowlist, at most 5 generic notes / 10 distinct URLs /
+15 minutes total. Collect and persist its result before ending the session, or explicitly record
+an incomplete run. No durable scheduler is installed. The new report is input to a **later**
+curation; research never changes knowledge, `last_validated`, confidence, or telemetry.
 
 ## De-identified mode
 Invoked by `/curate --sanitized` (a.k.a. de-identified mode), or forced always-on when

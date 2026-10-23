@@ -61,6 +61,10 @@ t_make_instance() {  # <dir>: a committed framework instance repo with a file://
   cp "$REPO_ROOT"/hooks/*.sh "$REPO_ROOT"/hooks/*.py "$inst/hooks/" 2>/dev/null || true
   cp "$REPO_ROOT"/hooks/settings.template.json "$inst/hooks/"
   cp "$REPO_ROOT"/scripts/doctor.sh "$inst/scripts/"
+  # The fetch guard imports its policy from the curate skill (doctor's canary runs it).
+  mkdir -p "$inst/skills/curate/scripts" "$inst/skills/curate/references"
+  cp "$REPO_ROOT"/skills/curate/scripts/check_source.py "$inst/skills/curate/scripts/"
+  cp "$REPO_ROOT"/skills/curate/references/gcp-sources.json "$inst/skills/curate/references/"
   git -C "$inst" init -q -b main
   git -C "$inst" add -A
   git -C "$inst" -c user.name=bw-test -c user.email=test@local commit -qm "seed"

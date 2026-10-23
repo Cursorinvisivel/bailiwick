@@ -1,6 +1,8 @@
 ---
 name: bailiwick-federation
 description: Federation stage of the Bailiwick Quality Workflow — read-only consult of registered EXTERNAL knowledge sources (.bailiwick-sources.json), tagging every fact [external:<id>]. Dispatched by the Lead orchestrator during Memory Query when federation sources are enabled. Dormant until a source is registered.
+model: haiku
+effort: low
 tools: Read, Grep, Glob, mcp__bailiwick-filesystem__read_text_file, mcp__bailiwick-filesystem__read_file, mcp__bailiwick-filesystem__read_multiple_files, mcp__bailiwick-filesystem__list_directory, mcp__bailiwick-filesystem__directory_tree, mcp__bailiwick-filesystem__search_files, mcp__bailiwick-filesystem__get_file_info, mcp__bailiwick-filesystem__list_allowed_directories
 ---
 <!-- tools: read-only INCLUDING the MCP filesystem server's read tools only — the "policy-read-only outward"

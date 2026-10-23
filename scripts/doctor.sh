@@ -43,24 +43,109 @@ except Exception:
     print("UNPARSEABLE"); sys.exit()
 cmds = [h.get("command", "") for v in (d.get("hooks") or {}).values()
         for g in v for h in g.get("hooks", [])]
-owned = re.compile(r'(\S+/hooks/(?:capture_session\.py|session_start\.sh|capture_backup\.sh|guardrails\.py))')
-homes = set()
-for c in cmds:
-    for m in owned.findall(c):
-        homes.add(os.path.realpath(os.path.dirname(m)))
-if not homes:
+owned = re.compile(r'(\S+/hooks/(?:capture_session\.py|session_start\.sh|capture_backup\.sh|guardrails\.py|fetch_guard\.py))')
+scripts = [m for c in cmds for m in owned.findall(c)]
+here = os.path.realpath(os.path.join(root, "hooks"))
+# A hook script that no longer exists makes python3 exit 2, which Claude Code treats as BLOCKING:
+# every call of that tool (Bash, WebFetch) fails machine-wide until the hooks are reinstalled.
+missing = sorted(set(m for m in scripts if not os.path.exists(m)))
+homes = set(os.path.realpath(os.path.dirname(m)) for m in scripts)
+if missing:
+    print("MISSING " + ";".join(missing))
+elif not homes:
     print("NONE")
 else:
-    foreign = sorted(h for h in homes if h != os.path.realpath(os.path.join(root, "hooks")))
-    print(";".join(foreign) if foreign else "OK")
+    foreign = sorted(h for h in homes if h != here)
+    if foreign:
+        print(";".join(foreign))
+    # Added after the first hook generation: a machine installed before it has every other hook,
+    # and the /curate WebFetch calls of the freshness agent then run without the fetch-time allowlist.
+    elif not any(os.path.basename(m) == "fetch_guard.py" for m in scripts):
+        print("OK-NOFETCH")
+    else:
+        print("OK")
 PY
 )"
   case "$hook_state" in
     OK)          ok "hooks in ~/.claude/settings.json execute this clone" ;;
+    OK-NOFETCH)  ok "hooks in ~/.claude/settings.json execute this clone"
+                 warn "freshness fetch guard hook not installed — re-run bootstrap.sh --install-tools to merge it" ;;
     NONE)        warn "no Bailiwick hooks in $SETTINGS — capture/guardrails not installed (bootstrap.sh --install-tools)" ;;
     UNPARSEABLE) warn "$SETTINGS is not valid JSON — cannot verify hook wiring" ;;
+    MISSING\ *)  fail "hook scripts no longer exist (${hook_state#MISSING }) — Claude Code treats a missing hook script as a blocking hook error (for PreToolUse, every call of that tool fails); re-run bootstrap.sh --install-tools from this clone" ;;
     *)           fail "hooks execute a DIFFERENT clone (${hook_state}) — this clone's code is not live and its /curate cannot see what those hooks capture; re-run bootstrap.sh --install-tools from here" ;;
   esac
+fi
+
+# ---- 1b. Freshness fetch guard canary: both layers must actually refuse an off-registry URL ------
+# Presence is not enough: a guard that cannot import its policy denies everything (fail-closed) and
+# one that cannot see its caller allows everything. Each installed layer gets a synthetic call and
+# must deny an off-registry URL AND allow a registry URL. This proves the installed commands and
+# the policy; it cannot prove that Claude Code still sends `agent_type` (scripts/smoke_fetch_guard.sh).
+if [ "$HAVE_PY" -eq 1 ]; then
+  canary="$(python3 - "$SETTINGS" "$BAILIWICK_ROOT" <<'PY'
+import json, os, subprocess, sys, tempfile
+OFF = "https://evil.test/doctor-canary"
+AGENT = "bailiwick-cloud-research-freshness"
+root = sys.argv[2]
+try:  # a registry URL that must pass: the first discovery URL, so a registry edit cannot fake a fault
+    ON = json.load(open(os.path.join(root, "skills/curate/references/gcp-sources.json")))["sources"][0]["discovery_urls"][0]
+except Exception:
+    ON = "https://docs.cloud.google.com/iam/docs/release-notes"
+# Synthetic denials must not land in the real audit log: doctor writes nothing.
+SCRATCH = tempfile.mkdtemp(prefix="bw-doctor-canary-")
+
+def decide(argv, url, shell=False):
+    payload = {"agent_type": AGENT, "tool_name": "WebFetch", "tool_input": {"url": url, "prompt": "x"}}
+    try:
+        r = subprocess.run(argv, shell=shell, input=json.dumps(payload), capture_output=True,
+                           text=True, timeout=20, env=dict(os.environ, BAILIWICK_HOME=SCRATCH))
+    except Exception as exc:
+        return "error:" + type(exc).__name__
+    if r.returncode == 2:
+        return "blocked"  # Claude Code treats exit 2 as a deny
+    if r.returncode != 0:
+        return "rc%d" % r.returncode
+    try:
+        return json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"] if r.stdout.strip() else "allow"
+    except Exception:
+        return "garbled"
+
+def verdict(label, run):
+    off, on = run(OFF), run(ON)
+    if off in ("deny", "blocked") and on == "allow":
+        print("OK\t" + label)
+    else:
+        print("BAD\t%s (off-registry: %s, registry: %s)" % (label, off, on))
+
+home = os.environ.get("BAILIWICK_HOME") or os.path.join(os.path.expanduser("~"), ".bailiwick")
+launcher = os.path.join(home, "hooks", "fetch_guard.py")
+if os.path.isfile(launcher):
+    verdict("agent-scoped launcher " + launcher,
+            lambda url: decide([sys.executable, "-I", launcher, "--scoped"], url))
+else:
+    print("NOLAUNCHER\t" + launcher)
+try:
+    groups = json.load(open(sys.argv[1])).get("hooks", {}).get("PreToolUse", [])
+except Exception:
+    groups = []
+cmds = [h.get("command", "") for g in groups if g.get("matcher") == "WebFetch"
+        for h in g.get("hooks", []) if "fetch_guard.py" in h.get("command", "")]
+for cmd in cmds:
+    verdict("global settings hook", lambda url, c=cmd: decide(c, url, shell=True))
+import shutil
+shutil.rmtree(SCRATCH, ignore_errors=True)
+PY
+)"
+  while IFS="$(printf '\t')" read -r state detail; do
+    case "$state" in
+      OK)         ok "freshness fetch guard refuses off-registry URLs: $detail" ;;
+      BAD)        fail "freshness fetch guard is not enforcing the registry: $detail — re-run bootstrap.sh --install-tools" ;;
+      NOLAUNCHER) warn "freshness fetch launcher missing ($detail) — the freshness agent's fetches are all blocked until bootstrap.sh --install-tools" ;;
+    esac
+  done <<EOF
+$canary
+EOF
 fi
 
 # ---- 2. Per-machine config ---------------------------------------------------------------------
@@ -272,6 +357,21 @@ if [ "$FETCH_OK" -eq 1 ]; then
       ok "no sync/${machine} branch on origin (nothing parked)"
     fi
   fi
+  # Inbound (#37): SessionStart only fast-forwards a clone checked out on main. Being on
+  # sync/<machine> is expected until central merges it (SessionStart then returns to main);
+  # merged-but-still-there, or any other branch, means inbound knowledge has silently stalled.
+  cur="$(git symbolic-ref --short -q HEAD || echo DETACHED)"
+  cur_behind="$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
+  case "$cur" in
+    main) ok "framework clone is on main (SessionStart fast-forwards it)" ;;
+    sync/*)
+      if ! { command -v bw_sync_merged >/dev/null 2>&1 && bw_sync_merged "$BAILIWICK_ROOT"; }; then
+        ok "framework clone is on ${cur} awaiting its PR merge — SessionStart returns it to main once merged"
+      else
+        warn "framework clone is still on ${cur}, already merged into origin/main (${cur_behind} behind) — inbound sync is stalled (uncommitted changes block the auto-switch); commit or stash, then: git checkout main && git merge --ff-only origin/main"
+      fi ;;
+    *) warn "framework clone is on '${cur}', not main (${cur_behind} behind origin/main) — SessionStart only fast-forwards main, so inbound knowledge is stalled: git checkout main && git merge --ff-only origin/main" ;;
+  esac
 else
   warn "cannot reach origin — sync-state checks skipped (offline?)"
 fi
@@ -333,7 +433,7 @@ PY
         *mcp-server-fetch*)
           case "$m_args" in
             *'mcp<2'*) : ;;
-            *) warn "$m_name does not pin the mcp SDK — mcp-server-fetch fails on import against SDK 2.x; re-run bootstrap.sh --install-tools to re-register it with --with 'mcp<2'" ;;
+            *) warn "$m_name does not pin the mcp SDK — mcp-server-fetch fails on import against SDK 2.x; re-run bootstrap.sh --install-tools (it re-registers drifted definitions), or by hand: claude mcp remove --scope user $m_name && claude mcp add --scope user $m_name -- uvx --with 'mcp<2' mcp-server-fetch" ;;
           esac ;;
       esac
     done <<EOF

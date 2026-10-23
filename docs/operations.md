@@ -108,8 +108,20 @@ it (see below).
 ### Inbound — automatic
 
 The SessionStart hook fast-forwards the Bailiwick clone from `origin/main` (throttled ~30 min, only
-on a clean `main`, non-fatal when offline). On a `sync/<machine>` branch it prints a
-"N commits behind" note instead of auto-merging.
+on a clean `main`, non-fatal when offline). After a satellite sync the clone is left on
+`sync/<machine>` so its new knowledge stays visible; once central has merged that branch (every
+commit on `origin/main`, by SHA or by patch), SessionStart switches the clone back to `main` and
+fast-forwards it. Until then — or if uncommitted changes block the switch — it prints an
+"N commits behind" note instead. `doctor.sh` warns when the clone is stuck off `main`.
+
+**Merge sync PRs with "Create a merge commit"** (or disable squash merging on your private
+repo). A merge commit, a rebase merge, and a single-commit squash are recognised by commit/patch.
+A **multi-commit squash** produces one new patch that matches none of the satellite's commits, so
+the satellite falls back to comparing **content**: it returns to `main` only if every file its sync
+branch changed is identical on `origin/main`. If central edited one of those files again before the
+satellite's next session, that check fails safe — the clone stays on `sync/<machine>`, `doctor.sh`
+warns, and its next sync would re-carry the already-merged commits. Recover with
+`git checkout main && git merge --ff-only origin/main`.
 
 ### Outbound — after an approved `/curate`
 
@@ -329,3 +341,68 @@ CLAUDE.local.md
 Never list the team's own `CLAUDE.md` / `AGENTS.md` / `copilot-instructions.md` here — the framework
 does not touch them. For a shared-team setup that *wants* the framework tracked, bootstrap with
 `--visible` instead.
+
+
+## 6. Explicit team execution (`/lead`)
+
+The shared [Lead skill](../skills/lead/SKILL.md) turns a concrete task into an explicit
+Quality Workflow: Memory Query, selected execution stages, review, and Memory Collect. It
+requires an execution table showing actual agents or inline fallbacks, validation evidence,
+and unresolved issues. It is an instruction contract, not a runtime enforcement hook.
+
+After pulling this change, run `scripts/bootstrap.sh --install-tools` (Windows:
+`scripts/bootstrap.ps1 -InstallTools`) from the framework clone to install the new global
+skill links. Existing directory discovery picks up `skills/lead/` for Claude Code and
+`codex-skills/bailiwick-lead/` for Codex; no files are copied into client repositories.
+Start a fresh Claude Code session (or use `/clear`) after installation so it discovers
+the new skill.
+
+- Claude Code: `/lead Implement X and have the draft independently reviewed.`
+- Codex: `$bailiwick-lead Implement X and have the draft independently reviewed.`
+- Gemini, Copilot, Antigravity, or another host: `Follow $BAILIWICK/skills/lead/SKILL.md
+  as Lead for this task: implement X and review it.` Supply the actual framework path when
+  the host cannot expand the environment variable.
+
+The skill checks the current runtime for native delegation. The existing installer generates
+stage adapters for Gemini, Codex, and Copilot alongside Claude Code's symlinks; it does not
+install an Antigravity-specific adapter. Hosts without delegation can execute the stages
+inline, with the limitation stated before work and in the execution report. Inline review
+is not independent review; a task explicitly requiring independent agents remains blocked
+on that requirement if the host cannot provide them.
+
+The Lead preserves existing authorization gates. It collects knowledge candidates for later
+`/curate` or `/investigate` approval; invoking it does not authorize knowledge-library writes,
+commits, pushes, PRs, or deployments.
+
+
+## 7. Periodic GCP knowledge freshness
+
+Run `/curate periodic` (Codex: `$bailiwick-curate periodic`) from any wired repo. After the
+public-origin gate and initial input snapshot, and before off-machine captures are decrypted,
+the orchestrator launches `bailiwick-cloud-research-freshness` — a fetch-only Cloud Research
+variant with no file or search tools — to compare selected generic GCP claims with official vendor
+evidence. This runs
+even when there are no pending captures. Ordinary curation only gathers previously completed reports.
+
+The [canonical procedure](../skills/curate/references/gcp-freshness.md) caps each run at 5 generic
+notes, 10 distinct requested or tool-exposed URLs, and 15 minutes total. It reviews 90 days of announcements plus
+older still-effective lifecycle notices and current claim documentation. The
+[indexed source registry](../skills/curate/references/gcp-sources.json) defines permitted service
+sources; the [URL policy helper](../skills/curate/scripts/check_source.py) checks discovery and
+reported redirect/final URLs. It is a workflow check, not a network firewall. Evidence with
+an unverified final destination is inconclusive; hidden intermediate hops are disclosed as a
+transport limitation, not proof of chain enforcement. Client notes, identifiers and raw captures never go
+to research or web queries.
+
+When the host supports native asynchronous delegation, research overlaps independent capture
+processing. Otherwise the orchestrator discloses sequential or inline execution. No background
+daemon, external CLI, global installation, or durable scheduling is introduced. Collect the result
+before session end or explicitly record an incomplete run.
+
+Reports live in the ignored **framework-root** `.bailiwick-outputs/gcp-freshness-<run-id>.md`, with
+unique IDs and `running` → `completed`, `partial`, or `failed` status. They record claim snapshots,
+source/destination checks, dates, applicability, confidence and exact coverage gaps. A completed
+report can include inconclusive findings; partial reports have unassessed selected claims.
+Only completed reports present in a **later** curation's initial snapshot enter its approval batch.
+Never retire incomplete or current-run reports. Research does not write knowledge, telemetry,
+confidence or validation dates; no announcement found is never positive revalidation.

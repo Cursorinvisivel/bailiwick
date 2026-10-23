@@ -247,6 +247,55 @@ def test_codex_tool_output_text_never_fakes_a_signal(tmp_path):
     assert "ghost" not in meta, "a path quoted in text/output is not a load"
 
 
+def test_antigravity_capture_derives_signals(tmp_path):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "CLAUDE.local.md").write_text("uses $BAILIWICK\n")
+    transcript = tmp_path / "agy-transcript.jsonl"
+    lines = [
+        json.dumps({
+            "step_index": 1,
+            "type": "PLANNER_RESPONSE",
+            "tool_calls": [
+                {"name": "read_file", "args": {"Path": "/path/knowledge/topics/my-topic.md"}}
+            ]
+        }),
+        json.dumps({
+            "step_index": 2,
+            "type": "PLANNER_RESPONSE",
+            "tool_calls": [
+                {"name": "write_file", "args": {"Path": "/path/foo.py", "Content": "print('hello')"}}
+            ]
+        }),
+        json.dumps({
+            "step_index": 3,
+            "type": "PLANNER_RESPONSE",
+            "tool_calls": [
+                {"name": "run_command", "args": {"CommandLine": "git commit -m 'feat: init'"}}
+            ]
+        })
+    ]
+    transcript.write_text("\n".join(lines) + "\n")
+    payload = {
+        "conversationId": "agy-123",
+        "transcriptPath": str(transcript),
+        "workspacePaths": [str(proj)],
+        "terminationReason": "NO_TOOL_CALL"
+    }
+    r = subprocess.run(
+        [sys.executable, os.path.join(HOOKS, "capture_session.py")],
+        input=json.dumps(payload), text=True, capture_output=True,
+    )
+    assert r.returncode == 0, r.stderr
+    meta_path = proj / ".bailiwick-outputs" / "raw" / "agy-123.md"
+    assert meta_path.exists()
+    meta = meta_path.read_text()
+    assert "- agent: antigravity" in meta
+    assert "mutating: 1" in meta
+    assert "committed: true" in meta
+    assert "my-topic" in meta
+
+
 def test_malformed_payload_never_blocks_the_harness(tmp_path):
     r = subprocess.run(
         [sys.executable, os.path.join(HOOKS, "capture_session.py")],

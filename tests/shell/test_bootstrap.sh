@@ -149,4 +149,57 @@ out="$(bash "$RI/scripts/bootstrap.sh" --role central 2>&1)"; rc=$?
 assert_exit "invalid JSON -> exit 2" 2 "$rc"
 assert_eq "broken file left as-is" "{ broken" "$(cat "$RCFG")"
 
+echo "== global uninstall removes this clone's fetch-guard launcher, never another clone's"
+LAUNCHER="$BAILIWICK_HOME/hooks/fetch_guard.py"
+mkdir -p "$HOME/.claude"
+python3 "$REPO_ROOT/hooks/install_hooks.py" "$HOME/.claude/settings.json" \
+  "$REPO_ROOT/hooks/settings.template.json" >/dev/null 2>&1
+assert_file "installer wrote the launcher" "$LAUNCHER"
+bash "$BOOTSTRAP" --uninstall >/dev/null 2>&1
+[ -e "$LAUNCHER" ]; assert_exit "own launcher removed" 1 "$?"
+python3 -I -c 'import sys; sys.path.append(sys.argv[1]); import install_hooks as m
+open(sys.argv[2], "w").write(m.launcher_content("/elsewhere/bailiwick/hooks/fetch_guard.py"))' \
+  "$REPO_ROOT/hooks" "$LAUNCHER"
+bash "$BOOTSTRAP" --uninstall >/dev/null 2>&1
+assert_file "another clone's launcher kept" "$LAUNCHER"
+
+# ---- user-scope MCP registration is CONVERGENT (#36) -------------------------------------------
+# A name match used to count as "registered", so a definition from before a change (the mcp<2 pin)
+# never updated and doctor's "re-run --install-tools" advice looped forever.
+echo "== drifted user-scope MCP definition is re-registered; matching ones are left alone"
+export CLAUDE_STUB_LOG="$T_SANDBOX/claude-stub.log"
+TM="$(new_target mcp)"
+cat > "$HOME/.claude.json" <<'JSON'
+{ "mcpServers": {
+  "bailiwick-fetch": { "type": "stdio", "command": "uvx", "args": ["mcp-server-fetch"], "env": {} },
+  "bailiwick-terraform": { "type": "stdio", "command": "terraform-mcp-server", "args": ["stdio"], "env": {} },
+  "my-own": { "type": "stdio", "command": "mine", "args": [], "env": {} } } }
+JSON
+out="$(PATH="$REPO_ROOT/tests/shell/stub-claude:$PATH" bash "$BOOTSTRAP" --no-gh-auth "$TM" 2>&1)"; rc=$?
+assert_exit "shadow bootstrap exits 0" 0 "$rc"
+fetch_args="$(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1]))["mcpServers"]["bailiwick-fetch"]["args"]))' "$HOME/.claude.json")"
+assert_eq "unpinned fetch now carries the mcp<2 pin" "--with mcp<2 mcp-server-fetch" "$fetch_args"
+assert_contains "reports the re-registration" "bailiwick-fetch definition changed — re-registered" "$out"
+assert_contains "matching definition left alone" "bailiwick-terraform already registered (up to date)" "$out"
+assert_not_contains "matching definition never removed" "remove --scope user bailiwick-terraform" "$(cat "$CLAUDE_STUB_LOG")"
+assert_contains "a non-bailiwick server survives" '"my-own"' "$(cat "$HOME/.claude.json")"
+
+echo "== a second run is a no-op (idempotent)"
+: > "$CLAUDE_STUB_LOG"
+out="$(PATH="$REPO_ROOT/tests/shell/stub-claude:$PATH" bash "$BOOTSTRAP" --no-gh-auth "$TM" 2>&1)"
+assert_contains "fetch now up to date" "bailiwick-fetch already registered (up to date)" "$out"
+assert_not_contains "nothing removed on a converged run" "remove" "$(cat "$CLAUDE_STUB_LOG")"
+
+echo "== a failed re-add restores the previous definition (never leaves the server missing)"
+python3 - "$HOME/.claude.json" <<'PY2'
+import json, sys
+d = json.load(open(sys.argv[1])); d["mcpServers"]["bailiwick-fetch"]["args"] = ["mcp-server-fetch"]
+json.dump(d, open(sys.argv[1], "w"))
+PY2
+out="$(CLAUDE_STUB_ADD_RC=1 PATH="$REPO_ROOT/tests/shell/stub-claude:$PATH" bash "$BOOTSTRAP" --no-gh-auth "$TM" 2>&1)"
+assert_contains "prints the manual remove + add" "claude mcp remove --scope user bailiwick-fetch && claude mcp add" "$out"
+assert_contains "old definition restored" '"mcp-server-fetch"' "$(cat "$HOME/.claude.json")"
+unset CLAUDE_STUB_LOG
+rm -f "$BAILIWICK_HOME/allowlist"
+
 t_summary

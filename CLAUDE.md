@@ -27,7 +27,7 @@ Orchestration is proportional: route substantial or multi-step work through the 
 (it dispatches stages by task type); handle trivial edits and direct questions inline with knowledge
 loaded. No prefix is required — stating a substantial task *is* the invocation. To force the full
 Quality Workflow when routing under-evaluates a task, say so ("run the full Quality Workflow" or
-name the stages).
+name the stages); for the stricter execution contract with required stage evidence, invoke `/lead`.
 
 **Execution model:** the Lead is the native main session; it dispatches real native Claude Code
 subagents (not role-play in one context). Independent stages run **concurrently**; dependent stages
@@ -52,6 +52,10 @@ Rules:
 - Maximum 5 *content* files (topics/patterns) per task unless justified — index navigation nodes don't count, but keep the descent shallow (≤2–3 levels)
 - **Engineering defaults always apply** — `context/engineering-defaults.md` (reuse-first: scan repo + KB for code to extend before creating; least privilege; CAF naming + labels; pinned versions; no secrets; plan-before-apply; drafts for review)
 - Updates to the knowledge library require explicit human approval (via `/curate`)
+- `definitions/` (repo root, outside `knowledge/`) holds per-client document build specs for a
+  documentation tool such as tech-scribe: authored by the tool or by hand, reviewed by git diff, never
+  curated or indexed, purged with the client. HLD/LLD work for a client with definitions is handed off
+  to that tool. See definitions/README.md and ADR-011.
 
 ## Capture & Curation
 Enforced by harness hooks ($BAILIWICK/hooks/) — Claude Code, and Codex CLI for capture:
@@ -78,6 +82,11 @@ Enforced by harness hooks ($BAILIWICK/hooks/) — Claude Code, and Codex CLI for
   shadow: `~/.bailiwick/captures/<repo-key>/`) — promotion rides the standard capture→curate
   human gate; writes no knowledge itself. Complement to `/enrich` (instruction files vs knowledge
   candidates). Codex wrapper: `$bailiwick-learn`.
+- **`/lead`** ($BAILIWICK/skills/lead/) — explicit team execution: the main session coordinates
+  the Quality Workflow through native stage subagents with stated dependencies, independent review,
+  and an execution table of what actually ran; unavailable delegation is disclosed as inline
+  fallback. Adds Memory Query and Quality to the stage matrix's rows. Authorizes orchestration only, not
+  commits, high-impact actions, or knowledge promotion. Codex wrapper: `$bailiwick-lead`.
 - **`/sign`** ($BAILIWICK/skills/sign/) — create a **GPG-signed** commit end to end: scope the change,
   draft a Conventional Commits message to `.git/`, pre-flight it against the attribution rule, handle
   the pinentry unlock handshake, commit with `-S`, and verify `%G?` is actually `G`. Two silent

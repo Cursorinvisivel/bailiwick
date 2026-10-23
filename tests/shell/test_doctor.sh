@@ -13,7 +13,8 @@ SETTINGS="$T_SANDBOX/claude-settings.json"
 
 own_settings() {  # settings whose hooks run from THIS instance
   cat > "$SETTINGS" <<EOF
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "python3 $INST/hooks/capture_session.py" } ] } ] } }
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "python3 $INST/hooks/capture_session.py" } ] } ],
+             "PreToolUse": [ { "matcher": "WebFetch", "hooks": [ { "type": "command", "command": "python3 $INST/hooks/fetch_guard.py" } ] } ] } }
 EOF
 }
 doctor() { CLAUDE_SETTINGS="$SETTINGS" bash "$INST/scripts/doctor.sh" 2>&1; }
@@ -34,6 +35,41 @@ out="$(doctor)"; rc=$?
 assert_exit "healthy -> exit 0" 0 "$rc"
 assert_contains "hook wiring passes" "execute this clone" "$out"
 assert_contains "config recognised" "role: satellite, machine: doctest" "$out"
+assert_not_contains "fetch guard counted as installed" "fetch guard hook not installed" "$out"
+
+echo "== a pre-fetch-guard install is degraded (warn), not broken"
+cat > "$SETTINGS" <<EOF
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "python3 $INST/hooks/capture_session.py" } ] } ] } }
+EOF
+out="$(doctor)"; rc=$?
+assert_exit "missing fetch guard still exits 0" 0 "$rc"
+assert_contains "warns about the missing fetch guard" "fetch guard hook not installed" "$out"
+
+echo "== a hook script that no longer exists is BROKEN (exit 1) — Claude Code blocks the tool"
+cat > "$SETTINGS" <<EOF
+{ "hooks": { "PreToolUse": [ { "matcher": "WebFetch", "hooks": [ { "type": "command", "command": "python3 -I $T_SANDBOX/moved-away/hooks/fetch_guard.py" } ] } ] } }
+EOF
+out="$(doctor)"; rc=$?
+assert_exit "missing hook script -> exit 1" 1 "$rc"
+assert_contains "names the missing script" "moved-away/hooks/fetch_guard.py" "$out"
+own_settings
+
+echo "== fetch guard canary: both installed layers must refuse an off-registry URL"
+out="$(doctor)"; rc=$?
+assert_contains "global layer enforces the registry" "refuses off-registry URLs: global settings hook" "$out"
+assert_contains "missing launcher is flagged" "freshness fetch launcher missing" "$out"
+python3 "$INST/hooks/install_hooks.py" "$T_SANDBOX/scratch-settings.json" "$INST/hooks/settings.template.json" >/dev/null
+out="$(doctor)"; rc=$?
+assert_exit "both layers enforcing -> exit 0" 0 "$rc"
+assert_contains "launcher layer enforces the registry" "refuses off-registry URLs: agent-scoped launcher" "$out"
+assert_not_contains "launcher no longer missing" "freshness fetch launcher missing" "$out"
+[ ! -e "$BAILIWICK_HOME/guardrail-audit.log" ]; assert_exit "canary leaves the real audit log untouched" 0 "$?"
+cp "$INST/skills/curate/references/gcp-sources.json" "$T_SANDBOX/sources.bak"
+echo '{' > "$INST/skills/curate/references/gcp-sources.json"
+out="$(doctor)"; rc=$?
+assert_exit "a guard that denies everything is BROKEN (exit 1)" 1 "$rc"
+assert_contains "names the non-enforcing guard" "not enforcing the registry" "$out"
+cp "$T_SANDBOX/sources.bak" "$INST/skills/curate/references/gcp-sources.json"
 
 echo "== missing per-machine config is only degraded (warn), not broken"
 rm "$INST/.bailiwick-sync.json"
@@ -139,6 +175,22 @@ out="$(BW_DOCTOR_STALE_DAYS=0 doctor)"; rc=$?
 unset GH_STUB_PR_LIST GH_STUB_PR_MERGEABLE
 assert_exit "stale mergeable PR -> exit 0" 0 "$rc"
 assert_contains "asks whether a central exists" "is there an active central" "$out"
+
+echo "== on sync/<machine> awaiting its merge is expected (#37), not a stall"
+git -C "$INST" checkout -q sync/doctest
+export GH_STUB_PR_LIST="9" GH_STUB_PR_MERGEABLE="MERGEABLE"
+out="$(doctor)"; rc=$?
+assert_exit "awaiting merge -> exit 0" 0 "$rc"
+assert_contains "explains SessionStart will return it to main" "awaiting its PR merge" "$out"
+
+echo "== a clone left on any other branch has a stalled inbound sync (degraded)"
+git -C "$INST" checkout -q -b feature
+out="$(doctor)"; rc=$?
+unset GH_STUB_PR_LIST GH_STUB_PR_MERGEABLE
+assert_exit "off-main clone -> exit 0 (warn)" 0 "$rc"
+assert_contains "names the stall and the fix" "not main" "$out"
+assert_contains "gives the recovery command" "git checkout main && git merge --ff-only origin/main" "$out"
+git -C "$INST" checkout -q main && git -C "$INST" branch -q -D feature
 
 echo "== central sweeps OTHER machines' parked branches too"
 cat > "$INST/.bailiwick-sync.json" <<'EOF'

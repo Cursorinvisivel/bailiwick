@@ -82,23 +82,48 @@ EOF
 fi
 
 # --- Inbound knowledge sync: keep the Bailiwick clone current (ff-only, throttled, non-fatal) ---
+# Bounded run: stock macOS has no GNU `timeout`, and a bare `timeout …` there failed every inbound
+# fetch (exit 127 -> return), so macOS satellites never synced. perl's alarm survives exec.
+_bw_bounded() {  # <secs> <cmd…>
+  if command -v timeout >/dev/null 2>&1; then timeout "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$@"
+  elif command -v perl >/dev/null 2>&1; then perl -e 'alarm shift @ARGV; exec @ARGV or exit 127' "$@"
+  else shift; "$@"
+  fi
+}
+_bw_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }  # GNU | BSD
 sync_inbound() {
   command -v git >/dev/null 2>&1 || return 0
   git -C "$BAILIWICK_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
   local fh now last branch behind dirty
   fh="$(git -C "$BAILIWICK_ROOT" rev-parse --git-path FETCH_HEAD 2>/dev/null || echo '')"
   now="$(date +%s)"; last=0
-  [ -n "$fh" ] && [ -f "$BAILIWICK_ROOT/$fh" ] && last="$(stat -c %Y "$BAILIWICK_ROOT/$fh" 2>/dev/null || echo 0)"
-  [ -n "$fh" ] && [ -f "$fh" ] && last="$(stat -c %Y "$fh" 2>/dev/null || echo "$last")"
+  [ -n "$fh" ] && [ -f "$BAILIWICK_ROOT/$fh" ] && last="$(_bw_mtime "$BAILIWICK_ROOT/$fh")"
+  # An absolute git-path (worktrees) is used as-is. A relative one must NOT be: it would resolve
+  # against the session's cwd — the project repo — whose fresh FETCH_HEAD silently skipped this fetch.
+  case "$fh" in /*) [ -f "$fh" ] && last="$(_bw_mtime "$fh")" ;; esac
   if [ $(( now - last )) -gt 1800 ]; then
-    timeout 8 git -C "$BAILIWICK_ROOT" fetch origin main --quiet >/dev/null 2>&1 || return 0
+    _bw_bounded 8 git -C "$BAILIWICK_ROOT" fetch origin main --quiet >/dev/null 2>&1 || return 0
   fi
   branch="$(git -C "$BAILIWICK_ROOT" symbolic-ref --short -q HEAD || echo DETACHED)"
+  dirty="$(git -C "$BAILIWICK_ROOT" status --porcelain 2>/dev/null | head -1)"
+  # Self-heal (#37): sync_knowledge.sh leaves a satellite checked out on sync/<machine>. Once
+  # central has merged it (bw_sync_merged: by SHA, patch, or squashed content) return to main,
+  # or this clone never fast-forwards again. Runs before the behind-count check: a rebase-merged
+  # branch can sit level with origin/main.
+  case "$branch" in
+    sync/*)
+      if [ -z "$dirty" ] && command -v bw_sync_merged >/dev/null 2>&1 \
+         && bw_sync_merged "$BAILIWICK_ROOT" \
+         && git -C "$BAILIWICK_ROOT" checkout -q main 2>/dev/null; then
+        printf '\n[bailiwick] %s is merged into origin/main — switched the framework clone back to main.\n' "$branch"
+        branch="main"
+      fi ;;
+  esac
   behind="$(git -C "$BAILIWICK_ROOT" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
   [ "${behind:-0}" -eq 0 ] && return 0
-  dirty="$(git -C "$BAILIWICK_ROOT" status --porcelain 2>/dev/null | head -1)"
   if [ "$branch" = "main" ] && [ -z "$dirty" ]; then
-    if timeout 8 git -C "$BAILIWICK_ROOT" merge --ff-only --quiet origin/main >/dev/null 2>&1; then
+    if _bw_bounded 8 git -C "$BAILIWICK_ROOT" merge --ff-only --quiet origin/main >/dev/null 2>&1; then
       printf '\n[bailiwick] Knowledge library updated: fast-forwarded %s commit(s) from origin/main.\n' "$behind"
     else
       printf '\n[bailiwick] Knowledge library is %s commit(s) behind origin/main (auto-ff failed). Pull when ready.\n' "$behind"

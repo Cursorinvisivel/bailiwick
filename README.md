@@ -8,7 +8,7 @@
 coding agents — with runtime guardrails so an agent that acts on it stays within your rules.**
 
 A *bailiwick* is the domain you're responsible for — your area of authority and expertise. Bailiwick
-gives an AI coding agent — Claude Code, Codex, Gemini, or GitHub Copilot — a persistent, curated
+gives an AI coding agent — Claude Code, Codex, Antigravity, or GitHub Copilot — a persistent, curated
 **memory** of how your domain works: the conventions, patterns, and hard-won context you'd otherwise
 re-explain every session. Because an agent with that memory acts with more initiative, Bailiwick
 pairs it with **runtime guardrails** as containment. It's plain Markdown + Python + shell: no
@@ -53,7 +53,7 @@ runtime service:
   knowledge unreviewed, and nothing is lost if you skip a cycle.
 - **Guardrails that are real, not advice.** A pre-execution hook intercepts high-impact commands
   (apply/destroy, cluster/cloud mutations, `rm -rf`, `git merge`, commit/push/PR): an in-the-moment
-  confirmation under Claude Code & Gemini CLI, a hard deny with an auditable break-glass under Codex.
+  confirmation under Claude Code & Antigravity, a hard deny with an auditable break-glass under Codex.
   Nothing dangerous runs on agent initiative.
 
 ## Quick start
@@ -96,9 +96,21 @@ Windows PowerShell mirrors every flag with a single dash: `bootstrap.ps1 -Instal
 👉 **Full walkthrough** — prerequisites, verification, and your first knowledge cycle — in
 **[docs/getting-started.md](docs/getting-started.md)**.
 
-**Also included** (all covered in [Operations](docs/operations.md)): seven skills — `/curate`,
+**Also included** (all covered in [Operations](docs/operations.md)): eight skills — `/lead`, `/curate`,
 `/enrich`, `/learn`, `/metrics`, `/investigate`, `/purge`, `/sign` — plus an optional encrypted off-machine
 capture backup and multi-machine central/satellite sync over plain git.
+
+For explicit team execution, use **`/lead`** (Codex: **`$bailiwick-lead`**). The shared
+[Lead skill](skills/lead/SKILL.md) requires applicable stages, review, and an execution report.
+Gemini, Copilot, Antigravity, and other hosts can follow the same file by reference; native
+delegation depends on the current runtime, with any inline fallback disclosed. See
+[Lead operations](docs/operations.md#6-explicit-team-execution-lead).
+
+Periodic curation (`/curate periodic`; Codex: `$bailiwick-curate periodic`) also checks selected
+GCP knowledge against an indexed allowlist of official release notes and documentation. The bounded
+research produces a report for later human approval; it never updates knowledge automatically.
+Native research can run alongside capture processing within the active session; other hosts disclose
+sequential/inline fallback. See [GCP freshness operations](docs/operations.md#7-periodic-gcp-knowledge-freshness).
 
 ## Supported tools
 
@@ -107,8 +119,8 @@ One Markdown knowledge base and role set, adapted to four tools of differing com
 | Tool | Capture | Dangerous-command control |
 |---|---|---|
 | **Claude Code** (fullest) | Automatic (hooks) | **Enforced** — PreToolUse |
-| **Codex CLI** | Manual | **Enforced** — PreToolUse (deny + break-glass; one-time trust) |
-| **Gemini CLI** | Manual | **Enforced** — BeforeTool |
+| **Codex CLI** | Automatic (Stop/SessionEnd) | **Enforced** — PreToolUse (deny + break-glass; one-time trust) |
+| **Antigravity CLI** | Automatic (Stop) | **Enforced** — PreToolUse (ask tiers) |
 | **GitHub Copilot** | Manual | Policy only |
 
 The honest per-adapter differences and the versions each is verified against:
@@ -156,9 +168,10 @@ A map of the whole set is in **[docs/README.md](docs/README.md)**.
 
 ```
 knowledge/   INDEX.md · topics/ patterns/ context/ templates/ · .telemetry.json
-agents/      role definitions (lead orchestrator + 5 domain-context + 7 Quality Workflow stages)
+definitions/ per-client document build specs for a documentation tool (ADR-011; empty in the public repo)
+agents/      role definitions (lead orchestrator + 5 domain-context + 7 Quality Workflow stages + a fetch-only freshness variant)
 hooks/       guardrail + capture + sync + health hooks, and the installers
-skills/      /curate · /enrich · /learn · /metrics · /investigate · /purge · /sign  (+ codex-skills/ wrappers)
+skills/      /lead · /curate · /enrich · /learn · /metrics · /investigate · /purge · /sign  (+ codex-skills/ wrappers)
 scripts/     bootstrap.sh · bootstrap.ps1  (repo onboarding) · doctor.sh (wiring preflight)
 docs/        this documentation set · decisions/ (framework ADRs)
 ```

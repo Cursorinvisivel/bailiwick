@@ -29,6 +29,14 @@ surface is small and specific:
   scripts, shell aliases/functions, or MCP tool calls. It fails *open* on internal error except when
   a destructive pre-filter trips (then it fails *closed*). Do not rely on it as a sandbox. See
   `docs/threat-model.md`.
+- **The freshness fetch guard** (`hooks/fetch_guard.py`) — denies WebFetch calls from the
+  `/curate` freshness research agent that fall outside the GCP source registry, in two layers: the
+  agent's own frontmatter hook (blocks all of that agent's fetches if its launcher is missing) and
+  a global hook keyed on the payload's `agent_type`. It fails closed on errors inside the script,
+  but open if the script cannot run (no interpreter, crash, timeout). `doctor.sh` exercises both
+  installed layers; `scripts/smoke_fetch_guard.sh` checks them live. It checks the requested URL only (not
+  same-host redirects the fetch tool follows) and covers that one agent under Claude Code — not
+  the general Cloud Research agent used as a fallback, and not other runtimes.
 - **Capture & backup** (`capture_backup.sh`) — optional off-machine backup of session transcripts.
   Only ciphertext leaves the machine (gpg); the private key never does. Transcripts may contain
   sensitive data — treat the local `.bailiwick-outputs/` zone accordingly.

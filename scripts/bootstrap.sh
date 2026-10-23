@@ -31,8 +31,8 @@ Modes (SHADOW is the DEFAULT):
                    framework for <repo> WITHOUT writing ANY files into it. Adds the repo root to
                    ~/.bailiwick/allowlist and registers global user-scope MCP (Claude Code);
                    captures stage centrally under ~/.bailiwick/captures/. Ideal for a client
-                   clone you must leave untouched. With --with-agents / --with-gemini it ALSO
-                   injects global Codex / Gemini MCP (~/.codex/config.toml, ~/.gemini/settings.json;
+                   clone you must leave untouched. With --with-agents / --with-antigravity it ALSO
+                   injects global Codex / Antigravity MCP (~/.codex/config.toml, ~/.gemini/config/mcp_config.json;
                    bailiwick-* names, idempotent). --with-standards still seeds the TRACKED team
                    baselines (see below) — that is the deliberate shared path; other seeding /
                    exclude flags are ignored. Undo: delete the repo's line from the allowlist.
@@ -47,11 +47,12 @@ Options:
                    ~/.codex/AGENTS.md layer; the team's own AGENTS.md is never shadowed).
   --with-copilot   Also create .github/instructions/bailiwick.instructions.md (Copilot complement,
                    applyTo:"**" — merges with any team .github/copilot-instructions.md).
-  --with-gemini    Also generate .gemini/settings.json (Gemini MCP + advisory excludeTools) and seed
-                   the shared .bailiwick.local.md marker. Gemini reads the framework via the global
-                   ~/.gemini/GEMINI.md layer (installed by --install-tools); the team's own GEMINI.md
-                   is never shadowed. A team-tracked .gemini/settings.json is left untouched.
-  --all-tools      Shorthand for --with-agents --with-copilot --with-gemini.
+  --with-antigravity Also generate .agents/mcp_config.json (or ~/.gemini/config/mcp_config.json in shadow mode)
+                   and seed the shared .bailiwick.local.md marker. Antigravity reads the framework via the global
+                   ~/.gemini/GEMINI.md layer (installed by --install-tools); the team's own AGENTS.md/GEMINI.md
+                   is never shadowed.
+  --with-gemini    Deprecated alias for --with-antigravity (Gemini CLI sunset June 2026; removal in April 2027).
+  --all-tools      Shorthand for --with-agents --with-copilot --with-antigravity.
   --with-desktop   Only with '--install-tools': wire a knowledge-SCOPED 'bailiwick-knowledge' MCP
                    filesystem server (rooted at knowledge/ only, never the rest of the framework)
                    into Claude Desktop and ChatGPT Desktop's own MCP config — so either app can
@@ -87,9 +88,9 @@ Options:
   --install-tools  Install the once-per-machine prerequisites when missing: the
                    terraform-mcp-server and github-mcp-server binaries (via 'go install', needs go), the
                    capture/curation + guardrail hooks (merged into ~/.claude/settings.json),
-                   the global Claude skill symlinks (~/.claude/skills/: /curate, /enrich, /learn, /metrics, /investigate, /purge, /sign), the
+                   the global Claude skill symlinks (~/.claude/skills/: /lead, /curate, /enrich, /learn, /metrics, /investigate, /purge, /sign), the
                    Quality Workflow stages as native Claude Code subagents (~/.claude/agents/: bailiwick-implement, bailiwick-quality, … — ADR-010), the
-                   Codex skill symlinks (~/.codex/skills/: bailiwick-curate, bailiwick-enrich, bailiwick-learn, bailiwick-investigate, bailiwick-purge), the global
+                   Codex skill symlinks (~/.codex/skills/: bailiwick-lead, bailiwick-curate, bailiwick-enrich, bailiwick-learn, bailiwick-investigate, bailiwick-purge, bailiwick-sign), the global
                    Codex + Gemini operator layers (managed blocks in ~/.codex/AGENTS.md and
                    ~/.gemini/GEMINI.md), and, only with --with-desktop, the knowledge-scoped Claude/ChatGPT
                    Desktop knowledge-reference MCP wiring (see --with-desktop above). Idempotent — no-op for anything already present. Off by
@@ -138,7 +139,7 @@ framework is written to the tracked .gitignore, so a clone shows no trace of it.
 USAGE
 }
 
-DO_INIT=0; WITH_AGENTS=0; WITH_COPILOT=0; WITH_GEMINI=0; WITH_DESKTOP=0; FORCE=0; CLOBBER=0; VISIBLE=0; UPDATE=0; NO_GH_AUTH=0; INSTALL_TOOLS=0; WITH_STANDARDS=0; SHADOW=0; SEEDED=0; DRY_RUN=0; UNINSTALL=0; PURGE_CAPTURES=0; TARGET_ARG=""; ROLE=""; MACHINE_ARG=""
+DO_INIT=0; WITH_AGENTS=0; WITH_COPILOT=0; WITH_ANTIGRAVITY=0; WITH_GEMINI=0; WITH_DESKTOP=0; FORCE=0; CLOBBER=0; VISIBLE=0; UPDATE=0; NO_GH_AUTH=0; INSTALL_TOOLS=0; WITH_STANDARDS=0; SHADOW=0; SEEDED=0; DRY_RUN=0; UNINSTALL=0; PURGE_CAPTURES=0; TARGET_ARG=""; ROLE=""; MACHINE_ARG=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
@@ -147,8 +148,12 @@ while [ $# -gt 0 ]; do
     --init) DO_INIT=1 ;;
     --with-agents) WITH_AGENTS=1 ;;
     --with-copilot) WITH_COPILOT=1 ;;
-    --with-gemini) WITH_GEMINI=1 ;;
-    --all-tools) WITH_AGENTS=1; WITH_COPILOT=1; WITH_GEMINI=1 ;;
+    --with-antigravity) WITH_ANTIGRAVITY=1 ;;
+    --with-gemini)
+      echo "  ⚠ WARNING: --with-gemini is DEPRECATED (Gemini CLI sunset June 2026) and will be removed in April 2027 (in 6 months). Routing to --with-antigravity." >&2
+      WITH_ANTIGRAVITY=1
+      ;;
+    --all-tools) WITH_AGENTS=1; WITH_COPILOT=1; WITH_ANTIGRAVITY=1 ;;
     --with-desktop) WITH_DESKTOP=1 ;;
     --with-standards) WITH_STANDARDS=1 ;;
     --update) UPDATE=1 ;;
@@ -417,6 +422,51 @@ json.dump(d, open(f, "w", encoding="utf-8"), indent=2); open(f, "a").write("\n")
 PY
 }
 
+rm_antigravity() {
+  local cfg_dir="${GEMINI_CONFIG_DIR:-${GEMINI_HOME:-$HOME/.gemini}/config}"
+  local h="$cfg_dir/hooks.json"
+  local m="$cfg_dir/mcp_config.json"
+  if [ -f "$h" ]; then
+    if DRY; then plan "remove bailiwick-* hooks from $h"; else
+      python3 - "$h" <<'PY' || true
+import json, sys
+f = sys.argv[1]
+try: d = json.load(open(f, encoding="utf-8"))
+except Exception: sys.exit(0)
+if isinstance(d, dict):
+    changed = False
+    for k in [k for k in list(d.keys()) if k.startswith("bailiwick-")]:
+        del d[k]
+        changed = True
+    if changed:
+        json.dump(d, open(f, "w", encoding="utf-8"), indent=2); open(f, "a").write("\n")
+PY
+      echo "  cleaned: bailiwick hooks from $h"
+    fi
+  fi
+  if [ -f "$m" ]; then
+    if DRY; then plan "remove bailiwick-* MCP servers from $m"; else
+      python3 - "$m" <<'PY' || true
+import json, sys
+f = sys.argv[1]
+try: d = json.load(open(f, encoding="utf-8"))
+except Exception: sys.exit(0)
+if isinstance(d, dict):
+    srv = d.get("mcpServers")
+    if isinstance(srv, dict):
+        changed = False
+        for k in [k for k in list(srv.keys()) if k.startswith("bailiwick-")]:
+            del srv[k]
+            changed = True
+        if changed:
+            if not srv: d.pop("mcpServers", None)
+            json.dump(d, open(f, "w", encoding="utf-8"), indent=2); open(f, "a").write("\n")
+PY
+      echo "  cleaned: bailiwick MCP servers from $m"
+    fi
+  fi
+}
+
 rm_desktop_mcp() {  # <file> — drop only the bailiwick-knowledge MCP entry (everything else preserved)
   local f="$1"
   [ -n "$f" ] && [ -f "$f" ] && grep -qF "bailiwick-knowledge" "$f" 2>/dev/null || return 0
@@ -478,6 +528,14 @@ rm_allowlist() {
   else rm -f "$f" && echo "  removed: shadow allowlist $f"; fi
 }
 
+rm_fetch_launcher() {  # the fixed-path launcher install_hooks.py writes — only one targeting THIS clone
+  local f="${BAILIWICK_HOME:-$HOME/.bailiwick}/hooks/fetch_guard.py"
+  [ -f "$f" ] && grep -q "GENERATED by bailiwick" "$f" 2>/dev/null \
+    && grep -qxF "# bailiwick-launcher-target: $BAILIWICK_ROOT/hooks/fetch_guard.py" "$f" 2>/dev/null || return 0
+  if DRY; then plan "remove fetch-guard launcher $f"
+  else rm -f "$f" && echo "  removed: fetch-guard launcher $f"; fi
+}
+
 uninstall_global() {
   local codex="${CODEX_HOME:-$HOME/.codex}" gem="${GEMINI_HOME:-$HOME/.gemini}"
   echo
@@ -491,11 +549,13 @@ uninstall_global() {
   rm_block "$codex/AGENTS.md"   "<!-- BEGIN bailiwick"    "<!-- END bailiwick -->" "Codex operator layer"
   rm_block "$gem/GEMINI.md"     "<!-- BEGIN bailiwick"    "<!-- END bailiwick -->" "Gemini operator layer"
   rm_gemini_json
+  rm_antigravity
   resolve_desktop_paths
   rm_desktop_mcp "$CLAUDE_DESKTOP_CFG"
   rm_desktop_mcp "$CHATGPT_DESKTOP_CFG"
   rm_symlinks
   rm_stage_adapters
+  rm_fetch_launcher
   rm_allowlist
   echo
   echo "  Left intact by design: this clone (delete the directory to remove it fully); your captures,"
@@ -538,6 +598,7 @@ f, keep = sys.argv[1], sys.argv[2] == "1"
 mark = "# bailiwick framework wiring (local-only — never shared)"
 ours = {".bailiwick-outputs/", ".mcp.json", ".vscode/mcp.json", "CLAUDE.local.md",
         ".bailiwick.local.md", ".codex/config.toml", ".gemini/settings.json",
+        ".agents/mcp_config.json",
         ".github/instructions/bailiwick.instructions.md"}
 keep_note = "# bailiwick: kept — uncurated plaintext captures still present (see --purge-captures)"
 if keep:  # captures survive the uninstall, so their ignore rule must survive with them
@@ -606,9 +667,10 @@ uninstall_repo() {  # <target>
   rm_seeded_file "$abs" ".vscode/mcp.json"                              "$BAILIWICK_ROOT"
   rm_seeded_file "$abs" ".codex/config.toml"                            "$BAILIWICK_ROOT"
   rm_seeded_file "$abs" ".gemini/settings.json"                         "$BAILIWICK_ROOT"
+  rm_seeded_file "$abs" ".agents/mcp_config.json"                       "$BAILIWICK_ROOT"
   rm_seeded_file "$abs" ".github/instructions/bailiwick.instructions.md" ""
   if ! DRY; then  # prune dirs we may have emptied (never forced; ignored if non-empty or absent)
-    for d in ".vscode" ".codex" ".github/instructions" ".github"; do rmdir "$abs/$d" 2>/dev/null || true; done
+    for d in ".vscode" ".codex" ".agents" ".github/instructions" ".github"; do rmdir "$abs/$d" 2>/dev/null || true; done
   fi
   # Captures FIRST: uninstalling must never un-hide plaintext transcripts it deliberately preserves.
   # warn_repo_captures returns 0 when .bailiwick-outputs/ survives, and strip_repo_exclude then keeps
@@ -873,11 +935,38 @@ if [ "$SHADOW" -eq 1 ]; then
   fi
 
   if command -v claude >/dev/null 2>&1; then
-    sh_mcp() {  # $1=name; shift; command…  — idempotent, non-fatal (never breaks the run)
-      local n="$1"; shift
+    sh_mcp() {  # $1=name; shift; command…  — convergent, non-fatal (never breaks the run)
+      local n="$1" cur; shift
       if DRY; then plan "register user MCP '$n' (claude mcp add --scope user)"; return 0; fi
       if claude mcp list 2>/dev/null | grep -qE "(^|[[:space:]])$n([[:space:]]|:|$)"; then
-        echo "  mcp(user): $n already registered"; return 0
+        # Convergent (#36): a name match alone is not "done" — a definition registered before a
+        # change (e.g. the mcp<2 pin) would never be updated, and doctor's remediation would loop.
+        # Reconcile only the USER-scope entry (top-level mcpServers); another scope is left alone.
+        cur="$(python3 - "${CLAUDE_CONFIG:-$HOME/.claude.json}" "$n" "$@" 2>/dev/null <<'PY'
+import json, sys
+cfg, name, want = sys.argv[1], sys.argv[2], sys.argv[3:]
+try:
+    s = (json.load(open(cfg)).get("mcpServers") or {}).get(name)
+except Exception:
+    s = None
+if isinstance(s, dict):  # SAME, or the old definition (JSON) to restore if re-adding fails
+    print("SAME" if [s.get("command")] + list(s.get("args") or []) == want else json.dumps(s))
+PY
+)"
+        case "$cur" in
+          SAME) echo "  mcp(user): $n already registered (up to date)" ;;
+          "") echo "  mcp(user): $n already registered" ;;
+          *)
+            if claude mcp remove --scope user "$n" >/dev/null 2>&1 \
+               && claude mcp add --scope user "$n" -- "$@" >/dev/null 2>&1; then
+              echo "  mcp(user): $n definition changed — re-registered"
+            else
+              claude mcp list 2>/dev/null | grep -qE "(^|[[:space:]])$n([[:space:]]|:|$)" \
+                || claude mcp add-json --scope user "$n" "$cur" >/dev/null 2>&1 || true
+              echo "  mcp(user): could not re-register $n — run: claude mcp remove --scope user $n && claude mcp add --scope user $n -- $*"
+            fi ;;
+        esac
+        return 0
       fi
       if claude mcp add --scope user "$n" -- "$@" >/dev/null 2>&1; then
         echo "  mcp(user): registered $n"
@@ -898,12 +987,12 @@ if [ "$SHADOW" -eq 1 ]; then
     echo "      claude mcp add --scope user bailiwick-filesystem -- npx -y @modelcontextprotocol/server-filesystem \"$BAILIWICK_ROOT\""
   fi
 
-  # Optional GLOBAL MCP for Codex / Gemini, opted in per tool via --with-agents / --with-gemini.
+  # Optional GLOBAL MCP for Codex / Antigravity, opted in per tool via --with-agents / --with-antigravity.
   # Uses bailiwick-* server names (never collides with your own) and github is omitted (per-repo token).
-  if [ "$WITH_GEMINI" -eq 1 ] && command -v python3 >/dev/null 2>&1; then
-    GEM="${GEMINI_HOME:-$HOME/.gemini}/settings.json"
-    if DRY; then plan "merge bailiwick-* MCP servers into $GEM"; else mkdir -p "$(dirname "$GEM")"
-    if python3 - "$GEM" "$SH_ROOTS_JSON" "$GH_SHADOW_SH" <<'PY'
+  if [ "$WITH_ANTIGRAVITY" -eq 1 ] && command -v python3 >/dev/null 2>&1; then
+    AGY_MCP="${GEMINI_CONFIG_DIR:-${GEMINI_HOME:-$HOME/.gemini}/config}/mcp_config.json"
+    if DRY; then plan "merge bailiwick-* MCP servers into $AGY_MCP"; else mkdir -p "$(dirname "$AGY_MCP")"
+    if python3 - "$AGY_MCP" "$SH_ROOTS_JSON" "$GH_SHADOW_SH" <<'PY'
 import json, os, sys
 dest, frag, gh = sys.argv[1], sys.argv[2], sys.argv[3]
 roots = json.loads("[" + frag + "]")
@@ -919,7 +1008,7 @@ if gh:
     srv["bailiwick-github"] = {"command": "sh", "args": ["-c", gh]}
 json.dump(d, open(dest, "w"), indent=2); open(dest, "a").write("\n")
 PY
-    then echo "  mcp(gemini): merged bailiwick-* servers into $GEM"; else echo "  mcp(gemini): could not update $GEM — edit by hand"; fi
+    then echo "  mcp(antigravity): merged bailiwick-* servers into $AGY_MCP"; else echo "  mcp(antigravity): could not update $AGY_MCP — edit by hand"; fi
     fi
   fi
   if [ "$WITH_AGENTS" -eq 1 ]; then
@@ -974,10 +1063,10 @@ Next:
   • Claude Code : hooks must be installed once globally — run '$0 --install-tools' (global-only,
       no target needed; or merge settings.template.json). SessionStart now activates on the
       allowlist; captures stage centrally under ${BW_HOME}/captures/<repo>/ — the repo stays clean.
-  • Codex/Gemini: install/refresh the global operator layers (--install-tools) — they now activate on
+  • Codex/Antigravity: install/refresh the global operator layers (--install-tools) — they now activate on
       ~/.bailiwick/allowlist (or BAILIWICK_SHADOW=1), no marker needed, and read the framework by
       path natively. Global filesystem/fetch/terraform MCP servers are injected by --with-agents /
-      --with-gemini (above), plus account-aware bailiwick-github when a usable gh account resolved
+      --with-antigravity (above), plus account-aware bailiwick-github when a usable gh account resolved
       (override > github_account_map > access probe; skipped with --no-gh-auth).
   • Copilot (VS Code): user-scope MCP via "MCP: Open User Configuration"; user instructions are
       build-dependent (VS Code #304101). See FRAMEWORK.md §7.1.
@@ -1091,14 +1180,15 @@ EOF
 #                 VS Code only; the GitHub-hosted Copilot cloud agent cannot see untracked files.
 copy_seeded "$BAILIWICK_ROOT/knowledge/templates/project-claude-md-template.md" "CLAUDE.local.md"
 # On --update, refresh whatever complement/config already exists (detect per tool).
-SEED_MARKER=0; GEMINI_GENERATED=0
+SEED_MARKER=0; GEMINI_GENERATED=0; ANTIGRAVITY_GENERATED=0
 if [ "$UPDATE" -eq 1 ] && [ -e "$TARGET/.bailiwick.local.md" ]; then SEED_MARKER=1; fi
 if [ "$UPDATE" -eq 1 ] && [ -e "$TARGET/.codex/config.toml" ]; then WITH_AGENTS=1; fi
-if [ "$UPDATE" -eq 1 ] && [ -e "$TARGET/.gemini/settings.json" ] && ! is_tracked ".gemini/settings.json"; then WITH_GEMINI=1; fi
+if [ "$UPDATE" -eq 1 ] && [ -e "$TARGET/.agents/mcp_config.json" ]; then WITH_ANTIGRAVITY=1; fi
+if [ "$UPDATE" -eq 1 ] && [ -e "$TARGET/.gemini/settings.json" ] && ! is_tracked ".gemini/settings.json"; then WITH_ANTIGRAVITY=1; fi
 if [ "$UPDATE" -eq 1 ] && [ -e "$TARGET/.github/instructions/bailiwick.instructions.md" ]; then WITH_COPILOT=1; fi
 
-# Shared private marker — read by BOTH Codex (via ~/.codex/AGENTS.md) and Gemini (via ~/.gemini/GEMINI.md).
-if [ "$WITH_AGENTS" -eq 1 ] || [ "$WITH_GEMINI" -eq 1 ] || [ "$SEED_MARKER" -eq 1 ]; then
+# Shared private marker — read by BOTH Codex (via ~/.codex/AGENTS.md) and Antigravity (via ~/.gemini/GEMINI.md).
+if [ "$WITH_AGENTS" -eq 1 ] || [ "$WITH_ANTIGRAVITY" -eq 1 ] || [ "$WITH_GEMINI" -eq 1 ] || [ "$SEED_MARKER" -eq 1 ]; then
   copy_seeded "$BAILIWICK_ROOT/knowledge/templates/project-agents-md-template.md" ".bailiwick.local.md"
 fi
 if [ "$WITH_AGENTS" -eq 1 ]; then
@@ -1127,12 +1217,34 @@ command = "terraform-mcp-server"
 args = ["stdio"]
 EOF
 fi
+if [ "$WITH_ANTIGRAVITY" -eq 1 ]; then
+  # Antigravity project MCP lives in .agents/mcp_config.json
+  mkdir -p "$TARGET/.agents"
+  write_managed ".agents/mcp_config.json" <<EOF
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", ${MCP_ROOTS}]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["--with", "mcp<2", "mcp-server-fetch"]
+    },
+    "github": {
+      ${GH_BLOCK_MCP}
+    },
+    "terraform": {
+      "command": "terraform-mcp-server",
+      "args": ["stdio"]
+    }
+  }
+}
+EOF
+  ANTIGRAVITY_GENERATED=1
+fi
 if [ "$WITH_GEMINI" -eq 1 ]; then
-  # Gemini MCP lives in .gemini/settings.json (one file for Gemini CLI + Code Assist VS Code agent).
-  # Google documents it as committable/shared, so a TEAM-TRACKED settings.json is LEFT UNTOUCHED
-  # (skip + warn) — we never clobber it. excludeTools is ADVISORY ONLY: Google calls command-specific
-  # shell restriction "simple string matching", "easily bypassed", "not a security mechanism". The
-  # real control is NOT enabling geminicodeassist.agentYoloMode (keep the approval dialog).
+  # Legacy Gemini MCP in .gemini/settings.json
   if is_tracked ".gemini/settings.json"; then
     echo "  skip (tracked by repo — left untouched; merge framework MCP by hand): .gemini/settings.json"
   else
@@ -1201,8 +1313,9 @@ if [ "$VISIBLE" -ne 1 ]; then
   add_excl ".mcp.json"
   add_excl ".vscode/mcp.json"
   add_excl "CLAUDE.local.md"
-  if [ "$WITH_AGENTS" -eq 1 ] || [ "$WITH_GEMINI" -eq 1 ]; then add_excl ".bailiwick.local.md"; fi
+  if [ "$WITH_AGENTS" -eq 1 ] || [ "$WITH_ANTIGRAVITY" -eq 1 ] || [ "$WITH_GEMINI" -eq 1 ]; then add_excl ".bailiwick.local.md"; fi
   if [ "$WITH_AGENTS" -eq 1 ]; then add_excl ".codex/config.toml"; fi
+  if [ "$ANTIGRAVITY_GENERATED" -eq 1 ]; then add_excl ".agents/mcp_config.json"; fi
   if [ "$GEMINI_GENERATED" -eq 1 ]; then add_excl ".gemini/settings.json"; fi
   if [ "$WITH_COPILOT" -eq 1 ]; then add_excl ".github/instructions/bailiwick.instructions.md"; fi
   echo "  hidden: framework complement files excluded via .git/info/exclude (team's standard files untouched)"
@@ -1227,7 +1340,8 @@ if [ "$DRY_RUN" -eq 1 ] && [ "$INSTALL_TOOLS" -eq 1 ]; then
   echo "  [dry-run] --install-tools would, when a piece is missing:"
   echo "    • go install terraform-mcp-server + github-mcp-server (needs 'go')"
   echo "    • merge capture + guardrail hooks into ~/.claude/settings.json (install_hooks.py)"
-  echo "    • wire the guardrail into ~/.codex/config.toml + ~/.gemini/settings.json (install_adapter_hooks.py)"
+  echo "    • write the fetch-guard launcher \$BAILIWICK_HOME/hooks/fetch_guard.py (install_hooks.py)"
+  echo "    • wire the guardrail into ~/.codex/config.toml + ~/.gemini/config/hooks.json (install_adapter_hooks.py)"
   echo "    • symlink skills into ~/.claude/skills/ and ~/.codex/skills/"
   echo "    • symlink Quality Workflow stages into ~/.claude/agents/ (native subagents, ADR-010)"
   echo "    • generate multi-tool stage adapters: ~/.gemini/agents/, ~/.codex/agents/ (TOML), ~/.copilot/agents/"
@@ -1302,7 +1416,9 @@ HOOK_TMPL="$BAILIWICK_ROOT/hooks/settings.template.json"
 # --install-tools skip the merge and report ✓ while the OLD clone's code stayed live (doctor.sh's
 # "hooks execute a DIFFERENT clone" ✗). install_hooks.py migrates such an install to here.
 hooks_present() { [ -f "$USER_SETTINGS" ] && grep -qF "$BAILIWICK_ROOT/hooks/capture_session.py" "$USER_SETTINGS" 2>/dev/null; }
-if ! hooks_present && [ "$INSTALL_TOOLS" -eq 1 ] && command -v python3 >/dev/null 2>&1 && [ -f "$HOOK_TMPL" ]; then
+# The merge is idempotent (PRESENT when nothing changed), so --install-tools always runs it: gating
+# on hooks_present left machines without any hook added to the template after their first install.
+if [ "$INSTALL_TOOLS" -eq 1 ] && command -v python3 >/dev/null 2>&1 && [ -f "$HOOK_TMPL" ]; then
   echo "  --install-tools: merging capture/curation hooks into ~/.claude/settings.json…"
   python3 "$BAILIWICK_ROOT/hooks/install_hooks.py" "$USER_SETTINGS" "$HOOK_TMPL" 2>&1 | sed 's/^/    /' || true
 fi
@@ -1311,7 +1427,7 @@ fi
 # same scripts Claude Code runs). All self-gating to wired/shadow repos — see
 # hooks/install_adapter_hooks.py.
 if [ "$INSTALL_TOOLS" -eq 1 ] && command -v python3 >/dev/null 2>&1; then
-  echo "  --install-tools: wiring Codex hooks (guardrail PreToolUse + capture Stop/SessionEnd) and the Gemini guardrail (BeforeTool)…"
+  echo "  --install-tools: wiring Codex hooks (PreToolUse/Stop/SessionEnd) and Antigravity hooks (PreToolUse/Stop)…"
   python3 "$BAILIWICK_ROOT/hooks/install_adapter_hooks.py" 2>&1 | sed 's/^/    /' || true
 fi
 if hooks_present; then
@@ -1343,7 +1459,7 @@ else
 fi
 
 # Quality Workflow stages as NATIVE Claude Code subagents (ADR-010) — GLOBAL, like the skills:
-# every agents/*.md carrying `name:` frontmatter (the 7 stages) is symlinked into
+# every agents/*.md carrying `name:` frontmatter (the 7 stages + the freshness variant) is symlinked into
 # ~/.claude/agents/<name>.md. lead.md (the orchestrator = the main session) and the 5 domain
 # context files have no frontmatter and are deliberately NOT installed. Never seeded per-repo —
 # shadow mode stays zero-footprint; activation is this user-scope install.
@@ -1371,7 +1487,11 @@ fi
 # Gemini (~/.gemini/agents/<name>.md), Codex (~/.codex/agents/<name>.toml) and Copilot
 # (~/.copilot/agents/<name>.agent.md), produced from the canonical frontmattered agents/*.md.
 # The Claude-specific `tools:` field is dropped (each tool's defaults apply); a canonical toolset
-# without Edit/Write maps to Codex `sandbox_mode = "read-only"`. Regenerated on every
+# without Edit/Write maps to Codex `sandbox_mode = "read-only"`. Stage sizing (ADR-010 Amendment 2):
+# `model:` is Claude-specific and never translated (other hosts inherit the session model);
+# `effort:` maps to Codex `model_reasoning_effort` and Copilot `reasoning-effort`. A Codex agent
+# file overrides spawn-time values, so a task-sized stage (`model: inherit`) omits effort there and
+# the Lead passes it at spawn. Gemini has no effort field. Regenerated on every
 # --install-tools run; a same-name file WITHOUT the GENERATED marker is never overwritten.
 if [ "$INSTALL_TOOLS" -eq 1 ]; then
   if command -v python3 >/dev/null 2>&1; then
@@ -1390,23 +1510,28 @@ for fn in sorted(os.listdir(os.path.join(root, "agents"))):
         continue
     end = text.index("\n---\n", 4)
     fm, body = text[4:end], text[end + 5:]
-    fields = dict(re.findall(r"^(name|description|tools):[ \t]*(.+)$", fm, re.M))
+    fields = dict(re.findall(r"^(name|description|tools|model|effort):[ \t]*(.+)$", fm, re.M))
     name, desc = fields.get("name"), fields.get("description")
     if not name or not desc:
         continue
     tools = fields.get("tools", "")
     read_only = bool(tools) and not re.search(r"\b(Edit|Write)\b", tools)
+    effort = fields.get("effort", "").strip()
+    task_sized = fields.get("model", "").strip() == "inherit"
     note = "%s from $BAILIWICK/agents/%s -- edit the source and re-run --install-tools; do not edit here." % (MARK, fn)
     md_adapter = "---\n# %s\nname: %s\ndescription: %s\n---\n%s" % (note, name, desc, body)
+    copilot_adapter = "---\n# %s\nname: %s\ndescription: %s\n%s---\n%s" % (
+        note, name, desc, ("reasoning-effort: %s\n" % effort) if effort else "", body)
     toml_desc = desc.replace("\\", "\\\\").replace('"', '\\"')
     toml_adapter = ("# %s\n" % note
                     + 'name = "%s"\n' % name
                     + 'description = "%s"\n' % toml_desc
                     + ('sandbox_mode = "read-only"\n' if read_only else "")
+                    + ('model_reasoning_effort = "%s"\n' % effort if effort and not task_sized else "")
                     + 'developer_instructions = """\n%s\n"""\n' % body.replace('"""', '\\"\\"\\"'))
     outs = [
         (os.path.join(home, ".gemini", "agents", name + ".md"), md_adapter),
-        (os.path.join(home, ".copilot", "agents", name + ".agent.md"), md_adapter),
+        (os.path.join(home, ".copilot", "agents", name + ".agent.md"), copilot_adapter),
         (os.path.join(codex_home, "agents", name + ".toml"), toml_adapter),
     ]
     for dest, content in outs:
@@ -1462,12 +1587,12 @@ done
 if [ "$_codex_skill_total" -eq 0 ]; then
   CODEX_SKILL_STATUS="✗ no Codex skills found in \$BAILIWICK/codex-skills"
 elif [ "$_codex_skill_missing" -eq 0 ]; then
-  CODEX_SKILL_STATUS="✓ ${_codex_skill_total} Codex skill(s) linked globally (~/.codex/skills/: bailiwick-curate, bailiwick-enrich, …)"
+  CODEX_SKILL_STATUS="✓ ${_codex_skill_total} Codex skill(s) linked globally (~/.codex/skills/: bailiwick-lead, bailiwick-curate, bailiwick-enrich, …)"
 else
   CODEX_SKILL_STATUS="✗ ${_codex_skill_missing}/${_codex_skill_total} Codex skills not linked — re-run with --install-tools, or symlink each dir under \$BAILIWICK/codex-skills/ into ~/.codex/skills/"
 fi
 
-# Codex & Gemini private operator layers are GLOBAL (once per machine): a managed block in
+# Codex & Antigravity private operator layers are GLOBAL (once per machine): a managed block in
 # ~/.codex/AGENTS.md and ~/.gemini/GEMINI.md that activates per-repo when a repo carries the untracked
 # .bailiwick.local.md marker. Each loads BEFORE the repo's own file (so the team file keeps
 # precedence) and never shadows it. One generic installer (install_global_layer.sh) serves both.
@@ -1478,8 +1603,8 @@ layer_present() { [ -f "$1" ] && grep -qF "BEGIN bailiwick" "$1" 2>/dev/null; }
 if [ "$INSTALL_TOOLS" -eq 1 ] && [ -f "$GLOBAL_INSTALLER" ] && command -v python3 >/dev/null 2>&1; then
   echo "  --install-tools: installing/refreshing the Codex operator layer in ~/.codex/AGENTS.md…"
   bash "$GLOBAL_INSTALLER" "$BAILIWICK_ROOT" "$BAILIWICK_ROOT/hooks/codex-global-agents.tmpl.md" "$CODEX_AGENTS" "codex layer" 2>&1 | sed 's/^/    /' || true
-  echo "  --install-tools: installing/refreshing the Gemini operator layer in ~/.gemini/GEMINI.md…"
-  bash "$GLOBAL_INSTALLER" "$BAILIWICK_ROOT" "$BAILIWICK_ROOT/hooks/gemini-global.tmpl.md" "$GEMINI_AGENTS" "gemini layer" 2>&1 | sed 's/^/    /' || true
+  echo "  --install-tools: installing/refreshing the Antigravity operator layer in ~/.gemini/GEMINI.md…"
+  bash "$GLOBAL_INSTALLER" "$BAILIWICK_ROOT" "$BAILIWICK_ROOT/hooks/antigravity-global.tmpl.md" "$GEMINI_AGENTS" "antigravity layer" 2>&1 | sed 's/^/    /' || true
 fi
 if layer_present "$CODEX_AGENTS"; then
   CODEX_STATUS="✓ Codex operator layer present (~/.codex/AGENTS.md) — activates on .bailiwick.local.md"
@@ -1492,9 +1617,9 @@ else
   CODEX_MCP_STATUS=""
 fi
 if layer_present "$GEMINI_AGENTS"; then
-  GEMINI_STATUS="✓ Gemini operator layer present (~/.gemini/GEMINI.md) — activates on .bailiwick.local.md"
+  ANTIGRAVITY_STATUS="✓ Antigravity operator layer present (~/.gemini/GEMINI.md) — activates on .bailiwick.local.md"
 else
-  GEMINI_STATUS="✗ Gemini operator layer not installed — re-run with --install-tools. Only needed if you use Gemini."
+  ANTIGRAVITY_STATUS="✗ Antigravity operator layer not installed — re-run with --install-tools. Only needed if you use Antigravity."
 fi
 
 # --- Optional knowledge-SCOPED reference for Claude Desktop / ChatGPT Desktop (--with-desktop) ---
@@ -1556,7 +1681,7 @@ if [ "$GLOBAL_ONLY" -eq 1 ]; then
   printf '  • %s\n' "$MT_AGENT_STATUS"
   printf '  • %s\n' "$CODEX_SKILL_STATUS"
   printf '  • %s\n' "$CODEX_STATUS"
-  printf '  • %s\n' "$GEMINI_STATUS"
+  printf '  • %s\n' "$ANTIGRAVITY_STATUS"
   printf '  • %s\n' "$CLAUDE_DT_STATUS"
   printf '  • %s\n' "$CHATGPT_DT_STATUS"
   printf '  • wire a repo:  %s <repo>   (shadow/zero-footprint by default; --seeded for in-repo hidden wiring)\n' "$0"
@@ -1574,7 +1699,7 @@ elif [ "$SHADOW" -eq 1 ]; then
   printf '  • %s\n' "$MT_AGENT_STATUS"
   printf '  • %s\n' "$CODEX_SKILL_STATUS"
   printf '  • %s\n' "$CODEX_STATUS"
-  printf '  • %s\n' "$GEMINI_STATUS"
+  printf '  • %s\n' "$ANTIGRAVITY_STATUS"
   printf '  • %s\n' "$CLAUDE_DT_STATUS"
   printf '  • %s\n' "$CHATGPT_DT_STATUS"
 else
@@ -1592,7 +1717,7 @@ else
   printf '  • %s\n' "$CODEX_SKILL_STATUS"
   printf '  • %s\n' "$CODEX_STATUS"
   [ -n "$CODEX_MCP_STATUS" ] && printf '  • %s\n' "$CODEX_MCP_STATUS"
-  printf '  • %s\n' "$GEMINI_STATUS"
+  printf '  • %s\n' "$ANTIGRAVITY_STATUS"
   printf '  • %s\n' "$CLAUDE_DT_STATUS"
   printf '  • %s\n' "$CHATGPT_DT_STATUS"
   printf '  • edit CLAUDE.local.md project-specific sections   (stack, environments, backend, CI/CD)\n'
