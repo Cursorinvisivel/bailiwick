@@ -108,8 +108,20 @@ it (see below).
 ### Inbound — automatic
 
 The SessionStart hook fast-forwards the Bailiwick clone from `origin/main` (throttled ~30 min, only
-on a clean `main`, non-fatal when offline). On a `sync/<machine>` branch it prints a
-"N commits behind" note instead of auto-merging.
+on a clean `main`, non-fatal when offline). After a satellite sync the clone is left on
+`sync/<machine>` so its new knowledge stays visible; once central has merged that branch (every
+commit on `origin/main`, by SHA or by patch), SessionStart switches the clone back to `main` and
+fast-forwards it. Until then — or if uncommitted changes block the switch — it prints an
+"N commits behind" note instead. `doctor.sh` warns when the clone is stuck off `main`.
+
+**Merge sync PRs with "Create a merge commit"** (or disable squash merging on your private
+repo). A merge commit, a rebase merge, and a single-commit squash are recognised by commit/patch.
+A **multi-commit squash** produces one new patch that matches none of the satellite's commits, so
+the satellite falls back to comparing **content**: it returns to `main` only if every file its sync
+branch changed is identical on `origin/main`. If central edited one of those files again before the
+satellite's next session, that check fails safe — the clone stays on `sync/<machine>`, `doctor.sh`
+warns, and its next sync would re-carry the already-merged commits. Recover with
+`git checkout main && git merge --ff-only origin/main`.
 
 ### Outbound — after an approved `/curate`
 
