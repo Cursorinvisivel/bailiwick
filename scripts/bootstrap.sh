@@ -935,11 +935,38 @@ if [ "$SHADOW" -eq 1 ]; then
   fi
 
   if command -v claude >/dev/null 2>&1; then
-    sh_mcp() {  # $1=name; shift; command…  — idempotent, non-fatal (never breaks the run)
-      local n="$1"; shift
+    sh_mcp() {  # $1=name; shift; command…  — convergent, non-fatal (never breaks the run)
+      local n="$1" cur; shift
       if DRY; then plan "register user MCP '$n' (claude mcp add --scope user)"; return 0; fi
       if claude mcp list 2>/dev/null | grep -qE "(^|[[:space:]])$n([[:space:]]|:|$)"; then
-        echo "  mcp(user): $n already registered"; return 0
+        # Convergent (#36): a name match alone is not "done" — a definition registered before a
+        # change (e.g. the mcp<2 pin) would never be updated, and doctor's remediation would loop.
+        # Reconcile only the USER-scope entry (top-level mcpServers); another scope is left alone.
+        cur="$(python3 - "${CLAUDE_CONFIG:-$HOME/.claude.json}" "$n" "$@" 2>/dev/null <<'PY'
+import json, sys
+cfg, name, want = sys.argv[1], sys.argv[2], sys.argv[3:]
+try:
+    s = (json.load(open(cfg)).get("mcpServers") or {}).get(name)
+except Exception:
+    s = None
+if isinstance(s, dict):  # SAME, or the old definition (JSON) to restore if re-adding fails
+    print("SAME" if [s.get("command")] + list(s.get("args") or []) == want else json.dumps(s))
+PY
+)"
+        case "$cur" in
+          SAME) echo "  mcp(user): $n already registered (up to date)" ;;
+          "") echo "  mcp(user): $n already registered" ;;
+          *)
+            if claude mcp remove --scope user "$n" >/dev/null 2>&1 \
+               && claude mcp add --scope user "$n" -- "$@" >/dev/null 2>&1; then
+              echo "  mcp(user): $n definition changed — re-registered"
+            else
+              claude mcp list 2>/dev/null | grep -qE "(^|[[:space:]])$n([[:space:]]|:|$)" \
+                || claude mcp add-json --scope user "$n" "$cur" >/dev/null 2>&1 || true
+              echo "  mcp(user): could not re-register $n — run: claude mcp remove --scope user $n && claude mcp add --scope user $n -- $*"
+            fi ;;
+        esac
+        return 0
       fi
       if claude mcp add --scope user "$n" -- "$@" >/dev/null 2>&1; then
         echo "  mcp(user): registered $n"
