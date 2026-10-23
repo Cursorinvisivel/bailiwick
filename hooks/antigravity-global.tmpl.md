@@ -49,8 +49,10 @@ framework layer complements them, never overrides them.
 > grant (plain `ask` would honour it); it self-gates to wired repos.
 
 ## Quality Workflow stages as Antigravity subagents (ADR-010)
-The `bailiwick-*` subagents in `~/.gemini/agents/` are the Bailiwick Quality Workflow stages.
-Antigravity discovers them natively via `agy agents`. Run independent stages in parallel,
+The `bailiwick-*` stage adapters are generated into `~/.gemini/agents/` (the legacy Gemini CLI
+path). Antigravity reads custom subagents from `~/.gemini/config/agents/` instead, which is not
+generated yet — until it is, open the stage role files under `__BAILIWICK__/agents/` directly.
+Run independent stages in parallel,
 dependent stages in order; each stage's final report must carry its outputs and knowledge signals.
 
 ## Capture (Automatic under Antigravity via Stop hook)

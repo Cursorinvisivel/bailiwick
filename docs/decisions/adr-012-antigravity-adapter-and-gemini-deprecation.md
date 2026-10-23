@@ -42,7 +42,9 @@ Antigravity resolves these deficiencies with a standardized lifecycle hook syste
   allowing **enforced automatic capture** (`capture_session.py`).
 - **`hooks.json`:** Structured hook specification in `~/.gemini/config/hooks.json` or `.agents/hooks.json`.
 - **MCP:** Standardized on `mcp_config.json` (`~/.gemini/config/mcp_config.json` or `.agents/mcp_config.json`).
-- **Rules & Subagents:** Discovers rules in `GEMINI.md` / `AGENTS.md` and subagents in `~/.gemini/agents/`.
+- **Rules & Subagents:** Discovers rules in `GEMINI.md` / `AGENTS.md` and custom subagents in `~/.gemini/config/agents/` (or `.agents/agents/` per workspace).
+  Bailiwick still generates stage adapters only into the legacy `~/.gemini/agents/`; generating
+  them for Antigravity is a follow-up (see ADR-010 Amendment 2).
 
 ## Decision
 
