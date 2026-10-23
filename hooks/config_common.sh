@@ -12,6 +12,7 @@
 #   bw_cfg_bool <key>              # exit 0 iff the key is boolean true
 #   bw_machine_token [name]        # normalized machine token (no arg: config 'machine' or hostname)
 #   bw_is_shadow_repo <dir>        # exit 0 iff dir is shadow-activated (env var or allowlist)
+#   bw_sync_merged <repo>          # exit 0 iff HEAD's work is already on origin/main (#37)
 #
 # BW_CFG_FILE overrides the config path (default: <this clone>/.bailiwick-sync.json).
 # python3 is preferred for JSON correctness; a grep/sed line-parse is the degradation path.
@@ -74,4 +75,19 @@ bw_is_shadow_repo() {  # <dir> — exit 0 iff shadow-activated. Mirror: capture_
     [ "$_bw_cc_here" = "$_bw_cc_entry" ] && return 0
   done < "$_bw_cc_list"
   return 1
+}
+
+bw_sync_merged() {  # <repo> — exit 0 iff everything HEAD adds over origin/main is already there.
+  # A satellite parked on sync/<machine> may return to main once this holds (#37). "Already there"
+  # by SHA or patch (merge commit, rebase, single-commit squash) — git cherry — or, for a
+  # multi-commit squash whose one new patch matches no satellite commit, by CONTENT: every path
+  # HEAD changed since the merge-base is identical on origin/main, so switching loses nothing.
+  # Conservative: any missing ref or git failure answers "not merged".
+  git -C "$1" rev-parse -q --verify origin/main >/dev/null 2>&1 || return 1
+  _bw_cc_cherry="$(git -C "$1" cherry origin/main HEAD 2>/dev/null)" || return 1
+  printf '%s\n' "$_bw_cc_cherry" | grep -q '^+' || return 0
+  _bw_cc_mb="$(git -C "$1" merge-base HEAD origin/main 2>/dev/null)" || return 1
+  [ -n "$(git -C "$1" diff --name-only "$_bw_cc_mb" HEAD 2>/dev/null)" ] || return 1
+  git -C "$1" diff -z --name-only "$_bw_cc_mb" HEAD 2>/dev/null \
+    | xargs -0 git -C "$1" --literal-pathspecs diff --quiet origin/main HEAD -- >/dev/null 2>&1
 }

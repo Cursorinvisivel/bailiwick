@@ -357,6 +357,21 @@ if [ "$FETCH_OK" -eq 1 ]; then
       ok "no sync/${machine} branch on origin (nothing parked)"
     fi
   fi
+  # Inbound (#37): SessionStart only fast-forwards a clone checked out on main. Being on
+  # sync/<machine> is expected until central merges it (SessionStart then returns to main);
+  # merged-but-still-there, or any other branch, means inbound knowledge has silently stalled.
+  cur="$(git symbolic-ref --short -q HEAD || echo DETACHED)"
+  cur_behind="$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
+  case "$cur" in
+    main) ok "framework clone is on main (SessionStart fast-forwards it)" ;;
+    sync/*)
+      if ! { command -v bw_sync_merged >/dev/null 2>&1 && bw_sync_merged "$BAILIWICK_ROOT"; }; then
+        ok "framework clone is on ${cur} awaiting its PR merge — SessionStart returns it to main once merged"
+      else
+        warn "framework clone is still on ${cur}, already merged into origin/main (${cur_behind} behind) — inbound sync is stalled (uncommitted changes block the auto-switch); commit or stash, then: git checkout main && git merge --ff-only origin/main"
+      fi ;;
+    *) warn "framework clone is on '${cur}', not main (${cur_behind} behind origin/main) — SessionStart only fast-forwards main, so inbound knowledge is stalled: git checkout main && git merge --ff-only origin/main" ;;
+  esac
 else
   warn "cannot reach origin — sync-state checks skipped (offline?)"
 fi
