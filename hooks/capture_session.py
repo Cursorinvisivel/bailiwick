@@ -46,10 +46,14 @@ BASH_READ_RE = re.compile(r"\b(cat|head|tail|less|more|grep|rg|sed|awk)\b")
 # transcript SHAPE differs: Claude Code writes {"message": {"content": [{"type": "tool_use", ...}]}},
 # Codex a rollout of {"type": "response_item"|"event_msg"|..., "payload": {...}}. Records are
 # dispatched per line on that shape, so one hook covers both (and a resumed/mixed file cannot lie).
+# Antigravity passes {"conversationId", "transcriptPath", "workspacePaths"} and writes
+# step records {"step_index", "tool_calls": [{"name": "...", "args": {...}}]}.
 # `exec`/`exec_command` are Codex's shell (code mode wraps the same call in a JS snippet);
 # `apply_patch` is its file-mutating tool — the Edit/Write of MUTATING_TOOLS above.
 CODEX_MUTATING_TOOLS = {"apply_patch"}
 CODEX_EXEC_TOOLS = {"exec", "exec_command", "shell"}
+ANTIGRAVITY_MUTATING_TOOLS = {"write_file", "edit_file"}
+ANTIGRAVITY_READ_TOOLS = {"read_file", "view_file"}
 # The command inside either shape: `"cmd": "..."` in the function-call arguments JSON, or the same
 # key inside the `tools.exec_command({...})` JS of a code-mode call. Captured WITH its quotes so
 # json.loads does the un-escaping (a code-mode input is doubly escaped).
@@ -196,6 +200,27 @@ def _scan_codex(rec, st):
         st["loaded"].update(knowledge_ids(raw))
 
 
+def _scan_antigravity(rec, st):
+    """Antigravity transcript record: tool calls live in rec.tool_calls as [{name, args}]."""
+    tool_calls = rec.get("tool_calls")
+    if not isinstance(tool_calls, list):
+        return
+    for call in tool_calls:
+        if not isinstance(call, dict):
+            continue
+        name = call.get("name", "")
+        args = call.get("args") or {}
+        st["tool_calls"] += 1
+        st["tools"].add(name)
+        if name in ANTIGRAVITY_MUTATING_TOOLS:
+            st["mutating"] += 1
+        if name == "run_command":
+            _scan_command(args.get("CommandLine") or "", st)
+        elif name in ANTIGRAVITY_READ_TOOLS or MCP_FS_READ_RE.match(name):
+            path_str = str(args.get("Path") or args.get("file_path") or "")
+            st["loaded"].update(knowledge_ids(path_str))
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -206,9 +231,9 @@ def main():
         # same never-block contract as above (guardrails.py guards this identically).
         return 0
 
-    transcript = payload.get("transcript_path")
-    session_id = payload.get("session_id") or "unknown-session"
-    event = payload.get("hook_event_name", "")
+    transcript = payload.get("transcript_path") or payload.get("transcriptPath")
+    session_id = payload.get("session_id") or payload.get("conversationId") or "unknown-session"
+    event = payload.get("hook_event_name") or payload.get("terminationReason") or ""
     project_dir = bw_common.resolve_project_dir(payload)
 
     if not transcript or not os.path.isfile(transcript):
@@ -236,6 +261,9 @@ def main():
                 if isinstance(rec.get("payload"), dict) and "message" not in rec:
                     st["agent"] = "codex"
                     _scan_codex(rec, st)
+                elif "tool_calls" in rec or "step_index" in rec or rec.get("source") in ("USER_INPUT", "PLANNER_RESPONSE", "MODEL", "SYSTEM"):
+                    st["agent"] = "antigravity"
+                    _scan_antigravity(rec, st)
                 else:
                     _scan_claude(rec, st)
     except Exception as e:
