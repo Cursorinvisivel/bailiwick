@@ -8,7 +8,7 @@
 coding agents — with runtime guardrails so an agent that acts on it stays within your rules.**
 
 A *bailiwick* is the domain you're responsible for — your area of authority and expertise. Bailiwick
-gives an AI coding agent — Claude Code, Codex, Gemini, or GitHub Copilot — a persistent, curated
+gives an AI coding agent — Claude Code, Codex, Antigravity, or GitHub Copilot — a persistent, curated
 **memory** of how your domain works: the conventions, patterns, and hard-won context you'd otherwise
 re-explain every session. Because an agent with that memory acts with more initiative, Bailiwick
 pairs it with **runtime guardrails** as containment. It's plain Markdown + Python + shell: no
@@ -53,7 +53,7 @@ runtime service:
   knowledge unreviewed, and nothing is lost if you skip a cycle.
 - **Guardrails that are real, not advice.** A pre-execution hook intercepts high-impact commands
   (apply/destroy, cluster/cloud mutations, `rm -rf`, `git merge`, commit/push/PR): an in-the-moment
-  confirmation under Claude Code & Gemini CLI, a hard deny with an auditable break-glass under Codex.
+  confirmation under Claude Code & Antigravity, a hard deny with an auditable break-glass under Codex.
   Nothing dangerous runs on agent initiative.
 
 ## Quick start
@@ -119,8 +119,8 @@ One Markdown knowledge base and role set, adapted to four tools of differing com
 | Tool | Capture | Dangerous-command control |
 |---|---|---|
 | **Claude Code** (fullest) | Automatic (hooks) | **Enforced** — PreToolUse |
-| **Codex CLI** | Manual | **Enforced** — PreToolUse (deny + break-glass; one-time trust) |
-| **Gemini CLI** | Manual | **Enforced** — BeforeTool |
+| **Codex CLI** | Automatic (Stop/SessionEnd) | **Enforced** — PreToolUse (deny + break-glass; one-time trust) |
+| **Antigravity CLI** | Automatic (Stop) | **Enforced** — PreToolUse (ask tiers) |
 | **GitHub Copilot** | Manual | Policy only |
 
 The honest per-adapter differences and the versions each is verified against:

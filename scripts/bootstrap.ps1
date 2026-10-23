@@ -26,8 +26,8 @@
   Modes (SHADOW is the DEFAULT):
   (no mode flag) SHADOW MODE: activates the framework for <repo> WITHOUT writing ANY files into
   it. Adds the repo root to ~/.bailiwick/allowlist and registers global user-scope MCP (Claude
-  Code); captures stage centrally under ~/.bailiwick/captures/. With -WithAgents / -WithGemini
-  it ALSO injects global Codex / Gemini MCP (~/.codex/config.toml, ~/.gemini/settings.json; bailiwick-*
+  Code); captures stage centrally under ~/.bailiwick/captures/. With -WithAgents / -WithAntigravity
+  it ALSO injects global Codex / Antigravity MCP (~/.codex/config.toml, ~/.gemini/config/mcp_config.json; bailiwick-*
   names, idempotent). -WithStandards still seeds the TRACKED team baselines; other seeding /
   exclude flags are ignored. Undo: delete the repo's line from the allowlist.
   -Shadow is an explicit alias for the default shadow mode (kept for compatibility; no-op).
@@ -43,8 +43,9 @@
   (~/.codex/skills/: bailiwick-lead, bailiwick-curate, bailiwick-enrich, bailiwick-learn, bailiwick-investigate, bailiwick-purge, bailiwick-sign), and the global Codex + Gemini operator layers
   (managed blocks in ~/.codex/AGENTS.md and ~/.gemini/GEMINI.md). Idempotent; off by default.
   Run with NO <target-repo-path> for a global-only install (nothing per-repo is written).
-  -WithGemini generates .gemini/settings.json (Gemini MCP + advisory excludeTools) and seeds the
-  shared .bailiwick.local.md marker; a team-tracked .gemini/settings.json is left untouched.
+  -WithAntigravity generates .agents/mcp_config.json (or ~/.gemini/config/mcp_config.json in shadow mode)
+  and seeds the shared .bailiwick.local.md marker.
+  -WithGemini is a deprecated alias for -WithAntigravity (Gemini CLI sunset June 2026; removal in April 2027).
   -WithAgents seeds .bailiwick.local.md (Codex private marker, read via the global ~/.codex/AGENTS.md
   layer; the team's own AGENTS.md is never shadowed).
   -Update: with -Seeded, regenerates the MANAGED configs and reconciles .git/info/exclude,
@@ -77,6 +78,7 @@ param(
   [switch]$Init,
   [switch]$WithAgents,
   [switch]$WithCopilot,
+  [switch]$WithAntigravity,
   [switch]$WithGemini,
   [switch]$AllTools,
   [switch]$WithStandards,
@@ -190,6 +192,46 @@ function Remove-GeminiJson([string]$f) {
   Write-Host "  cleaned: bailiwick entries from $f"
 }
 
+function Remove-AntigravityJson([string]$cfgDir) {
+  $h = Join-Path $cfgDir 'hooks.json'
+  $m = Join-Path $cfgDir 'mcp_config.json'
+  if (Test-Path $h) {
+    if (Dry) { Plan "remove bailiwick-* hooks from $h" } else {
+      try {
+        $d = [System.IO.File]::ReadAllText($h) | ConvertFrom-Json
+        if ($d) {
+          $changed = $false
+          foreach ($k in @($d.PSObject.Properties.Name)) {
+            if ($k -like 'bailiwick-*') { $d.PSObject.Properties.Remove($k); $changed = $true }
+          }
+          if ($changed) {
+            [System.IO.File]::WriteAllText($h, (($d | ConvertTo-Json -Depth 20) + "`n"))
+            Write-Host "  cleaned: bailiwick hooks from $h"
+          }
+        }
+      } catch {}
+    }
+  }
+  if (Test-Path $m) {
+    if (Dry) { Plan "remove bailiwick-* MCP servers from $m" } else {
+      try {
+        $d = [System.IO.File]::ReadAllText($m) | ConvertFrom-Json
+        if ($d -and $d.PSObject.Properties['mcpServers']) {
+          $changed = $false
+          foreach ($k in @($d.mcpServers.PSObject.Properties.Name)) {
+            if ($k -like 'bailiwick-*') { $d.mcpServers.PSObject.Properties.Remove($k); $changed = $true }
+          }
+          if ($changed) {
+            if (@($d.mcpServers.PSObject.Properties.Name).Count -eq 0) { $d.PSObject.Properties.Remove('mcpServers') }
+            [System.IO.File]::WriteAllText($m, (($d | ConvertTo-Json -Depth 20) + "`n"))
+            Write-Host "  cleaned: bailiwick MCP servers from $m"
+          }
+        }
+      } catch {}
+    }
+  }
+}
+
 # Remove skill symlinks that resolve INTO this clone (leave symlinks pointing elsewhere).
 function Remove-BailiwickSymlinks {
   $codexH = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
@@ -289,7 +331,9 @@ function Invoke-BailiwickUninstall {
   Remove-MarkerBlock (Join-Path $codexHomeU 'config.toml') '# BEGIN bailiwick mcp'   '# END bailiwick mcp'   'Codex MCP'
   Remove-MarkerBlock (Join-Path $codexHomeU 'AGENTS.md')   '<!-- BEGIN bailiwick'     '<!-- END bailiwick -->' 'Codex operator layer'
   Remove-MarkerBlock (Join-Path $geminiHomeU 'GEMINI.md')  '<!-- BEGIN bailiwick'     '<!-- END bailiwick -->' 'Gemini operator layer'
+  $geminiCfgDirU = if ($env:GEMINI_CONFIG_DIR) { $env:GEMINI_CONFIG_DIR } else { Join-Path $geminiHomeU 'config' }
   Remove-GeminiJson (Join-Path $geminiHomeU 'settings.json')
+  Remove-AntigravityJson $geminiCfgDirU
   Remove-BailiwickSymlinks
   Resolve-DesktopPaths
   Remove-DesktopMcp $script:ClaudeDesktopCfg
@@ -345,6 +389,7 @@ function Clear-RepoExclude([string]$abs, [bool]$keepCaptureRule = $false) {
   if (Dry) { Plan "strip the framework block from $excl (your own exclude rules preserved)"; return }
   $ours = @('.mcp.json', '.vscode/mcp.json', 'CLAUDE.local.md',
             '.bailiwick.local.md', '.codex/config.toml', '.gemini/settings.json',
+            '.agents/mcp_config.json',
             '.github/instructions/bailiwick.instructions.md')
   # When captures survive the uninstall, their ignore rule must survive with them — otherwise the
   # next `git add -A` stages plaintext session transcripts (mirror of bootstrap.sh
@@ -426,9 +471,10 @@ function Invoke-BailiwickRepoUninstall([string]$repo) {
   Remove-SeededFile $abs '.vscode/mcp.json' $BailiwickRoot
   Remove-SeededFile $abs '.codex/config.toml' $BailiwickRoot
   Remove-SeededFile $abs '.gemini/settings.json' $BailiwickRoot
+  Remove-SeededFile $abs '.agents/mcp_config.json' $BailiwickRoot
   Remove-SeededFile $abs '.github/instructions/bailiwick.instructions.md' ''
   if (-not (Dry)) {
-    foreach ($d in @('.vscode', '.codex', '.github/instructions', '.github')) {
+    foreach ($d in @('.vscode', '.codex', '.agents', '.gemini', '.github/instructions', '.github')) {
       $dp = Join-Path $abs $d
       if ((Test-Path -LiteralPath $dp) -and (-not (Get-ChildItem -LiteralPath $dp -Force -ErrorAction SilentlyContinue))) {
         Remove-Item -LiteralPath $dp -Force -ErrorAction SilentlyContinue
@@ -657,7 +703,8 @@ if ($Help -or (-not $Target -and -not $GlobalOnly -and -not $Uninstall)) {
   Write-Host "-DryRun previews every change and writes nothing. -Uninstall reverses global wiring (no target) or un-seeds a repo (with target)."
   if (-not $Target -and -not $GlobalOnly) { exit 2 } else { exit 0 }
 }
-if ($AllTools) { $WithAgents = $true; $WithCopilot = $true; $WithGemini = $true }
+if ($WithGemini) { Write-Warning "-WithGemini is DEPRECATED (Gemini CLI sunset June 2026) and will be removed in April 2027 (in 6 months). Routing to -WithAntigravity."; $WithAntigravity = $true }
+if ($AllTools) { $WithAgents = $true; $WithCopilot = $true; $WithAntigravity = $true }
 
 # Mode resolution — SHADOW is the DEFAULT (zero-footprint; personal). -Seeded selects the in-repo
 # hidden wiring; -Visible and -Init imply seeded (they write repo files by design). -Shadow stays
@@ -928,13 +975,14 @@ if ($Shadow) {
     Write-Host "      claude mcp add --scope user bailiwick-filesystem -- npx -y @modelcontextprotocol/server-filesystem `"$tkJson`""
   }
 
-  # Optional GLOBAL MCP for Codex / Gemini, opted in per tool via -WithAgents / -WithGemini.
+  # Optional GLOBAL MCP for Codex / Antigravity, opted in per tool via -WithAgents / -WithAntigravity.
   # Uses bailiwick-* server names (never collides with your own) and github is omitted (per-repo token).
-  if ($WithGemini) {
+  if ($WithAntigravity) {
     $gemHome = if ($env:GEMINI_HOME) { $env:GEMINI_HOME } else { Join-Path $HOME '.gemini' }
-    $gemFile = Join-Path $gemHome 'settings.json'
+    $gemCfgDir = if ($env:GEMINI_CONFIG_DIR) { $env:GEMINI_CONFIG_DIR } else { Join-Path $gemHome 'config' }
+    $gemFile = Join-Path $gemCfgDir 'mcp_config.json'
     if (Dry) { Plan "merge bailiwick-* MCP servers into $gemFile" } else {
-    New-Item -ItemType Directory -Force -Path $gemHome | Out-Null
+    New-Item -ItemType Directory -Force -Path $gemCfgDir | Out-Null
     try {
       $gem = $null
       if ((Test-Path $gemFile) -and ((Get-Item -LiteralPath $gemFile).Length -gt 0)) {
@@ -956,9 +1004,9 @@ if ($Shadow) {
           command = 'sh'; args = @('-c', $ghShadowSh) })
       }
       [System.IO.File]::WriteAllText($gemFile, (($gem | ConvertTo-Json -Depth 10) + "`n"))
-      Write-Host "  mcp(gemini): merged bailiwick-* servers into $gemFile"
+      Write-Host "  mcp(antigravity): merged bailiwick-* servers into $gemFile"
     } catch {
-      Write-Host "  mcp(gemini): could not update $gemFile - edit by hand"
+      Write-Host "  mcp(antigravity): could not update $gemFile - edit by hand"
     }
     }
   }
@@ -1116,14 +1164,15 @@ Write-Managed '.vscode/mcp.json' @"
 #   Copilot     : .github/instructions/bailiwick.instructions.md  (local VS Code only)
 Copy-Seeded (Join-Path $BailiwickRoot 'knowledge/templates/project-claude-md-template.md') 'CLAUDE.local.md'
 # On -Update, refresh whatever complement/config already exists (detect per tool).
-$seedMarker = $false; $geminiGenerated = $false
+$seedMarker = $false; $geminiGenerated = $false; $antigravityGenerated = $false
 if ($Update -and (Test-Path (Join-Path $Target '.bailiwick.local.md')))                                  { $seedMarker = $true }
 if ($Update -and (Test-Path (Join-Path $Target '.codex/config.toml')))                                   { $WithAgents = $true }
-if ($Update -and (Test-Path (Join-Path $Target '.gemini/settings.json')) -and (-not (Test-Tracked '.gemini/settings.json'))) { $WithGemini = $true }
+if ($Update -and (Test-Path (Join-Path $Target '.agents/mcp_config.json')))                             { $WithAntigravity = $true }
+if ($Update -and (Test-Path (Join-Path $Target '.gemini/settings.json')) -and (-not (Test-Tracked '.gemini/settings.json'))) { $WithAntigravity = $true }
 if ($Update -and (Test-Path (Join-Path $Target '.github/instructions/bailiwick.instructions.md')))    { $WithCopilot = $true }
 
-# Shared private marker — read by BOTH Codex (~/.codex/AGENTS.md) and Gemini (~/.gemini/GEMINI.md).
-if ($WithAgents -or $WithGemini -or $seedMarker) {
+# Shared private marker — read by BOTH Codex (~/.codex/AGENTS.md) and Antigravity (~/.gemini/GEMINI.md).
+if ($WithAgents -or $WithAntigravity -or $WithGemini -or $seedMarker) {
   Copy-Seeded (Join-Path $BailiwickRoot 'knowledge/templates/project-agents-md-template.md') '.bailiwick.local.md'
 }
 if ($WithAgents)  {
@@ -1152,14 +1201,9 @@ command = "terraform-mcp-server"
 args = ["stdio"]
 "@
 }
-if ($WithGemini) {
-  # Gemini MCP lives in .gemini/settings.json (one file for Gemini CLI + Code Assist VS Code agent).
-  # Google documents it as committable/shared, so a TEAM-TRACKED settings.json is LEFT UNTOUCHED.
-  # excludeTools is ADVISORY ONLY (Google: "simple string matching", "not a security mechanism").
-  if (Test-Tracked '.gemini/settings.json') {
-    Write-Host "  skip (tracked by repo — left untouched; merge framework MCP by hand): .gemini/settings.json"
-  } else {
-    Write-Managed '.gemini/settings.json' @"
+if ($WithAntigravity) {
+  # Antigravity project MCP lives in .agents/mcp_config.json
+  Write-Managed '.agents/mcp_config.json' @"
 {
   "mcpServers": {
     "filesystem": {
@@ -1177,17 +1221,10 @@ if ($WithGemini) {
       "command": "terraform-mcp-server",
       "args": ["stdio"]
     }
-  },
-  "excludeTools": [
-    "run_shell_command(terraform apply)",
-    "run_shell_command(terraform destroy)",
-    "run_shell_command(terragrunt apply)",
-    "run_shell_command(terragrunt destroy)"
-  ]
+  }
 }
 "@
-    $geminiGenerated = $true
-  }
+  $antigravityGenerated = $true
 }
 if ($WithCopilot) { Copy-Seeded (Join-Path $BailiwickRoot 'knowledge/templates/copilot-bailiwick-instructions-template.md') '.github/instructions/bailiwick.instructions.md' }
 
@@ -1220,8 +1257,9 @@ if ((-not (Dry)) -and ($existing -notcontains $mark)) { Add-Content -LiteralPath
 Add-Excl '.bailiwick-outputs/'
 if (-not $Visible) {
   Add-Excl '.mcp.json'; Add-Excl '.vscode/mcp.json'; Add-Excl 'CLAUDE.local.md'
-  if ($WithAgents -or $WithGemini) { Add-Excl '.bailiwick.local.md' }
+  if ($WithAgents -or $WithAntigravity -or $WithGemini) { Add-Excl '.bailiwick.local.md' }
   if ($WithAgents)     { Add-Excl '.codex/config.toml' }
+  if ($antigravityGenerated) { Add-Excl '.agents/mcp_config.json' }
   if ($geminiGenerated){ Add-Excl '.gemini/settings.json' }
   if ($WithCopilot) { Add-Excl '.github/instructions/bailiwick.instructions.md' }
   Write-Host "  hidden: framework files excluded via .git/info/exclude (not shared)"
@@ -1329,7 +1367,7 @@ if ($InstallTools -and $pyExe -and (Test-Path $hookTmpl)) {
 # same scripts Claude Code runs). All self-gating to wired/shadow repos - see
 # hooks/install_adapter_hooks.py.
 if ($InstallTools -and $pyExe) {
-  Write-Host "  -InstallTools: wiring Codex hooks (guardrail PreToolUse + capture Stop/SessionEnd) and the Gemini guardrail (BeforeTool)..."
+  Write-Host "  -InstallTools: wiring Codex hooks (PreToolUse/Stop/SessionEnd) and Antigravity hooks (PreToolUse/Stop)..."
   & $pyExe.Source (Join-Path $BailiwickRoot "hooks/install_adapter_hooks.py") 2>&1 | ForEach-Object { "    $_" }
 }
 if (Test-HooksPresent) {
@@ -1506,14 +1544,14 @@ $geminiHome  = if ($env:GEMINI_HOME) { $env:GEMINI_HOME } else { Join-Path $HOME
 $codexAgents  = Join-Path $codexHome  "AGENTS.md"
 $geminiAgents = Join-Path $geminiHome "GEMINI.md"
 $codexTmpl  = Join-Path $BailiwickRoot "hooks/codex-global-agents.tmpl.md"
-$geminiTmpl = Join-Path $BailiwickRoot "hooks/gemini-global.tmpl.md"
+$geminiTmpl = Join-Path $BailiwickRoot "hooks/antigravity-global.tmpl.md"
 if ($InstallTools) {
   if (Test-Path $codexTmpl) {
     Write-Host "  -InstallTools: installing/refreshing the Codex operator layer in ~/.codex/AGENTS.md..."
     Install-GlobalLayer $codexTmpl $codexAgents
   }
   if (Test-Path $geminiTmpl) {
-    Write-Host "  -InstallTools: installing/refreshing the Gemini operator layer in ~/.gemini/GEMINI.md..."
+    Write-Host "  -InstallTools: installing/refreshing the Antigravity operator layer in ~/.gemini/GEMINI.md..."
     Install-GlobalLayer $geminiTmpl $geminiAgents
   }
 }
@@ -1528,9 +1566,9 @@ if ($WithAgents -and (-not $Shadow) -and (-not $GlobalOnly)) {
   $codexMcpStatus = ""
 }
 if (Test-GlobalLayer $geminiAgents) {
-  $geminiStatus = "OK Gemini operator layer present (~/.gemini/GEMINI.md) - activates on .bailiwick.local.md"
+  $antigravityStatus = "OK Antigravity operator layer present (~/.gemini/GEMINI.md) - activates on .bailiwick.local.md"
 } else {
-  $geminiStatus = "MISSING Gemini operator layer - re-run with -InstallTools. Only needed if you use Gemini."
+  $antigravityStatus = "MISSING Antigravity operator layer - re-run with -InstallTools. Only needed if you use Antigravity."
 }
 
 # --- Optional knowledge-SCOPED reference for Claude Desktop / ChatGPT Desktop (-WithDesktop) ---
@@ -1593,7 +1631,7 @@ if ($GlobalOnly) {
   Write-Host "  - $mtAgentStatus"
   Write-Host "  - $codexSkillStatus"
   Write-Host "  - $codexStatus"
-  Write-Host "  - $geminiStatus"
+  Write-Host "  - $antigravityStatus"
   Write-Host "  - $claudeDtStatus"
   Write-Host "  - $chatgptDtStatus"
   Write-Host "  - wire a repo:  bootstrap.ps1 <repo>   (shadow/zero-footprint by default; -Seeded for in-repo hidden wiring)"
@@ -1612,7 +1650,7 @@ if ($GlobalOnly) {
   Write-Host "  - $mtAgentStatus"
   Write-Host "  - $codexSkillStatus"
   Write-Host "  - $codexStatus"
-  Write-Host "  - $geminiStatus"
+  Write-Host "  - $antigravityStatus"
   Write-Host "  - $claudeDtStatus"
   Write-Host "  - $chatgptDtStatus"
 } else {
@@ -1631,7 +1669,7 @@ if ($GlobalOnly) {
   Write-Host "  - $codexSkillStatus"
   Write-Host "  - $codexStatus"
   if ($codexMcpStatus) { Write-Host "  - $codexMcpStatus" }
-  Write-Host "  - $geminiStatus"
+  Write-Host "  - $antigravityStatus"
   Write-Host "  - $claudeDtStatus"
   Write-Host "  - $chatgptDtStatus"
   Write-Host "  - edit CLAUDE.local.md project-specific sections  (stack, environments, backend, CI/CD)"

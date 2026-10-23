@@ -29,7 +29,7 @@ adopt Bailiwick as-is (single practitioner / small trusted team) or invest in ge
   the backbone of a multi-tenant brain.
 - **Security Review's leakage check** already prevents client-cross-contamination on promotion — a
   governance control a team brain needs.
-- **Tool-neutral** (Claude Code / Codex / Gemini / Copilot) — fits a mixed-tooling team.
+- **Tool-neutral** (Claude Code / Codex / Antigravity / Copilot) — fits a mixed-tooling team.
 - **Hidden wiring** keeps the framework invisible in client/colleague repos — relevant if a team
   brain is consumed inside client engagements.
 

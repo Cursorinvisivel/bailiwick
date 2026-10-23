@@ -33,9 +33,19 @@ def _bw_home(tmp_path, monkeypatch):
 
 def run_guard(command, adapter="claude", tool=None, wired=True, cwd=None, break_glass=False):
     """Invoke guardrails.py exactly as a pre-tool hook does. Returns (returncode, decision_or_None)."""
-    if tool is None:
-        tool = "run_shell_command" if adapter == "gemini" else "Bash"
-    payload = {"tool_name": tool, "tool_input": {"command": command}, "cwd": cwd or str(REPO_ROOT)}
+    if adapter == "antigravity":
+        tool_name = tool if tool is not None else "run_command"
+        payload = {
+            "toolCall": {
+                "name": tool_name,
+                "args": {"CommandLine": command}
+            },
+            "workspacePaths": [cwd or str(REPO_ROOT)]
+        }
+    else:
+        if tool is None:
+            tool = "run_shell_command" if adapter == "gemini" else "Bash"
+        payload = {"tool_name": tool, "tool_input": {"command": command}, "cwd": cwd or str(REPO_ROOT)}
     env = dict(os.environ)
     env["BAILIWICK_HOME"] = os.environ["BAILIWICK_HOME"]
     env.pop("CLAUDE_PROJECT_DIR", None)  # let payload cwd drive project_dir deterministically
@@ -59,7 +69,7 @@ def decision_of(parsed, adapter="claude"):
     """Pull the decision verb out of whichever contract the adapter uses."""
     if parsed is None:
         return None
-    if adapter == "gemini":
+    if adapter in ("gemini", "antigravity"):
         return parsed["decision"]
     return parsed["hookSpecificOutput"]["permissionDecision"]
 
@@ -276,7 +286,27 @@ def test_malformed_payload_fails_open():
     assert proc.stdout.strip() == ""
 
 
-# ----------------------------------------------------------------------------- adapters: gemini
+# ----------------------------------------------------------------------------- adapters: antigravity
+
+def test_antigravity_asks_with_its_own_contract():
+    rc, parsed = run_guard("terraform apply", adapter="antigravity")
+    # force_ask, not ask: Antigravity's ask would honour a cached "Always Allow".
+    assert parsed == {"decision": "force_ask",
+                      "reason": parsed["reason"]}  # shape check
+    assert parsed["reason"].startswith("[bailiwick guardrail]")
+
+
+def test_antigravity_ignores_non_shell_tool():
+    rc, parsed = run_guard("terraform apply", adapter="antigravity", tool="read_file")
+    assert parsed is None  # antigravity adapter only acts on run_command
+
+
+def test_antigravity_safe_command_allowed():
+    rc, parsed = run_guard("git status", adapter="antigravity")
+    assert parsed is None  # safe command passes through with no hook decision
+
+
+# ----------------------------------------------------------------------------- adapters: gemini (legacy)
 
 def test_gemini_asks_with_its_own_contract():
     rc, parsed = run_guard("terraform apply", adapter="gemini")

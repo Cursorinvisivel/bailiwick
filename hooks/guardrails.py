@@ -4,7 +4,8 @@
 Invoked as a pre-execution hook by:
   - Claude Code  (PreToolUse, Bash)            — no argument, or `claude`
   - Codex CLI    (PreToolUse, Bash)            — argument `codex`
-  - Gemini CLI   (BeforeTool, run_shell_command) — argument `gemini`
+  - Antigravity  (PreToolUse, run_command)     — argument `antigravity`
+  - Gemini CLI   (BeforeTool, run_shell_command; deprecated) — argument `gemini`
 
 All three send a JSON payload on stdin carrying the shell command; the tier evaluation is
 identical, only payload parsing and the decision contract differ (see ADAPTER MAPPING below).
@@ -58,16 +59,18 @@ enforcement under indirection.
 ADAPTER MAPPING (the confirmation tiers are identical; only the decision vocabulary differs):
   - claude: every tier -> permissionDecision "ask" (the dialog IS the re-confirmation).
     Break-glass downgrades only the error-path fail-closed deny to ask.
-  - gemini: every tier -> {"decision": "ask"} — BeforeTool's ask forces the user confirmation
-    dialog (source-verified in gemini-cli's scheduler; the docs only list allow/deny, so pin the
-    CLI version if this ever regresses). Error path fails closed with {"decision": "deny"};
-    break-glass downgrades that deny to ask.
+  - antigravity: every tier -> {"decision": "force_ask"} — Antigravity's plain "ask" honours a
+    cached "Always Allow", which would silently skip the in-the-moment re-confirmation; force_ask
+    always prompts (antigravity.google/docs/hooks). Error path fails closed with
+    {"decision": "deny"}; break-glass downgrades that deny to force_ask.
+  - gemini: (legacy Gemini CLI BeforeTool, deprecated) every tier -> {"decision": "ask"} —
+    source-verified in gemini-cli's scheduler. Same deny / break-glass handling.
   - codex: PreToolUse has NO ask (allow-with-rewrite or deny only, and a deny without a non-empty
     permissionDecisionReason silently fails open — always emit the reason). Every tier -> deny
     with an actionable remedy in the reason. BAILIWICK_BREAK_GLASS=1 = allow-once (no decision
     emitted, audited) — the only in-band override, since no confirmation dialog exists.
 
-Break-glass (deliberate override): with BAILIWICK_BREAK_GLASS=1 set — claude/gemini: the
+Break-glass (deliberate override): with BAILIWICK_BREAK_GLASS=1 set — claude/antigravity/gemini: the
 error-path fail-closed DENY is downgraded to ASK (in normal operation there is no hard deny;
 both tiers already resolve to a confirmation); codex: any tier decision becomes allow-once
 (audited), because Codex has no ask. Every ask / deny / break-glass decision is appended to
@@ -242,14 +245,20 @@ def emit(decision, reason):
     sys.stdout.write("\n")
 
 
-def emit_gemini(decision, reason):
-    """Gemini CLI BeforeTool contract: {"decision": ..., "reason": ...} on stdout (JSON only)."""
+def emit_antigravity(decision, reason):
+    """Antigravity PreToolUse / Gemini BeforeTool contract: {"decision": ..., "reason": ...} on stdout (JSON only)."""
     json.dump({"decision": decision,
                "reason": "[bailiwick guardrail] " + reason}, sys.stdout)
     sys.stdout.write("\n")
 
 
-# Audit-event label per tier (adapter-prefixed for codex/gemini at the call site).
+emit_gemini = emit_antigravity
+
+# Antigravity's "ask" respects cached grants; only force_ask guarantees the re-confirmation.
+ASK_VERB = {"antigravity": "force_ask", "gemini": "ask"}
+
+
+# Audit-event label per tier (adapter-prefixed for codex/gemini/antigravity at the call site).
 AUDIT_EVENT = {"impact": "ask-impact", "signature": "ask-signature", "goahead": "ask"}
 
 # Codex has no confirmation dialog, so every deny reason must carry its remedy.
@@ -265,9 +274,10 @@ CODEX_REMEDY = {
 
 def _respond(adapter, tier, reason, command, project_dir):
     """Map a tier decision onto the adapter's decision contract (see ADAPTER MAPPING)."""
-    if adapter == "gemini":
-        _audit("gemini:" + AUDIT_EVENT[tier], command, project_dir)
-        emit_gemini("ask", reason)
+    if adapter in ("antigravity", "gemini"):
+        prefix = "antigravity:" if adapter == "antigravity" else "gemini:"
+        _audit(prefix + AUDIT_EVENT[tier], command, project_dir)
+        emit_antigravity(ASK_VERB[adapter], reason)
     elif adapter == "codex":
         if os.environ.get("BAILIWICK_BREAK_GLASS") == "1":
             _audit("codex:break-glass-allow", command, project_dir)
@@ -280,16 +290,17 @@ def _respond(adapter, tier, reason, command, project_dir):
 
 
 def _decide_deny(adapter, reason, command, project_dir):
-    """Error-path fail-closed deny — break-glass downgrades to ask (claude/gemini) or
+    """Error-path fail-closed deny — break-glass downgrades to ask (claude/antigravity/gemini) or
     allow-once (codex, which has no ask). Audits every outcome."""
     bg = os.environ.get("BAILIWICK_BREAK_GLASS") == "1"
-    if adapter == "gemini":
+    if adapter in ("antigravity", "gemini"):
+        prefix = "antigravity:" if adapter == "antigravity" else "gemini:"
         if bg:
-            _audit("gemini:break-glass", command, project_dir)
-            emit_gemini("ask", "BREAK-GLASS override active — " + reason + " Confirm deliberately; logged.")
+            _audit(prefix + "break-glass", command, project_dir)
+            emit_antigravity(ASK_VERB[adapter], "BREAK-GLASS override active — " + reason + " Confirm deliberately; logged.")
         else:
-            _audit("gemini:deny", command, project_dir)
-            emit_gemini("deny", reason)
+            _audit(prefix + "deny", command, project_dir)
+            emit_antigravity("deny", reason)
     elif adapter == "codex":
         if bg:
             _audit("codex:break-glass-allow", command, project_dir)
@@ -312,14 +323,26 @@ def main(adapter="claude"):
     except Exception:
         return 0  # Fail open — never wedge the harness on a malformed payload.
 
-    tool = payload.get("tool_name") or ""
-    if adapter == "gemini":
-        if tool != "run_shell_command":
+    tool_call = payload.get("toolCall")
+    if adapter in ("antigravity", "gemini"):
+        # Antigravity sends toolCall: {name: "run_command", args: {CommandLine: "..."}}
+        # Legacy Gemini CLI sends tool_name: "run_shell_command", tool_input: {command: "..."}
+        if isinstance(tool_call, dict):
+            tool = tool_call.get("name") or ""
+            if tool != "run_command":
+                return 0
+            raw_command = (tool_call.get("args") or {}).get("CommandLine") or ""
+        else:
+            tool = payload.get("tool_name") or ""
+            if tool not in ("run_shell_command", "run_command"):
+                return 0
+            raw_command = ((payload.get("tool_input") or {}).get("command") or "")
+    else:
+        tool = payload.get("tool_name") or ""
+        if tool != "Bash":  # claude and codex both use the canonical "Bash" tool name
             return 0
-    elif tool != "Bash":  # claude and codex both use the canonical "Bash" tool name
-        return 0
+        raw_command = ((payload.get("tool_input") or {}).get("command") or "")
 
-    raw_command = ((payload.get("tool_input") or {}).get("command") or "")
     if not raw_command.strip():
         return 0
     command = normalize(raw_command)
@@ -329,7 +352,7 @@ def main(adapter="claude"):
     # `command` (needs the quotes).
     cmd_tokens = strip_quoted(unwrap_token_quotes(command))
 
-    # Gemini exports CLAUDE_PROJECT_DIR as a compat alias; Codex carries only payload cwd.
+    # Antigravity carries workspacePaths / cwd; Gemini exports CLAUDE_PROJECT_DIR; Codex cwd.
     project_dir = bw_common.resolve_project_dir(payload)
     if not (is_bailiwick_repo(project_dir) or is_shadow_repo(project_dir)):
         return 0  # Inert outside bailiwick-wired repos (seeded or shadow-activated).
@@ -387,7 +410,7 @@ if __name__ == "__main__":
     try:
         _adapter = "claude"
         for _arg in sys.argv[1:]:
-            if _arg in ("claude", "codex", "gemini"):
+            if _arg in ("claude", "codex", "gemini", "antigravity"):
                 _adapter = _arg
         sys.exit(main(_adapter))
     except Exception:
