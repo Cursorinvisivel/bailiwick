@@ -137,3 +137,35 @@ docs: subagent activity appears in the ChatGPT desktop app, CLI, and IDE extensi
 Gemini CLI but exposes a subset of its functionality, and subagents are not in the documented
 subset (unverified there); Copilot's covered surfaces are VS Code + CLI (`~/.copilot/agents` is a
 documented VS Code user-profile agents location).
+
+## Amendment 2 (2026-10-22) — stage sizing (model tier + effort)
+
+**Finding.** Every stage ran at the main session's model and default effort. A Memory index walk
+cost the same as a Security Review. Verified against official docs (2026-10-22), each host offers
+a different sizing surface:
+- **Claude Code:** subagent frontmatter `model` (`haiku`/`sonnet`/`opus`/`inherit`/full ID) and
+  `effort` (`low`…`max`). The Agent tool's per-invocation `model` and `effort` override both.
+- **Codex:** agent TOML `model` and `model_reasoning_effort`. A value in the **file takes
+  precedence** over explicit spawn values and `[agents]` defaults.
+- **Copilot (VS Code / CLI):** `.agent.md` `model` (harness model names, string or preference
+  list) and `reasoning-effort` (`low`…`max`). Subagent dispatch cannot override them.
+- **Gemini CLI:** `model` (Gemini model name) and no effort field. Gemini CLI was superseded by
+  **Antigravity CLI** (2026-06-18), which reads custom agents from `~/.gemini/config/agents/`
+  (`subagent: true`, `model: inherit|flash|pro`). That path is not yet generated (residual below).
+
+**Decision.**
+1. Canonical `agents/*.md` carry Claude Code `model:` + `effort:` as the **Standard-task
+   defaults**: Memory/Federation/freshness light, Docs/Cloud Research standard, Quality/Security
+   Review deep + high. Implement is `model: inherit` + `effort: medium`, which marks it as the
+   **task-sized** stage.
+2. `/lead` rates the task (trivial / standard / complex-high-risk), records model tier + effort per
+   stage, passes them through the host's dispatch parameters, and reports the sizing actually
+   applied. A reviewer never runs below the implementer.
+3. Adapters translate **effort only**. `model:` is never translated, because tier names do not map
+   across vendors and pinned names rot. Codex gets `model_reasoning_effort` except on task-sized
+   stages (the file would block the Lead's spawn value). Copilot gets `reasoning-effort`. Gemini
+   gets nothing.
+
+**Accepted residuals:** on Codex/Copilot/Gemini the model tier is the session's. Copilot and the
+fixed Codex stages cannot be resized per task. No Antigravity `~/.gemini/config/agents/` adapter
+exists yet.

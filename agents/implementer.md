@@ -1,6 +1,8 @@
 ---
 name: bailiwick-implement
 description: Implement stage of the Bailiwick Quality Workflow — generates Terraform/IaC/code drafts per the framework checklists. Dispatched by the Lead orchestrator with domain hints and a task specification; use for substantial code or IaC generation in Bailiwick-wired repos.
+model: inherit
+effort: medium
 ---
 <!-- tools: inherited (needs full file access + MCP terraform registry; guardrails.py still enforces dangerous commands at PreToolUse) -->
 

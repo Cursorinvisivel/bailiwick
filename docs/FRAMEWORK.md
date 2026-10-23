@@ -576,7 +576,7 @@ delegation rule, and the user forces by asking for an agent by name; Copilot is 
 Codex subagents span the CLI **and the IDE extension** (same `~/.codex/agents/`); Gemini is
 **CLI-verified only** — Code Assist agent mode exposes a subset of the CLI and subagent support
 there is unverified; Copilot's covered surfaces are VS Code + CLI. Guardrail-hook coverage inside
-Codex/Gemini subagent threads is **unverified** — policy posture applies there. Mechanics: each
+Codex/Gemini subagent threads is **unverified** — policy posture applies there. **Sizing (Amendment 2):** canonical `model:`/`effort:` frontmatter sets per-stage defaults; `/lead` sizes each dispatch by task rating; adapters carry effort only (Codex `model_reasoning_effort`, Copilot `reasoning-effort`; none for Gemini). Mechanics: each
 tool's official subagent docs.
 
 Key consequences (the four tools do not share one uniform integration):

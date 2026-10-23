@@ -1,6 +1,8 @@
 ---
 name: bailiwick-memory
 description: Memory stage of the Bailiwick Quality Workflow — Query (load relevant knowledge before a task, given domain tags) and Collect (gather reusable knowledge candidates after a task). Dispatched by the Lead orchestrator at task start and task end. Read-only — proposes knowledge, never writes it (/curate owns writes).
+model: sonnet
+effort: low
 tools: Read, Grep, Glob
 ---
 <!-- tools: read-only by transport, not just policy — this stage can propose knowledge but cannot write it; promotion goes through /curate (human gate). -->
