@@ -433,7 +433,7 @@ PY
         *mcp-server-fetch*)
           case "$m_args" in
             *'mcp<2'*) : ;;
-            *) warn "$m_name does not pin the mcp SDK — mcp-server-fetch fails on import against SDK 2.x; re-run bootstrap.sh --install-tools to re-register it with --with 'mcp<2'" ;;
+            *) warn "$m_name does not pin the mcp SDK — mcp-server-fetch fails on import against SDK 2.x; re-run bootstrap.sh --install-tools (it re-registers drifted definitions), or by hand: claude mcp remove --scope user $m_name && claude mcp add --scope user $m_name -- uvx --with 'mcp<2' mcp-server-fetch" ;;
           esac ;;
       esac
     done <<EOF

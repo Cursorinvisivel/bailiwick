@@ -959,7 +959,29 @@ if ($Shadow) {
     function Register-UserMcp([string]$name, [string[]]$spawn) {   # idempotent, non-fatal
       if (Dry) { Plan "register user MCP '$name' (claude mcp add --scope user)"; return }
       if ($script:mcpUserList -match ('(?m)(^|\s)' + [regex]::Escape($name) + '(\s|:|$)')) {
-        Write-Host "  mcp(user): $name already registered"; return
+        # Convergent (#36): reconcile the USER-scope entry (top-level mcpServers) when its
+        # definition drifted (e.g. registered before the mcp<2 pin); another scope is left alone.
+        $cfgPath = if ($env:CLAUDE_CONFIG) { $env:CLAUDE_CONFIG } else { Join-Path $HOME '.claude.json' }
+        $cur = $null
+        try {
+          $servers = ([System.IO.File]::ReadAllText($cfgPath) | ConvertFrom-Json).mcpServers
+          if ($servers) { $cur = $servers.PSObject.Properties[$name].Value }
+        } catch { $cur = $null }
+        if (-not $cur) { Write-Host "  mcp(user): $name already registered"; return }
+        $have = @([string]$cur.command) + @($cur.args | ForEach-Object { [string]$_ })
+        if (($have -join "`0") -ceq ($spawn -join "`0")) {
+          Write-Host "  mcp(user): $name already registered (up to date)"; return
+        }
+        $oldJson = $cur | ConvertTo-Json -Compress -Depth 10
+        & claude mcp remove --scope user $name *> $null
+        $ok = ($LASTEXITCODE -eq 0)
+        if ($ok) { & claude mcp add --scope user $name -- @spawn *> $null; $ok = ($LASTEXITCODE -eq 0) }
+        if ($ok) { Write-Host "  mcp(user): $name definition changed - re-registered"; return }
+        if (-not ((& claude mcp list 2>$null | Out-String) -match ('(?m)(^|\s)' + [regex]::Escape($name) + '(\s|:|$)'))) {
+          & claude mcp add-json --scope user $name $oldJson *> $null
+        }
+        Write-Host "  mcp(user): could not re-register $name - run: claude mcp remove --scope user $name; claude mcp add --scope user $name -- $($spawn -join ' ')"
+        return
       }
       & claude mcp add --scope user $name -- @spawn *> $null
       if ($LASTEXITCODE -eq 0) { Write-Host "  mcp(user): registered $name" }

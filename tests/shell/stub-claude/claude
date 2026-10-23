@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Test stub for the Claude Code CLI's `mcp` subcommands — just enough to exercise user-scope MCP
+# registration. NOT on the shared stub-bin PATH (other suites rely on 'claude' being absent);
+# a suite opts in by prepending tests/shell/stub-claude to PATH.
+#   State: the top-level mcpServers of ${CLAUDE_CONFIG:-$HOME/.claude.json} (user scope).
+#   CLAUDE_STUB_LOG  file to append every invocation to (one line of args)
+#   CLAUDE_STUB_ADD_RC  exit code for `mcp add` (default 0) — simulates a failed re-add
+[ -n "${CLAUDE_STUB_LOG:-}" ] && printf '%s\n' "$*" >> "$CLAUDE_STUB_LOG"
+[ "${1:-}" = "mcp" ] || exit 0
+[ "${2:-}" = "add" ] && [ "${CLAUDE_STUB_ADD_RC:-0}" != 0 ] && exit "$CLAUDE_STUB_ADD_RC"
+exec python3 - "${CLAUDE_CONFIG:-$HOME/.claude.json}" "$@" <<'PY'
+import json, os, sys
+cfg, args = sys.argv[1], sys.argv[3:]
+d = json.load(open(cfg)) if os.path.exists(cfg) else {}
+srv = d.setdefault("mcpServers", {})
+op, rest = args[0], [a for a in args[1:] if a not in ("--scope", "user")]
+if op == "list":
+    for n, s in srv.items():
+        print("%s: %s %s - ✓ Connected" % (n, s.get("command", ""), " ".join(s.get("args", []))))
+    sys.exit(0)
+if op == "add":
+    name, spawn = rest[0], rest[rest.index("--") + 1:]
+    srv[name] = {"type": "stdio", "command": spawn[0], "args": spawn[1:], "env": {}}
+elif op == "add-json":
+    srv[rest[0]] = json.loads(rest[1])
+elif op == "remove":
+    if rest[0] not in srv:
+        sys.exit(1)
+    del srv[rest[0]]
+json.dump(d, open(cfg, "w"), indent=2)
+PY
