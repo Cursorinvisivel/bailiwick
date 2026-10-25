@@ -58,6 +58,13 @@ No definitions for the client (or no client at all) → draft as usual from the 
 4. Generate based on context provided by the orchestrator
 5. Adapt technical level to defined audience
 
+## Reading Discipline
+
+Every tool result stays in your context and is re-read on every later turn, so reading cost
+compounds. Start from the excerpts and line ranges in the dispatch brief. Locate with Grep, then
+read only the range you need (Read with offset/limit). Read a file whole only when you will
+document most of it. Never re-read a file or range already in context.
+
 ## Quality Criteria
 
 - Enables replication by another engineer without additional verbal explanation
