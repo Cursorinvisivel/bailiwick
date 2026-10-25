@@ -61,7 +61,12 @@ gain them here.
 - **Memory Collect** after integration, including research-only and partially completed tasks.
 
 Explicit invocation requires these applicable stages even for a small task; keep the scope of
-each stage small. Do not silently replace delegated work with solo execution for convenience.
+each stage small. **Split large Implement work into slices.** Give each module or file-ownership
+boundary its own Implement dispatch, each starting fresh, rather than one long run. A stage
+re-reads its whole context on every turn, so one long run costs far more than the same work done
+in fresh slices. Run independent slices concurrently and dependent ones in order. Review the
+integrated result: Quality and Security Review see all slices together, so no cross-slice issue
+escapes review. Do not silently replace delegated work with solo execution for convenience.
 Stage dependencies determine order: research findings must reach implementation before decisions
 that depend on them, and review must consume the completed draft. Parallelize only independent
 work within runtime limits. An explicitly requested narrower scope still takes precedence;
@@ -110,6 +115,11 @@ containing:
   `security-review.md`, `docs.md`, `cloud-research.md`, or `federation.md` as appropriate).
 - User objective, acceptance criteria, project instructions, domain hints/checklist, relevant
   knowledge facts/IDs, and upstream outputs. Do not assume the stage inherits main-session context.
+- The evidence you already hold, so the stage does not rediscover it: file paths with line
+  ranges, and the excerpts that matter. A reviewer gets the full diff to review, inline. A
+  stage's reads stay in its context for every later turn, so supplied evidence is cheaper than
+  re-reads. Supplying it does not limit the stage: reviewers still verify independently and
+  read whatever they judge necessary.
 - Exact file/module ownership and allowed side effects. Tell writers they share the workspace,
   must preserve others' edits, and must not revert unrelated work. Avoid concurrent ownership
   of the same files; assign a single integrator when boundaries overlap.

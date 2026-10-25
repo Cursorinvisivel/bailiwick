@@ -3,8 +3,12 @@ name: bailiwick-implement
 description: Implement stage of the Bailiwick Quality Workflow — generates Terraform/IaC/code drafts per the framework checklists. Dispatched by the Lead orchestrator with domain hints and a task specification; use for substantial code or IaC generation in Bailiwick-wired repos.
 model: inherit
 effort: medium
+tools: Read, Grep, Glob, Edit, Write, Bash, Monitor, TaskStop, ToolSearch, mcp__bailiwick-terraform__search_providers, mcp__bailiwick-terraform__get_provider_details, mcp__bailiwick-terraform__get_provider_capabilities, mcp__bailiwick-terraform__get_latest_provider_version, mcp__bailiwick-terraform__search_modules, mcp__bailiwick-terraform__get_module_details, mcp__bailiwick-terraform__get_latest_module_version, mcp__bailiwick-terraform__search_policies, mcp__bailiwick-terraform__get_policy_details
 ---
-<!-- tools: inherited (needs full file access + MCP terraform registry; guardrails.py still enforces dangerous commands at PreToolUse) -->
+<!-- tools: file access + shell (validation runs) + the terraform registry MCP. Explicit, not inherited:
+     inheriting loads every tool and MCP schema the session has (~34K tokens re-read on every turn —
+     measured 48K vs ~14K start context) and grants tools this stage never needs. No Agent: the
+     Lead owns orchestration. guardrails.py still enforces dangerous commands at PreToolUse. -->
 
 # Implement — stage
 
@@ -59,6 +63,15 @@ Consult $BAILIWICK/knowledge/patterns/terraform-module-structure.md before gener
 2. Identify the naming pattern in the target file group.
 3. Check provider version ranges in `versions.tf` before referencing any resource argument or data source.
 4. If naming, environment, or target cloud is ambiguous, clarify before implementing.
+
+## Reading Discipline
+
+Every tool result stays in your context and is re-read on every later turn, so reading cost
+compounds. Start from the excerpts and line ranges in the dispatch brief. Locate with `grep -n`
+or Grep, then read only the range you need (Read with offset/limit). Read a file whole only when
+you will edit most of it. Never re-read a file or range already in context, and do not `cat` or
+`sed -n` files through Bash when Read does the job. Keep command output short: `| tail`, `--quiet`,
+or a filtered grep, not full logs.
 
 ## Blast Radius Awareness
 
