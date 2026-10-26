@@ -163,9 +163,24 @@ ASK_GOAHEAD_PATTERNS = [
 # skill's output: the message was drafted to a file and pre-flighted against SIGNATURE_RE, and the
 # signature is requested explicitly instead of trusting config. An inline `-m` commit skipped both,
 # so it is DENIED (not asked): an ask would let one click approve the step the skill exists to force.
-# The subcommand is anchored past git's global options, so `git log --grep commit` never matches.
-GIT_COMMIT_RE = re.compile(
-    r"\bgit((\s+-[Cc]\s+\S+)|(\s+--?[\w-]+(=\S+)?))*\s+commit(?=\s|$)", re.IGNORECASE)
+# The subcommand is found past git's global options, so `git log --grep commit` never matches.
+# A token scan, not a regex: an option-repetition regex here backtracked exponentially (ReDoS).
+GIT_OPTS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
+                       "--super-prefix", "--config-env"}
+
+
+def is_git_commit(seg):
+    """True when a segment runs `git [global options] commit`."""
+    tokens = seg.split()
+    for i, tok in enumerate(tokens):
+        if tok != "git" and not tok.endswith("/git"):
+            continue
+        j = i + 1
+        while j < len(tokens) and tokens[j].startswith("-"):
+            j += 2 if tokens[j] in GIT_OPTS_WITH_VALUE else 1
+        if j < len(tokens) and tokens[j] == "commit":
+            return True
+    return False
 COMMIT_SIGN_FLAG_RE = re.compile(r"(?:^|\s)(?:-S\S*|--gpg-sign(?:=\S+)?)(?=\s|$)")
 COMMIT_NO_SIGN_RE = re.compile(r"(?:^|\s)--no-gpg-sign(?=\s|$)")
 COMMIT_MSG_FILE_RE = re.compile(r"(?:^|\s)(?:-F\s*|--file(?:=|\s+))(\S+)")
@@ -440,7 +455,7 @@ def main(adapter="claude"):
                     return 0
         # SIGNED-COMMIT SHAPE: deny a commit that skipped /sign in a repo that signs; for a
         # /sign-shaped commit, scan the -F message file, which the command text never shows.
-        commit_segs = [seg for seg in segs if GIT_COMMIT_RE.search(seg)]
+        commit_segs = [seg for seg in segs if is_git_commit(seg)]
         file_signature = False
         if commit_segs:
             shell_cwd = (payload.get("cwd") if isinstance(payload, dict) else None) or project_dir

@@ -250,6 +250,16 @@ def test_non_commit_git_commands_untouched_by_shape_tier(signing_repo, cmd):
     assert decision_of(parsed) != "deny", f"{cmd!r} is not a commit subcommand, got {parsed!r}"
 
 
+def test_git_commit_detection_is_linear_on_adversarial_options(guard_mod):
+    """CodeQL py/redos: an option-repetition regex backtracked exponentially on these inputs."""
+    import time
+    start = time.monotonic()
+    assert not guard_mod.is_git_commit("git" + " -- -" * 50000 + " x")
+    assert not guard_mod.is_git_commit("git" + " -c --=!" * 50000)
+    assert guard_mod.is_git_commit("/usr/bin/git -C repo -c a=b --no-pager commit -m x")
+    assert time.monotonic() - start < 2
+
+
 def test_shape_deny_break_glass_downgrades_to_ask(signing_repo):
     rc, parsed = run_guard("git commit -m x", cwd=str(signing_repo), break_glass=True)
     assert decision_of(parsed) == "ask"
