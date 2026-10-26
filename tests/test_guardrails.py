@@ -49,6 +49,9 @@ def run_guard(command, adapter="claude", tool=None, wired=True, cwd=None, break_
     env = dict(os.environ)
     env["BAILIWICK_HOME"] = os.environ["BAILIWICK_HOME"]
     env.pop("CLAUDE_PROJECT_DIR", None)  # let payload cwd drive project_dir deterministically
+    # Hermetic git config: the developer's global commit.gpgsign must not flip the shape tier.
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
     if wired:
         env["BAILIWICK_SHADOW"] = "1"
     else:
@@ -173,6 +176,100 @@ def test_robot_emoji_signature_asks():
     rc, parsed = run_guard(cmd)
     assert decision_of(parsed) == "ask"
     assert "signature" in parsed["hookSpecificOutput"]["permissionDecisionReason"].lower()
+
+
+# ----------------------------------------------------------------------------- SIGNED-COMMIT SHAPE
+
+@pytest.fixture
+def signing_repo(tmp_path):
+    """A git repo whose LOCAL config signs commits — the trigger for the /sign shape tier."""
+    repo = tmp_path / "signing-repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "commit.gpgsign", "true"], check=True)
+    return repo
+
+
+def write_msg(repo, text, slug="x"):
+    path = repo / ".git" / f"COMMIT_MSG_{slug}"
+    path.write_text(text, encoding="utf-8")
+    return f".git/COMMIT_MSG_{slug}"
+
+
+@pytest.mark.parametrize("cmd", [
+    "git commit -m 'feat: x'",
+    "git commit -F msg.txt -S",                       # file outside .git/
+    "git commit -F .git/COMMIT_MSG_x",                # no explicit -S
+    "git commit -S -F .git/COMMIT_MSG_x --no-gpg-sign",
+    "git commit --amend --no-edit",
+    "git add a && git commit -am wip",
+    "git -c user.name=x commit -m y",
+])
+def test_signing_repo_denies_commit_outside_sign_shape(signing_repo, cmd):
+    rc, parsed = run_guard(cmd, cwd=str(signing_repo))
+    assert decision_of(parsed) == "deny", f"{cmd!r} should DENY (not /sign-shaped), got {parsed!r}"
+    assert "/sign" in parsed["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("cmd", [
+    "git commit -S -F .git/COMMIT_MSG_x",
+    "timeout 180 git commit -S -F .git/COMMIT_MSG_x",
+    "timeout 10 gpg --batch --no-tty --pinentry-mode error -o /dev/null <<< probe "
+    "&& git commit -S -F .git/COMMIT_MSG_x",
+    "git commit --gpg-sign --file=.git/COMMIT_MSG_x",
+    "git commit --amend -S -F .git/COMMIT_MSG_x",
+])
+def test_sign_shaped_commit_reaches_go_ahead(signing_repo, cmd):
+    write_msg(signing_repo, "feat: x\n\nWhy it changed.\n")
+    rc, parsed = run_guard(cmd, cwd=str(signing_repo))
+    assert decision_of(parsed) == "ask", f"{cmd!r} should ASK (go-ahead), got {parsed!r}"
+    assert "go-ahead" in parsed["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_signature_in_msg_file_is_caught(signing_repo):
+    path = write_msg(signing_repo, "feat: x\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n")
+    rc, parsed = run_guard(f"git commit -S -F {path}", cwd=str(signing_repo))
+    assert decision_of(parsed) == "ask"
+    assert "signature" in parsed["hookSpecificOutput"]["permissionDecisionReason"].lower()
+
+
+def test_non_signing_repo_keeps_plain_go_ahead(tmp_path):
+    repo = tmp_path / "plain"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    rc, parsed = run_guard("git commit -m 'feat: x'", cwd=str(repo))
+    assert decision_of(parsed) == "ask"
+
+
+@pytest.mark.parametrize("cmd", [
+    "git log --grep commit",
+    "git show HEAD:commit.txt",
+    "git commit-tree HEAD^{tree} -m x",
+])
+def test_non_commit_git_commands_untouched_by_shape_tier(signing_repo, cmd):
+    rc, parsed = run_guard(cmd, cwd=str(signing_repo))
+    assert decision_of(parsed) != "deny", f"{cmd!r} is not a commit subcommand, got {parsed!r}"
+
+
+def test_git_commit_detection_is_linear_on_adversarial_options(guard_mod):
+    """CodeQL py/redos: an option-repetition regex backtracked exponentially on these inputs."""
+    import time
+    start = time.monotonic()
+    assert not guard_mod.is_git_commit("git" + " -- -" * 50000 + " x")
+    assert not guard_mod.is_git_commit("git" + " -c --=!" * 50000)
+    assert guard_mod.is_git_commit("/usr/bin/git -C repo -c a=b --no-pager commit -m x")
+    assert time.monotonic() - start < 2
+
+
+def test_shape_deny_break_glass_downgrades_to_ask(signing_repo):
+    rc, parsed = run_guard("git commit -m x", cwd=str(signing_repo), break_glass=True)
+    assert decision_of(parsed) == "ask"
+    assert "BREAK-GLASS" in parsed["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("adapter", ["codex", "antigravity", "gemini"])
+def test_shape_deny_across_adapters(signing_repo, adapter):
+    rc, parsed = run_guard("git commit -m x", adapter=adapter, cwd=str(signing_repo))
+    assert decision_of(parsed, adapter) == "deny"
 
 
 # ----------------------------------------------------------------------------- EXEMPT plumbing

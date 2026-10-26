@@ -40,6 +40,9 @@ framework layer complements them, never overrides them.
 - `git commit`/`push`/PR opening only on a clear user go-ahead — never your initiative. Never add AI
   attribution signatures (Co-Authored-By, "Generated with …", 🤖) to commit/PR messages unless
   explicitly wanted.
+- In a repo that signs commits, commit only through the sign skill (`__BAILIWICK__/skills/sign/SKILL.md`):
+  message drafted to `.git/COMMIT_MSG_<slug>`, pre-flighted, then `git commit -S -F` that file. The
+  guardrail denies any other commit shape there.
 - Never modify `__BAILIWICK__/knowledge/` without the human gate (`/curate`, run under Claude Code).
 - `.bailiwick-outputs/raw/` is unsanitised capture staging — never commit it. All outputs are drafts for review.
 

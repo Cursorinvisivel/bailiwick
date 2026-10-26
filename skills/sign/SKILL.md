@@ -155,6 +155,10 @@ Approval happens *before* the call runs, so the probe is fresh at execution and 
 microseconds later — no window for expiry. A failed probe short-circuits the `&&`, so the commit is
 never attempted on a cold key.
 
+In a Bailiwick-wired repo that signs, the guardrail **denies** any commit not shaped
+`git commit -S -F .git/COMMIT_MSG_<slug>` (a leading `timeout`/probe chain is fine) and scans that
+file for the attribution signature, so keep the message there and keep `-S` explicit.
+
 The framework guardrail confirms every `git commit`. **That prompt is expected, not a failure** —
 it is the "clear user go-ahead" rule doing its job. Do not treat it as an error or retry around it.
 Its latency is exactly the gap this chaining closes: the user thinking for eleven minutes at that
