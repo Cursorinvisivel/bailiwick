@@ -160,6 +160,9 @@ scope limit, not a write block (see above).
   guardrail forces a confirmation. An AI attribution signature in a commit/PR message
   (Co-Authored-By, "Generated with … Claude", 🤖) triggers its own confirmation — strip it unless
   the user explicitly wants it
+- **In a repo that signs commits, every commit goes through `/sign`** — the guardrail denies any
+  commit that is not `git commit -S -F .git/COMMIT_MSG_<slug>` (the skill's shape: message drafted
+  to a file and pre-flighted), and scans that file for attribution signatures
 - **Exempt:** dirty-zone capture plumbing (`capture_backup.sh`, capture-mirror) is never blocked —
   capture prevents data loss. Validation-only commands (terraform plan/validate/fmt, kubectl
   get/--dry-run, read-only cloud CLI) run untouched

@@ -26,6 +26,10 @@ instead of mere instructions:
           silently, never agent-initiated. A commit/PR message carrying an AI
           attribution signature (Co-Authored-By: Claude / "Generated with ... Claude" /
           the robot emoji) gets its own confirmation so a signature never lands unnoticed.
+  - SIGNED-COMMIT SHAPE (deny): in a repo that signs (commit.gpgsign / user.signingkey), a git
+          commit must take the /sign skill's shape — `-S -F .git/COMMIT_MSG_<slug>` — and the
+          message file is scanned for the attribution signature. Anything else is denied with
+          the /sign route in the reason; break-glass downgrades the deny like the error path.
   - EXEMPT: dirty-zone capture plumbing (capture_backup.sh, the capture-mirror repo)
           always passes — capture exists to guarantee no data loss and is never blocked.
 
@@ -153,6 +157,61 @@ ASK_GOAHEAD_PATTERNS = [
     (r"\bgh\b" + SEG + r"\bpr\b" + SEG + r"\b(create|merge|close|ready)\b",
      "opening/merging a PR requires a clear user go-ahead — never agent initiative; confirm to proceed."),
 ]
+
+# SIGNED-COMMIT SHAPE: in a repo that signs (commit.gpgsign=true or user.signingkey set), a commit
+# must take the /sign skill's shape — `-S` plus `-F <gitdir>/COMMIT_MSG_<slug>`. That shape is the
+# skill's output: the message was drafted to a file and pre-flighted against SIGNATURE_RE, and the
+# signature is requested explicitly instead of trusting config. An inline `-m` commit skipped both,
+# so it is DENIED (not asked): an ask would let one click approve the step the skill exists to force.
+# The subcommand is anchored past git's global options, so `git log --grep commit` never matches.
+GIT_COMMIT_RE = re.compile(
+    r"\bgit((\s+-[Cc]\s+\S+)|(\s+--?[\w-]+(=\S+)?))*\s+commit(?=\s|$)", re.IGNORECASE)
+COMMIT_SIGN_FLAG_RE = re.compile(r"(?:^|\s)(?:-S\S*|--gpg-sign(?:=\S+)?)(?=\s|$)")
+COMMIT_NO_SIGN_RE = re.compile(r"(?:^|\s)--no-gpg-sign(?=\s|$)")
+COMMIT_MSG_FILE_RE = re.compile(r"(?:^|\s)(?:-F\s*|--file(?:=|\s+))(\S+)")
+SIGN_MSG_PATH_RE = re.compile(r"(?:^|/)\.git/(?:worktrees/[^/]+/)?COMMIT_MSG_[\w.-]+$")
+UNSIGNED_SHAPE_REASON = (
+    "this repo signs commits, so commits go through the /sign skill (Codex: $bailiwick-sign; "
+    "other hosts: follow $BAILIWICK/skills/sign/SKILL.md): "
+    "draft the message to .git/COMMIT_MSG_<slug>, pre-flight it with check_message.py, then "
+    "`git commit -S -F .git/COMMIT_MSG_<slug>`. Inline -m, unsigned, and amend-without-file "
+    "commits are denied.")
+
+
+def repo_signs(cwd):
+    """True when git in `cwd` is configured to sign (commit.gpgsign=true or a user.signingkey).
+    Any failure reads as not signing — the go-ahead tier still confirms the commit."""
+    import subprocess
+    try:
+        def get(key):
+            out = subprocess.run(["git", "-C", cwd, "config", "--get", key],
+                                 capture_output=True, text=True, timeout=3)
+            return out.stdout.strip() if out.returncode == 0 else ""
+        return get("commit.gpgsign").lower() == "true" or bool(get("user.signingkey"))
+    except Exception:
+        return False
+
+
+def commit_msg_file(seg):
+    """The -F/--file path of a /sign-shaped commit segment, or None when the shape is wrong."""
+    if not COMMIT_SIGN_FLAG_RE.search(seg) or COMMIT_NO_SIGN_RE.search(seg):
+        return None
+    m = COMMIT_MSG_FILE_RE.search(seg)
+    if not m or not SIGN_MSG_PATH_RE.search(m.group(1)):
+        return None
+    return m.group(1)
+
+
+def file_has_signature(path, cwd):
+    """SIGNATURE_RE over a -F message file. With -F the message never appears in the command, so
+    without this read the signature tier would be blind to every /sign commit. Unreadable -> False."""
+    try:
+        full = path if os.path.isabs(path) else os.path.join(cwd, path)
+        with open(os.path.expanduser(full), encoding="utf-8", errors="replace") as fh:
+            return SIGNATURE_RE.search(fh.read()) is not None
+    except Exception:
+        return False
+
 
 # DANGER pre-filter (ADR-005): a broad, cheap match on the raw command, used ONLY to pick the fail
 # direction if the main pattern engine errors — fail CLOSED (deny) when this trips, else fail open.
@@ -289,9 +348,10 @@ def _respond(adapter, tier, reason, command, project_dir):
         emit("ask", reason)
 
 
-def _decide_deny(adapter, reason, command, project_dir):
-    """Error-path fail-closed deny — break-glass downgrades to ask (claude/antigravity/gemini) or
-    allow-once (codex, which has no ask). Audits every outcome."""
+def _decide_deny(adapter, reason, command, project_dir, event="deny"):
+    """Hard deny — the error-path fail-closed deny and the signed-commit shape tier. Break-glass
+    downgrades it to ask (claude/antigravity/gemini) or allow-once (codex, which has no ask).
+    Audits every outcome; `event` labels the non-break-glass audit line."""
     bg = os.environ.get("BAILIWICK_BREAK_GLASS") == "1"
     if adapter in ("antigravity", "gemini"):
         prefix = "antigravity:" if adapter == "antigravity" else "gemini:"
@@ -299,13 +359,13 @@ def _decide_deny(adapter, reason, command, project_dir):
             _audit(prefix + "break-glass", command, project_dir)
             emit_antigravity(ASK_VERB[adapter], "BREAK-GLASS override active — " + reason + " Confirm deliberately; logged.")
         else:
-            _audit(prefix + "deny", command, project_dir)
+            _audit(prefix + event, command, project_dir)
             emit_antigravity("deny", reason)
     elif adapter == "codex":
         if bg:
             _audit("codex:break-glass-allow", command, project_dir)
         else:
-            _audit("codex:deny", command, project_dir)
+            _audit("codex:" + event, command, project_dir)
             emit("deny", reason)
     else:
         if bg:
@@ -313,7 +373,7 @@ def _decide_deny(adapter, reason, command, project_dir):
             emit("ask", "BREAK-GLASS override active (BAILIWICK_BREAK_GLASS) — " + reason
                  + " Confirm deliberately; this override is logged.")
         else:
-            _audit("deny", command, project_dir)
+            _audit(event, command, project_dir)
             emit("deny", reason)
 
 
@@ -357,8 +417,8 @@ def main(adapter="claude"):
     if not (is_bailiwick_repo(project_dir) or is_shadow_repo(project_dir)):
         return 0  # Inert outside bailiwick-wired repos (seeded or shadow-activated).
 
-    # Evaluate tiers in order: EXEMPT → ASK-IMPACT → ASK-SIGNATURE → ASK-GO-AHEAD. On ANY engine
-    # failure, fail CLOSED if the command trips the destructive pre-filter, else fail open — never
+    # Evaluate tiers in order: EXEMPT → ASK-IMPACT → SIGNED-COMMIT SHAPE → ASK-SIGNATURE →
+    # ASK-GO-AHEAD. On ANY engine failure, fail CLOSED if the command trips the destructive pre-filter, else fail open — never
     # wedge the harness on a harmless command (ADR-005).
     try:
         # Per-segment evaluation (ADR-006 amendment): EXEMPT clears only its own segment, and the
@@ -378,7 +438,21 @@ def main(adapter="claude"):
                              + " — blocked from agent initiative; re-confirm this is really the intent.",
                              raw_command, project_dir)
                     return 0
-        if GIT_MESSAGE_RE.search(command) and SIGNATURE_RE.search(command):
+        # SIGNED-COMMIT SHAPE: deny a commit that skipped /sign in a repo that signs; for a
+        # /sign-shaped commit, scan the -F message file, which the command text never shows.
+        commit_segs = [seg for seg in segs if GIT_COMMIT_RE.search(seg)]
+        file_signature = False
+        if commit_segs:
+            shell_cwd = (payload.get("cwd") if isinstance(payload, dict) else None) or project_dir
+            if repo_signs(shell_cwd):
+                for seg in commit_segs:
+                    msg_file = commit_msg_file(seg)
+                    if msg_file is None:
+                        _decide_deny(adapter, UNSIGNED_SHAPE_REASON, raw_command, project_dir,
+                                     event="deny-unsigned-shape")
+                        return 0
+                    file_signature = file_signature or file_has_signature(msg_file, shell_cwd)
+        if file_signature or (GIT_MESSAGE_RE.search(command) and SIGNATURE_RE.search(command)):
             _respond(adapter, "signature",
                      "the commit/PR message carries an AI attribution signature "
                      "(Co-Authored-By / 'Generated with' / robot emoji) — confirm it is wanted, "
