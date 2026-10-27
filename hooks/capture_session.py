@@ -72,6 +72,16 @@ def knowledge_ids(text):
 # Combined with a mutation, it upgrades a loaded tidbit from "read" to "in play when work shipped".
 COMMIT_RE = re.compile(r"\bgit\b[^\n]*\bcommit\b")
 
+# Header schema. 2 = subagent transcripts are scanned too, so `/metrics` can tell captures that see
+# subagent reads from older ones (whose cold counts undercount anything a stage agent read).
+CAPTURE_SCHEMA = 2
+# Claude Code writes each subagent's transcript BESIDE the main one, not inline:
+#   <projects-dir>/<session_id>/subagents/agent-<id>.jsonl  (+ agent-<id>.meta.json)
+# Nested agents (spawnDepth > 1) land in the same flat folder; the walk is recursive anyway. Without
+# this, every knowledge read by a Memory Query, Lead stage, or fork was invisible to telemetry.
+# Claude Code only: Codex and Antigravity subagent transcript locations are not yet verified.
+SUBAGENT_GLOB = re.compile(r"^agent-[\w-]+\.jsonl$")
+
 
 # Self-gating, shadow gate, home resolution, and health logging live in the shared
 # hooks/bw_common.py substrate (one implementation for this hook and guardrails.py).
@@ -221,6 +231,44 @@ def _scan_antigravity(rec, st):
             st["loaded"].update(knowledge_ids(path_str))
 
 
+def _new_state():
+    return {"tool_calls": 0, "mutating": 0, "patch_events": 0, "committed": False,
+            "tools": set(), "loaded": set(), "agent": "claude"}
+
+
+def _scan_file(path, st):
+    """Scan one transcript into `st`, dispatching each record on its shape (Claude/Codex/agy)."""
+    with open(path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            if isinstance(rec.get("payload"), dict) and "message" not in rec:
+                st["agent"] = "codex"
+                _scan_codex(rec, st)
+            elif "tool_calls" in rec or "step_index" in rec or rec.get("source") in ("USER_INPUT", "PLANNER_RESPONSE", "MODEL", "SYSTEM"):
+                st["agent"] = "antigravity"
+                _scan_antigravity(rec, st)
+            else:
+                _scan_claude(rec, st)
+
+
+def subagent_transcripts(transcript):
+    """Sorted subagent transcript paths for a Claude Code session ([] when it spawned none)."""
+    stem = os.path.splitext(os.path.basename(transcript))[0]
+    root = os.path.join(os.path.dirname(transcript), stem, "subagents")
+    found = []
+    for dirpath, _dirs, files in os.walk(root):
+        found.extend(os.path.join(dirpath, f) for f in files if SUBAGENT_GLOB.match(f))
+    return sorted(found)
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -244,37 +292,36 @@ def main():
     if not (seeded or shadow):
         return 0  # Inert outside bailiwick-wired repos (seeded or shadow-activated).
 
-    st = {"tool_calls": 0, "mutating": 0, "patch_events": 0, "committed": False,
-          "tools": set(), "loaded": set(), "agent": "claude"}
+    st = _new_state()
     try:
-        with open(transcript, "r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except Exception:
-                    continue
-                if not isinstance(rec, dict):
-                    continue
-                if isinstance(rec.get("payload"), dict) and "message" not in rec:
-                    st["agent"] = "codex"
-                    _scan_codex(rec, st)
-                elif "tool_calls" in rec or "step_index" in rec or rec.get("source") in ("USER_INPUT", "PLANNER_RESPONSE", "MODEL", "SYSTEM"):
-                    st["agent"] = "antigravity"
-                    _scan_antigravity(rec, st)
-                else:
-                    _scan_claude(rec, st)
+        _scan_file(transcript, st)
     except Exception as e:
         _health("error", "transcript read failed for {}: {!r}".format(session_id, e)[:200])
         return 0
 
-    tool_calls = st["tool_calls"]
-    mutating = st["mutating"]
-    committed = st["committed"]
-    tools_used = st["tools"]
+    # Subagent transcripts (Claude Code). A Stop can fire while a background agent still runs; the
+    # capture is rewritten on every Stop and at SessionEnd, so the last one sees finished agents.
+    # An unreadable subagent file degrades to the main transcript with a health warn — never blocks.
+    sub = _new_state()
+    sub_count = 0
+    if st["agent"] == "claude":
+        for path in subagent_transcripts(transcript):
+            try:
+                _scan_file(path, sub)
+                sub_count += 1
+            except Exception as e:  # one bad file never hides the others
+                _health("warn", "subagent scan failed for {} ({}): {!r}".format(
+                    session_id, os.path.basename(path), e)[:200])
+
+    # Subagent work counts toward the session: a Lead that only dispatched an Implement stage
+    # still shipped what that stage wrote.
+    tool_calls = st["tool_calls"] + sub["tool_calls"]
+    mutating = st["mutating"] + sub["mutating"]
+    committed = st["committed"] or sub["committed"]
+    tools_used = st["tools"] | sub["tools"]
     loaded_ids = st["loaded"]
+    # Disjoint from `loaded`, so crediting both never counts one id twice for a session.
+    loaded_via_subagents = sub["loaded"] - loaded_ids
     # Code-mode Codex applies a patch from INSIDE an `exec` call, so the only trace left is the
     # patch_apply_end event. Use it as a FLOOR, never an addition — an `apply_patch` tool call and
     # its patch_apply_end are the same edit counted from two sides.
@@ -288,7 +335,7 @@ def main():
     # `applied` (ADR-004): loaded tidbits get applied credit when this session SHIPPED work —
     # produced a file mutation and/or a git commit. Coarse by design (all co-loaded ids credited);
     # the semantic `used` tier at /curate disambiguates which one actually informed the output.
-    applied_ids = sorted(loaded_ids) if (mutating > 0 or committed) else []
+    applied_ids = sorted(loaded_ids | loaded_via_subagents) if (mutating > 0 or committed) else []
 
     # Seeded repos stage in-repo; shadow-only repos stage centrally, keyed by origin repo, so the
     # target repo tree stays untouched (FRAMEWORK.md §7.1). Seeded wins if a repo is somehow both.
@@ -310,6 +357,7 @@ def main():
         with open(meta, "w", encoding="utf-8") as fh:
             fh.write("# Raw capture — {}\n\n".format(session_id))
             fh.write("- captured: {}\n".format(stamp))
+            fh.write("- capture_schema: {}\n".format(CAPTURE_SCHEMA))
             fh.write("- event: {}\n".format(event))
             fh.write("- project_dir: {}\n".format(project_dir))
             fh.write("- mode: {}\n".format("seeded" if seeded else "shadow"))
@@ -318,6 +366,7 @@ def main():
                 fh.write("- origin_remote: {}\n".format(origin_remote(project_dir) or "(none)"))
             fh.write("- tool_calls: {} (mutating: {})\n".format(tool_calls, mutating))
             fh.write("- tools: {}\n".format(", ".join(sorted(tools_used)) or "none"))
+            fh.write("- subagents: {}\n".format(sub_count))
             fh.write("- transcript: {}\n\n".format(os.path.basename(dest)))
             # Mechanical Retrieval Feedback — the `loaded` signal /curate Step 2 applies to telemetry
             # (load_count, last_loaded, and distinct_projects_used credited to this project). Derived
@@ -326,7 +375,9 @@ def main():
             fh.write("## Retrieval Feedback (auto-derived)\n")
             fh.write("- project: {}\n".format(project_id))
             fh.write("- loaded: [{}]\n".format(", ".join(sorted(loaded_ids))))
-            # `applied` = loaded ids credited because this session shipped (mutation and/or commit);
+            # Read only by a subagent (Memory Query, Lead stages, forks). Credit like `loaded`.
+            fh.write("- loaded_via_subagents: [{}]\n".format(", ".join(sorted(loaded_via_subagents))))
+            # `applied` = loaded ids (both lists) credited because this session shipped (mutation and/or commit);
             # `committed` records whether a git commit ran. Consumed by /curate telemetry (ADR-004).
             fh.write("- applied: [{}]\n".format(", ".join(applied_ids)))
             fh.write("- committed: {}\n\n".format("true" if committed else "false"))

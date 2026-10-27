@@ -333,3 +333,124 @@ def test_machine_normalization_matches_bash_pipeline(name):
     import re as _re
     py_out = _re.sub(r"[^a-z0-9._-]", "", name.lower().replace(" ", "-"))
     assert py_out == bash_out
+
+
+# ---- subagent transcripts (Claude Code: <dir>/<sid>/subagents/agent-<id>.jsonl) ----------------
+
+def _session(tmp_path, main_calls, sid="sess-sub"):
+    """A wired project + a main transcript laid out the way Claude Code stores it."""
+    proj = _wired(tmp_path)
+    tdir = tmp_path / "projects-dir"
+    tdir.mkdir()
+    transcript = tdir / (sid + ".jsonl")
+    _make_transcript(transcript, main_calls)
+    return proj, transcript
+
+
+def _subagent(transcript, agent_id, calls, depth=1):
+    sub = transcript.parent / transcript.stem / "subagents"
+    sub.mkdir(parents=True, exist_ok=True)
+    path = sub / "agent-{}.jsonl".format(agent_id)
+    _make_transcript(path, calls)
+    (sub / "agent-{}.meta.json".format(agent_id)).write_text(
+        json.dumps({"agentType": "bailiwick-memory", "spawnDepth": depth}))
+    return path
+
+
+def _header(proj, sid="sess-sub"):
+    return (proj / ".bailiwick-outputs" / "raw" / (sid + ".md")).read_text()
+
+
+def _field(meta, name):
+    line = next(l for l in meta.splitlines() if l.startswith("- {}:".format(name)))
+    inner = line.split(":", 1)[1].strip().strip("[]")
+    return sorted(x.strip() for x in inner.split(",") if x.strip())
+
+
+MAIN_WORK = [("Agent", {"prompt": "x"}), ("Write", {"file_path": "out.tf"})]
+
+
+def test_subagent_read_is_credited_separately(tmp_path, monkeypatch):
+    monkeypatch.setenv("BAILIWICK_HOME", str(tmp_path / "bw-home"))
+    proj, t = _session(tmp_path, MAIN_WORK + [("Read", {"file_path": "/b/knowledge/topics/main-one.md"})])
+    _subagent(t, "a1", [("Read", {"file_path": "/b/knowledge/topics/sub-only.md"}),
+                        ("Read", {"file_path": "/b/knowledge/topics/main-one.md"})])
+    assert _run_hook(proj, t, session_id="sess-sub").returncode == 0
+    meta = _header(proj)
+    assert _field(meta, "loaded") == ["main-one"]
+    # disjoint from `loaded`: an id the main session also read is not credited twice
+    assert _field(meta, "loaded_via_subagents") == ["sub-only"]
+    assert _field(meta, "applied") == ["main-one", "sub-only"]
+    assert "- capture_schema: 2" in meta
+    assert "- subagents: 1" in meta
+
+
+def test_subagent_path_mention_in_write_is_not_a_load(tmp_path, monkeypatch):
+    monkeypatch.setenv("BAILIWICK_HOME", str(tmp_path / "bw-home"))
+    proj, t = _session(tmp_path, MAIN_WORK)
+    _subagent(t, "a1", [("Write", {"file_path": "doc.md",
+                                   "content": "see knowledge/topics/mentioned.md"})])
+    _run_hook(proj, t, session_id="sess-sub")
+    assert _field(_header(proj), "loaded_via_subagents") == []
+
+
+def test_no_subagents_folder_still_captures(tmp_path, monkeypatch):
+    monkeypatch.setenv("BAILIWICK_HOME", str(tmp_path / "bw-home"))
+    proj, t = _session(tmp_path, MAIN_WORK)
+    assert _run_hook(proj, t, session_id="sess-sub").returncode == 0
+    meta = _header(proj)
+    assert "- subagents: 0" in meta
+    assert _field(meta, "loaded_via_subagents") == []
+
+
+def test_nested_subagents_are_scanned(tmp_path, monkeypatch):
+    monkeypatch.setenv("BAILIWICK_HOME", str(tmp_path / "bw-home"))
+    proj, t = _session(tmp_path, MAIN_WORK)
+    _subagent(t, "parent", [("Agent", {"prompt": "y"})])
+    _subagent(t, "child", [("mcp__bailiwick-filesystem__read_text_file",
+                            {"path": "/b/knowledge/patterns/deep-read.md"})], depth=2)
+    _run_hook(proj, t, session_id="sess-sub")
+    meta = _header(proj)
+    assert _field(meta, "loaded_via_subagents") == ["deep-read"]
+    assert "- subagents: 2" in meta
+
+
+def test_subagent_only_work_makes_the_session_substantive(tmp_path, monkeypatch):
+    """A Lead that only dispatched an Implement stage still shipped what the stage wrote."""
+    monkeypatch.setenv("BAILIWICK_HOME", str(tmp_path / "bw-home"))
+    proj, t = _session(tmp_path, [("Agent", {"prompt": "implement"})])
+    _subagent(t, "impl", [("Read", {"file_path": "/b/knowledge/topics/used-here.md"}),
+                          ("Edit", {"file_path": "main.tf"})])
+    _run_hook(proj, t, session_id="sess-sub")
+    meta = _header(proj)
+    assert _field(meta, "applied") == ["used-here"]
+
+
+def test_later_stop_sees_a_subagent_that_finished_after_the_first(tmp_path, monkeypatch):
+    """Stop can fire while a background agent runs; the next Stop/SessionEnd rewrites the capture."""
+    monkeypatch.setenv("BAILIWICK_HOME", str(tmp_path / "bw-home"))
+    proj, t = _session(tmp_path, MAIN_WORK)
+    path = _subagent(t, "bg", [("Bash", {"command": "ls"})])
+    _run_hook(proj, t, session_id="sess-sub", event="Stop")
+    assert _field(_header(proj), "loaded_via_subagents") == []
+    with open(path, "a") as fh:
+        fh.write(json.dumps({"message": {"content": [{"type": "tool_use", "name": "Read",
+                 "input": {"file_path": "/b/knowledge/topics/late-read.md"}}]}}) + "\n")
+    _run_hook(proj, t, session_id="sess-sub", event="SessionEnd")
+    assert _field(_header(proj), "loaded_via_subagents") == ["late-read"]
+
+
+def test_unreadable_subagent_degrades_to_main_transcript(tmp_path, monkeypatch):
+    home = tmp_path / "bw-home"
+    monkeypatch.setenv("BAILIWICK_HOME", str(home))
+    proj, t = _session(tmp_path, MAIN_WORK + [("Read", {"file_path": "/b/knowledge/topics/main-one.md"})])
+    bad = t.parent / t.stem / "subagents" / "agent-broken.jsonl"
+    bad.parent.mkdir(parents=True)
+    bad.write_bytes(b"\xff\xfe not utf-8\n")  # decoding raises mid-scan
+    _subagent(t, "zz-good", [("Read", {"file_path": "/b/knowledge/topics/after-bad.md"})])
+    assert _run_hook(proj, t, session_id="sess-sub").returncode == 0
+    meta = _header(proj)
+    assert _field(meta, "loaded") == ["main-one"]
+    assert _field(meta, "loaded_via_subagents") == ["after-bad"]
+    shards = list((home / "health").glob("*.jsonl"))
+    assert shards and "subagent scan failed" in shards[0].read_text()

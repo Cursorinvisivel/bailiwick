@@ -37,8 +37,10 @@ No other headings, no summary tables, no re-derived statistics — interpretatio
 from the section guide below.
 
 ## How to read it (and what to do)
-- **[retrieval]** — `ever loaded` vs `cold`. The `loaded` signal is mechanical and reliable
-  (`capture_session.py` derives it from every transcript), so this is trustworthy.
+- **[retrieval]** — `ever loaded` vs `cold`. The `loaded` signal is mechanical (`capture_session.py`
+  derives it from every transcript), but captures before `capture_schema: 2` never saw subagent
+  reads, so a file only stage agents read looks cold. When the report prints a `caveat:` line,
+  relay it: cold counts are inflated until subagent-aware captures span 60 days.
 - **[impact — funnel load → applied → used]** — `loaded` (mechanical read), `applied` (loaded in a
   session that shipped a mutation/commit — mechanical proxy, ADR-004), `used` (curate-judged: the
   reasoning shows the tidbit informed the output). If it warns that no `applied`/`used` signal exists
@@ -46,7 +48,9 @@ from the section guide below.
 - **[reach & graduation]** — `graduation-eligible` = topics at `confidence: high` used in ≥3 distinct
   projects → propose promoting `topics/ → patterns/` at the next `/curate`. `bump candidate` = ≥3
   projects but confidence still low/medium → propose a confidence bump.
-- **[archival / rewrite candidates]** — `never loaded` files are archive-or-advertise candidates
+- **[archival / rewrite candidates]** — while the `caveat:` line shows, `never loaded` files are
+  **not** archive candidates: older captures in the window miss subagent reads. Recommend nothing
+  be archived for coldness until it clears. Otherwise, `never loaded` files are archive-or-advertise candidates
   (either genuinely unused, or under-discovered because their INDEX tags/description are weak — check
   the index entry before archiving). The loaded-but-never-useful list stays OFF until a `used` signal
   exists.

@@ -19,6 +19,12 @@ import sys
 
 CONTENT_DIRS = ("topics", "patterns", "context", "clients")
 STALE_DAYS = 270  # ~9 months — matches memory.md Periodic Curation staleness scan.
+# Captures before capture_schema 2 never saw subagent reads (Memory Query, Lead stages, forks), so a
+# file only those agents read looked cold. "Never loaded" is no archive verdict until subagent-aware
+# captures have covered this long.
+SUBAGENT_WINDOW_DAYS = 60
+SCHEMA_RE = re.compile(r"^- capture_schema:\s*(\d+)", re.MULTILINE)
+CAPTURED_RE = re.compile(r"^- captured:\s*(\d{4}-\d{2}-\d{2})", re.MULTILINE)
 FM = re.compile(r"^---\s*(.*?)\n---", re.DOTALL)
 
 
@@ -81,6 +87,46 @@ def age_days(iso, today):
 
 def bw_home():
     return os.environ.get("BAILIWICK_HOME") or os.path.join(os.path.expanduser("~"), ".bailiwick")
+
+
+def capture_coverage(kdir):
+    """Schema split of the capture headers this machine can reach (raw + .curated, in the framework
+    clone and the shadow staging). Returns {"total", "old", "first_subagent_aware"}."""
+    roots = [os.path.join(os.path.dirname(kdir), ".bailiwick-outputs", "raw"),
+             os.path.join(bw_home(), "captures")]
+    total, old, first = 0, 0, None
+    # os.walk, not glob: glob's ** skips hidden dirs, and processed captures live in .curated/.
+    paths = [os.path.join(d, f) for root in roots for d, _s, fs in os.walk(root)
+             for f in fs if f.endswith(".md")]
+    for path in paths:
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+                head = fh.read(2048)
+        except Exception:
+            continue
+        if not head.startswith("# Raw capture"):
+            continue
+        total += 1
+        m = SCHEMA_RE.search(head)
+        if not m or int(m.group(1)) < 2:
+            old += 1
+            continue
+        d = CAPTURED_RE.search(head)
+        if d and (first is None or d.group(1) < first):
+            first = d.group(1)
+    return {"total": total, "old": old, "first_subagent_aware": first}
+
+
+def subagent_caveat(cov, today):
+    """None once subagent-aware captures span SUBAGENT_WINDOW_DAYS, else the caveat line."""
+    first = cov["first_subagent_aware"]
+    span = age_days(first, today) if first else None
+    if span is not None and span >= SUBAGENT_WINDOW_DAYS:
+        return None
+    return ("{} of {} reachable captures predate subagent read capture (capture_schema < 2); "
+            "subagent-aware since {}. Files read only by stage agents look cold, so do not "
+            "archive for coldness until that spans {} days.").format(
+                cov["old"], cov["total"], first or "never", SUBAGENT_WINDOW_DAYS)
 
 
 def log_health(event, detail):
@@ -197,7 +243,7 @@ def build(kdir):
     return rows, orphans, missing
 
 
-def report_text(rows, orphans, missing, top):
+def report_text(rows, orphans, missing, top, caveat=None):
     R = rows.values()
     n = len(rows)
     loaded = [r for r in R if r["load_count"] > 0]
@@ -235,6 +281,8 @@ def report_text(rows, orphans, missing, top):
     line("ever loaded", f"{len(loaded)}/{n}")
     line("total load events", total_loads)
     line("cold (never loaded)", f"{len(cold)}/{n}")
+    if caveat:
+        print("  caveat: " + caveat)
 
     print("\n[impact — funnel: load → applied → used]")
     line("loaded (read)", f"{len(loaded)}/{n}")
@@ -266,7 +314,12 @@ def report_text(rows, orphans, missing, top):
     elif dead_sig is None:
         print("  (loaded-but-not-useful heuristic OFF — no `applied`/`used` signal library-wide yet;")
         print("   high load with 0 impact here means the signal is missing, NOT that the file is dead)")
-    if cold:
+    if cold and caveat:
+        print(f"  never loaded ({len(cold)}) — NOT archive candidates yet (see [retrieval] caveat);")
+        print("  advertise better or wait for subagent-aware captures:")
+        for c in sorted(cold):
+            print(f"    · {c}")
+    elif cold:
         print(f"  never loaded ({len(cold)}) — candidates to archive or advertise better:")
         for c in sorted(cold):
             print(f"    · {c}")
@@ -297,13 +350,15 @@ def main():
         return 2
     rows, orphans, missing = build(kdir)
     health = load_health_shards()
+    coverage = capture_coverage(kdir)
+    caveat = subagent_caveat(coverage, datetime.date.today())
     if a.json:
         json.dump({"knowledge": kdir, "rows": rows, "orphans": orphans, "missing": missing,
-                   "health": health},
+                   "health": health, "capture_coverage": dict(coverage, caveat=caveat)},
                   sys.stdout, indent=2, default=str)
         sys.stdout.write("\n")
     else:
-        report_text(rows, orphans, missing, a.top)
+        report_text(rows, orphans, missing, a.top, caveat)
         report_health(health, datetime.date.today())
         print()
     return 0
