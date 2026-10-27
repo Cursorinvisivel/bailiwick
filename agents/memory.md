@@ -102,8 +102,14 @@ Read `$BAILIWICK/knowledge/.telemetry.json`.
 header, derived from the knowledge-file reads in the transcript — so this signal no longer depends on
 an agent remembering to self-report it (that path never fired; telemetry sat at all-zeros). Apply it:
 
-For each `loaded` id in a capture's block (the file was read during substantive work in that capture's
-`project`):
+The block also carries `loaded_via_subagents: [ids]` (header `capture_schema: 2` and later): files
+read only by a subagent of that session (Memory Query, Lead stages, forks), whose transcripts Claude
+Code stores beside the main one. It is disjoint from `loaded`, so credit **each id in either list
+exactly as below** — never twice for one capture. Older captures lack the field and undercount
+anything a stage agent read.
+
+For each `loaded` (or `loaded_via_subagents`) id in a capture's block (the file was read during
+substantive work in that capture's `project`):
 - Increment `load_count`, set `last_loaded` to today.
 - If the capture's `project` is not already in `distinct_projects_used`, **append it** — this is what
   makes the **graduation signal accumulate** (`distinct_projects_used >= 3`) from real, mechanical
@@ -325,7 +331,7 @@ proactive staleness, non-blocking digest, and graduation review.
 
 1. **Proactive staleness scan**: read ALL `last_validated` fields in frontmatter regardless of recent tag activity. Flag any file older than 9 months — this catches the dangerous quadrant (stable, never-touched, silently wrong).
 2. **Non-blocking digest**: apply all EXPAND and non-contradicting IMPROVE candidates that were held from recent sessions. Present as a single batch for approval.
-3. **Archival candidates**: from `.telemetry.json`, surface files where `load_count` is high, `useful_count` is near zero, and `last_useful` is old. Present as "loaded repeatedly but rarely used — candidate for archival or rewrite."
+3. **Archival candidates**: from `.telemetry.json`, surface files where `load_count` is high, `useful_count` is near zero, and `last_useful` is old. Present as "loaded repeatedly but rarely used — candidate for archival or rewrite." Never propose archiving a file for zero loads while `/metrics` prints its subagent `caveat:` line: older captures missed subagent reads (ADR-004 Amendment 1).
 4. **Graduation review**: surface any topic eligible for pattern graduation (`confidence: high`, `distinct_projects_used.length >= 3`, `open_contradictions == 0`).
 5. **Confidence proposals**: propose `medium → high` for any topic where `distinct_projects_used.length >= 3` and `open_contradictions == 0`.
 6. **GCP freshness report** (dispatched at curate Step 1, before off-machine captures are

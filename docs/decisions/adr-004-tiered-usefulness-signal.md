@@ -124,6 +124,25 @@ excluded that credit rather than skew the signal.
 - `knowledge/INDEX.md` header + `.telemetry.json` schema — the new counters seed into
   existing rows on a `/curate` reconcile; the INDEX schema note is updated in the same gated pass.
 
+## Amendment 1 — subagent reads (2026-10-27)
+
+Claude Code stores each subagent's transcript beside the main one
+(`<session_id>/subagents/agent-<id>.jsonl`), not inline, and `capture_session.py` read only the main
+transcript. Every knowledge read by a Memory Query, Lead stage, or fork was therefore missing from
+`loaded`, so cold counts overstated how unused the library is. The hook now scans those transcripts
+too (recursively; nested agents share the folder) with the same read-only detection, and writes:
+
+- `loaded_via_subagents: [ids]` — read only by a subagent; disjoint from `loaded`, credited the same.
+- `applied` — the union of both lists when the session shipped; subagent mutations and commits count
+  toward shipping and toward the substantive threshold.
+- `capture_schema: 2` and `subagents: N` in the header, so `/metrics` can tell subagent-aware
+  captures from older ones and withhold the "never loaded → archive" verdict until subagent-aware
+  captures span 60 days.
+
+Claude Code only. Codex and Antigravity subagent transcript locations are not yet verified; their
+captures stay main-transcript-only. An unreadable subagent file degrades to the rest with a health
+warn. Captures already purged cannot be repaired.
+
 ## References
 - `skills/metrics/report.py` + `SKILL.md` (the report that surfaced `useful_count = 0`)
 - `agents/memory.md` (Retrieval Feedback + telemetry counters)
