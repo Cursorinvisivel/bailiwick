@@ -11,6 +11,9 @@
   "//curate": "OPTIONAL. 'deidentify': true forces every /curate promotion into de-identified mode — no client/project identifiers are ever stored (scope forced to generic, no clients/<id>/ files, org names/ids/project associations stripped at ingest), keeping only the reusable 'how it was solved'. Leave false for the normal model (client detail routed to clients/<id>/). Per-run override: '/curate --sanitized'.",
   "curate": { "deidentify": false },
 
+  "//capture": "OPTIONAL. 'include_subagents' (default true): append each Claude Code subagent's transcript records to the session capture, tagged isSidechain + agentId, so /curate sees what stage agents reasoned and did. Still one .jsonl per session. Set false to keep captures main-transcript-only (smaller; subagent knowledge reads are credited either way).",
+  "capture": { "include_subagents": true },
+
   "//capture_backup": "OPTIONAL encrypted off-machine backup of the dirty zone (.bailiwick-outputs/) so un-curated captures survive disk loss. Only CIPHERTEXT leaves the machine; the gpg private key never does. Disabled by default. 'repo' must be a DEDICATED PRIVATE repo (not the framework repo, not a client repo). 'gpg_recipients' = public key fingerprint(s); the matching private key lives only on the machine that runs /curate. 'confidentiality_ack' must be true to back up data that may include client material — enabling it asserts your engagement terms permit it.",
   "capture_backup": {
     "enabled": false,

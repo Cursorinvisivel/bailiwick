@@ -454,3 +454,54 @@ def test_unreadable_subagent_degrades_to_main_transcript(tmp_path, monkeypatch):
     assert _field(meta, "loaded_via_subagents") == ["after-bad"]
     shards = list((home / "health").glob("*.jsonl"))
     assert shards and "subagent scan failed" in shards[0].read_text()
+
+
+# ---- subagent records inlined into the ONE capture file (capture.include_subagents) ------------
+
+def _records(proj, sid="sess-sub"):
+    path = proj / ".bailiwick-outputs" / "raw" / (sid + ".jsonl")
+    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+
+
+def test_subagent_records_are_appended_tagged_after_the_main_ones(tmp_path, monkeypatch):
+    monkeypatch.setenv("BAILIWICK_HOME", str(tmp_path / "bw-home"))
+    proj, t = _session(tmp_path, MAIN_WORK)
+    path = _subagent(t, "a1", [("Read", {"file_path": "x"}), ("Bash", {"command": "ls"})])
+    # one record already tagged the way current Claude Code writes it: kept as is
+    with open(path, "a") as fh:
+        fh.write(json.dumps({"isSidechain": True, "agentId": "a1", "message": {"content": []}}) + "\n")
+    _run_hook(proj, t, session_id="sess-sub")
+    recs = _records(proj)
+    assert len(recs) == 2 + 3
+    assert not any(r.get("isSidechain") for r in recs[:2]), "main records come first, untouched"
+    assert all(r["isSidechain"] is True and r["agentId"] == "a1" for r in recs[2:])
+    assert "records inlined: 3" in _header(proj)
+
+
+def test_repeated_stop_never_duplicates_inlined_records(tmp_path, monkeypatch):
+    monkeypatch.setenv("BAILIWICK_HOME", str(tmp_path / "bw-home"))
+    proj, t = _session(tmp_path, MAIN_WORK)
+    _subagent(t, "a1", [("Read", {"file_path": "x"})])
+    for event in ("Stop", "Stop", "SessionEnd"):
+        _run_hook(proj, t, session_id="sess-sub", event=event)
+    assert len(_records(proj)) == 2 + 1
+
+
+def test_include_subagents_false_keeps_signals_but_not_records(tmp_path, monkeypatch):
+    """Flag off: the capture stays main-only, yet subagent reads are still credited."""
+    import shutil
+    monkeypatch.setenv("BAILIWICK_HOME", str(tmp_path / "bw-home"))
+    fw = tmp_path / "fw"
+    shutil.copytree(HOOKS, fw / "hooks", ignore=shutil.ignore_patterns("__pycache__"))
+    (fw / ".bailiwick-sync.json").write_text(json.dumps({"capture": {"include_subagents": False}}))
+    proj, t = _session(tmp_path, MAIN_WORK)
+    _subagent(t, "a1", [("Read", {"file_path": "/b/knowledge/topics/sub-only.md"})])
+    payload = json.dumps({"hook_event_name": "SessionEnd", "session_id": "sess-sub",
+                          "transcript_path": str(t), "cwd": str(proj)})
+    r = subprocess.run([sys.executable, str(fw / "hooks" / "capture_session.py")], input=payload,
+                       text=True, capture_output=True, env=dict(os.environ, CLAUDE_PROJECT_DIR=str(proj)))
+    assert r.returncode == 0, r.stderr
+    assert len(_records(proj)) == 2
+    meta = _header(proj)
+    assert "records inlined: 0" in meta
+    assert _field(meta, "loaded_via_subagents") == ["sub-only"]

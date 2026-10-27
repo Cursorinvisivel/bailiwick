@@ -83,6 +83,17 @@ def machine_token(name):
     return re.sub(r"[^a-z0-9._-]", "", (name or "").lower().replace(" ", "-"))
 
 
+def sync_config():
+    """This clone's .bailiwick-sync.json as a dict ({} when absent or unreadable)."""
+    try:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, ".bailiwick-sync.json"), encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        return cfg if isinstance(cfg, dict) else {}
+    except Exception:
+        return {}
+
+
 def health(component, event, detail):
     """Append one line to this machine's health shard (best-effort, never raises).
 
@@ -91,13 +102,7 @@ def health(component, event, detail):
     """
     try:
         import socket
-        machine = ""
-        try:
-            root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            with open(os.path.join(root, ".bailiwick-sync.json"), encoding="utf-8") as fh:
-                machine = (json.load(fh).get("machine") or "").strip()
-        except Exception:
-            pass
+        machine = str(sync_config().get("machine") or "").strip()
         machine = machine_token(machine or socket.gethostname()) or "unknown"
         hdir = os.path.join(bw_home(), "health")
         os.makedirs(hdir, exist_ok=True)
