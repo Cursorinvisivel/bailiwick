@@ -112,7 +112,9 @@ ensure_mirror() {
   fi
 }
 
-git_id() { git -C "$MIRROR" -c user.name=bailiwick -c user.email=backup@local "$@"; }
+# Machine-generated ciphertext commits: never sign. Inheriting a user's global commit.gpgsign=true
+# makes every Stop/SessionEnd hook fire a pinentry prompt (or hang/fail headless).
+git_id() { git -C "$MIRROR" -c user.name=bailiwick -c user.email=backup@local -c commit.gpgsign=false "$@"; }
 
 case "$MODE" in
   push)
@@ -329,7 +331,7 @@ case "$MODE" in
         bw_health capture_backup warn "purge: cannot stage worktree for $tbr ($rel)"
         echo "[backup] cannot stage a worktree for $tbr — purge not applied" >&2; exit 0
       fi
-      wid() { git -C "$wt/w" -c user.name=bailiwick -c user.email=backup@local "$@"; }
+      wid() { git -C "$wt/w" -c user.name=bailiwick -c user.email=backup@local -c commit.gpgsign=false "$@"; }
       wid rm -q --ignore-unmatch "$rel" "$rel.sha256" 2>/dev/null || true
       ph="$(printf '%s' "$rel" | sha256sum | awk '{print $1}')"
       grep -qx "$ph" "$wt/w/.purged" 2>/dev/null || { printf '%s\n' "$ph" >> "$wt/w/.purged"; wid add .purged; }
