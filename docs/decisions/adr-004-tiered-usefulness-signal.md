@@ -139,6 +139,13 @@ too (recursively; nested agents share the folder) with the same read-only detect
   captures from older ones and withhold the "never loaded → archive" verdict until subagent-aware
   captures span 60 days.
 
+The subagent records themselves are appended to the session capture (`isSidechain: true` +
+`agentId`, the shape older Claude Code wrote inline), so `/curate` can judge `used` for work routed
+through the Lead. The capture stays one `.jsonl` + `.md` pair, so backup, `/curate`, and `/purge` are
+unchanged; the main transcript is copied fresh before appending, so repeated Stops never duplicate.
+Captures grow (roughly 20–50% where stages ran); `capture.include_subagents: false` in
+`.bailiwick-sync.json` turns the append off without affecting the read credit.
+
 Claude Code only. Codex and Antigravity subagent transcript locations are not yet verified; their
 captures stay main-transcript-only. An unreadable subagent file degrades to the rest with a health
 warn. Captures already purged cannot be repaired.

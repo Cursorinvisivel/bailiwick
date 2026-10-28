@@ -269,6 +269,42 @@ def subagent_transcripts(transcript):
     return sorted(found)
 
 
+def include_subagents():
+    """`capture.include_subagents` in .bailiwick-sync.json — default on."""
+    capture = bw_common.sync_config().get("capture")
+    if isinstance(capture, dict) and capture.get("include_subagents") is False:
+        return False
+    return True
+
+
+def append_subagents(dest, paths):
+    """Append each subagent's records to the copied capture, tagged the way older Claude Code wrote
+    them inline (isSidechain: true + agentId), so the capture stays ONE .jsonl per session and
+    backup, /curate, and /purge need no change. The caller copies the main transcript fresh first,
+    so a repeated Stop never duplicates records. Returns the number of records appended."""
+    count = 0
+    with open(dest, "a", encoding="utf-8") as out:
+        for path in paths:
+            agent_id = os.path.basename(path)[len("agent-"):-len(".jsonl")]
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    for line in fh:
+                        try:
+                            rec = json.loads(line)
+                        except Exception:
+                            continue
+                        if not isinstance(rec, dict):
+                            continue
+                        rec["isSidechain"] = True
+                        rec.setdefault("agentId", agent_id)
+                        out.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                        count += 1
+            except Exception as e:  # one bad file never drops the others
+                _health("warn", "subagent append failed for {}: {!r}".format(
+                    os.path.basename(path), e)[:200])
+    return count
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -304,14 +340,14 @@ def main():
     # An unreadable subagent file degrades to the main transcript with a health warn — never blocks.
     sub = _new_state()
     sub_count = 0
-    if st["agent"] == "claude":
-        for path in subagent_transcripts(transcript):
-            try:
-                _scan_file(path, sub)
-                sub_count += 1
-            except Exception as e:  # one bad file never hides the others
-                _health("warn", "subagent scan failed for {} ({}): {!r}".format(
-                    session_id, os.path.basename(path), e)[:200])
+    sub_paths = subagent_transcripts(transcript) if st["agent"] == "claude" else []
+    for path in sub_paths:
+        try:
+            _scan_file(path, sub)
+            sub_count += 1
+        except Exception as e:  # one bad file never hides the others
+            _health("warn", "subagent scan failed for {} ({}): {!r}".format(
+                session_id, os.path.basename(path), e)[:200])
 
     # Subagent work counts toward the session: a Lead that only dispatched an Implement stage
     # still shipped what that stage wrote.
@@ -350,6 +386,12 @@ def main():
     except Exception as e:
         _health("error", "capture copy failed for {}: {!r}".format(session_id, e)[:200])
         return 0
+    inlined = 0
+    if sub_paths and include_subagents():
+        try:
+            inlined = append_subagents(dest, sub_paths)
+        except Exception as e:
+            _health("warn", "subagent append failed for {}: {!r}".format(session_id, e)[:200])
 
     stamp = datetime.datetime.now().isoformat(timespec="seconds")
     meta = os.path.join(raw_dir, session_id + ".md")
@@ -366,7 +408,7 @@ def main():
                 fh.write("- origin_remote: {}\n".format(origin_remote(project_dir) or "(none)"))
             fh.write("- tool_calls: {} (mutating: {})\n".format(tool_calls, mutating))
             fh.write("- tools: {}\n".format(", ".join(sorted(tools_used)) or "none"))
-            fh.write("- subagents: {}\n".format(sub_count))
+            fh.write("- subagents: {} (records inlined: {})\n".format(sub_count, inlined))
             fh.write("- transcript: {}\n\n".format(os.path.basename(dest)))
             # Mechanical Retrieval Feedback — the `loaded` signal /curate Step 2 applies to telemetry
             # (load_count, last_loaded, and distinct_projects_used credited to this project). Derived
