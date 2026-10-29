@@ -1,0 +1,106 @@
+# Documentation site for GitHub Pages. docs/ stays the single source of truth — this file only
+# renders it; nothing here is authored content. Build: see website/README.md.
+site_name: Bailiwick
+site_description: >-
+  Curated engineering knowledge for AI coding agents, preserved and reused across sessions and
+  projects, with runtime guardrails.
+site_url: https://cursorinvisivel.github.io/bailiwick/
+site_author: CursorInvisível
+repo_url: https://github.com/Cursorinvisivel/bailiwick
+repo_name: Cursorinvisivel/bailiwick
+edit_uri: edit/main/docs/
+copyright: Apache-2.0 · Built by CursorInvisível
+
+docs_dir: docs
+site_dir: site
+strict: true
+
+theme:
+  name: material
+  custom_dir: website/overrides
+  language: en
+  favicon: assets/brand/cursorinvisivel-monogram-tile-dark.svg
+  icon:
+    repo: octicons/mark-github-24
+    edit: lucide/pencil
+  font: false                     # Archivo + JetBrains Mono loaded in website/overrides/main.html
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: night
+      toggle:
+        icon: lucide/sun
+        name: Switch to Paper (light)
+    - media: "(prefers-color-scheme: light)"
+      scheme: paper
+      toggle:
+        icon: lucide/moon
+        name: Switch to Night (dark)
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.action.edit
+
+extra_css:
+  - assets/stylesheets/brand.css
+
+hooks:
+  - website/hooks.py
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Home: README.md
+  - Use it:
+      - Getting started: getting-started.md
+      - Operations: operations.md
+      - Staying private: staying-private.md
+      - Compatibility: compatibility.md
+  - Reference:
+      - Framework reference: FRAMEWORK.md
+      - Threat model: threat-model.md
+      - History purge: history-purge.md
+      - Telemetry validation: telemetry-validation-protocol.md
+      - Traffic metrics: traffic-metrics.md
+  - Decisions:
+      - ADR-001 Knowledge-base tooling: decisions/adr-001-kb-tooling-and-team-brain.md
+      - ADR-002 Backup confidentiality: decisions/adr-002-dirty-zone-backup-confidentiality.md
+      - ADR-003 Shadow mode: decisions/adr-003-shadow-mode.md
+      - ADR-004 Tiered usefulness signal: decisions/adr-004-tiered-usefulness-signal.md
+      - ADR-005 Guardrail fail-closed: decisions/adr-005-guardrail-fail-closed.md
+      - ADR-006 Confirmation tiers: decisions/adr-006-guardrail-confirmation-tiers.md
+      - ADR-007 Two operating modes: decisions/adr-007-shadow-default-two-modes.md
+      - ADR-008 Purge and de-identification: decisions/adr-008-purge-and-deidentification.md
+      - ADR-009 Public origin contribute-only: decisions/adr-009-public-origin-contribute-only.md
+      - ADR-010 Native subagent orchestration: decisions/adr-010-native-subagent-orchestration.md
+      - ADR-011 Knowledge vs definitions: decisions/adr-011-knowledge-vs-definitions.md
+      - ADR-012 Antigravity adapter: decisions/adr-012-antigravity-adapter-and-gemini-deprecation.md

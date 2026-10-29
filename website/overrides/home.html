@@ -1,0 +1,22 @@
+{% extends "main.html" %}
+
+{#- Landing hero, applied to docs/README.md by website/hooks.py. The page body below it is the
+    unmodified docs index, so the hero adds framing only — no content that isn't in the docs. -#}
+{% block hero %}
+  <section class="ci-hero">
+    <div class="ci-hero__inner md-grid">
+      <p class="ci-eyebrow">AI agent framework · Apache-2.0</p>
+      <h1 class="ci-hero__title">Bailiwick</h1>
+      <p class="ci-hero__lead">
+        Your curated engineering knowledge, preserved and reused across sessions, projects and AI
+        coding agents, with runtime guardrails so an agent that acts on it stays within your rules.
+      </p>
+      <p class="ci-prompt"><span class="ci-prompt__chevron">&gt;</span> git clone {{ config.repo_url }}.git<span class="ci-caret" aria-hidden="true"></span></p>
+      <div class="ci-hero__actions">
+        <a class="ci-button ci-button--primary" href="{{ 'getting-started/' | url }}">Get started</a>
+        <a class="ci-button ci-button--secondary" href="{{ 'FRAMEWORK/' | url }}">Read the reference</a>
+        <a class="ci-button ci-button--ghost" href="{{ config.repo_url }}">View on GitHub</a>
+      </div>
+    </div>
+  </section>
+{% endblock %}
