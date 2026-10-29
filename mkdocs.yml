@@ -23,7 +23,7 @@ theme:
   icon:
     repo: octicons/mark-github-24
     edit: lucide/pencil
-  font: false                     # Archivo + JetBrains Mono loaded in website/overrides/main.html
+  font: false                     # Archivo + JetBrains Mono self-hosted, see brand.css
   palette:
     - media: "(prefers-color-scheme: dark)"
       scheme: night

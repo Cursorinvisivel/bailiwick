@@ -3,6 +3,23 @@
    are mapped onto them so the stock components inherit the palette. Square corners, hairlines
    instead of shadows, cyan used sparingly. */
 
+/* Self-hosted brand fonts (SIL OFL 1.1, see assets/fonts/OFL-*.txt). Archivo is pinned to the
+   normal width; both keep their full weight axis. */
+@font-face {
+  font-family: "Archivo";
+  src: url("../fonts/Archivo-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../fonts/JetBrainsMono-Variable.woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --ci-font-sans: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
   --ci-font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;

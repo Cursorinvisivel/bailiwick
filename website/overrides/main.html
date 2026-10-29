@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 
+{#- Brand fonts are self-hosted (assets/fonts, @font-face in brand.css) so no visitor request
+    goes to a third party such as Google Fonts. -#}
 {% block extrahead %}
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400..800&family=JetBrains+Mono:wght@400..600&display=swap">
+  <link rel="preload" href="{{ 'assets/fonts/Archivo-Variable.woff2' | url }}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="{{ 'assets/fonts/JetBrainsMono-Variable.woff2' | url }}" as="font" type="font/woff2" crossorigin>
 {% endblock %}
