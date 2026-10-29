@@ -9,7 +9,7 @@ truth, written to be read on GitHub first. Nothing in this folder is documentati
 | [`../mkdocs.yml`](../mkdocs.yml) | Site config: nav, theme, Markdown extensions, strict validation |
 | [`requirements.txt`](requirements.txt) | Pinned MkDocs + Material. MkDocs stays on 1.6.x: 2.0 drops the plugin and theme-override systems this site relies on |
 | [`hooks.py`](hooks.py) | Rewrites links that leave `docs/` (`../README.md`, `../hooks/…`) to their GitHub URL, opens the home page with the landing hero, and keeps ADR `status:` front matter from rendering as a Material page-status icon |
-| [`overrides/`](overrides/) | Material theme overrides: landing hero (`home.html`), font preload (`main.html`), wordmark (`partials/logo.html`), repo link without the GitHub API call (`partials/source.html`), brand stylesheet |
+| [`overrides/`](overrides/) | Material theme overrides: landing hero (`home.html`), font preload (`main.html`), wordmark (`partials/logo.html`), header and drawer links (`partials/header.html`, `partials/nav.html`: logo opens cursorinvisivel.pt in a new tab, the title goes to the docs home), repo link without the GitHub API call (`partials/source.html`), brand stylesheet |
 | `overrides/assets/brand/` | CursorInvisível logo files, vendored from the brand repository. Do not edit or redraw them; replace them with the brand repo's files |
 | `overrides/assets/fonts/` | Archivo and JetBrains Mono as WOFF2, converted from the brand repo's fonts (SIL OFL 1.1, licences alongside). Self-hosted on purpose: the site makes **no third-party requests**, so visitor IPs never reach Google Fonts or the GitHub API (GDPR) |
 | `overrides/.icons/lucide/` | The few Lucide icons the theme uses, at 1.5px stroke (ISC, see its `LICENSE`) |

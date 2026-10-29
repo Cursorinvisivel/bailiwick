@@ -47,6 +47,9 @@ theme:
     - content.code.copy
     - content.action.edit
 
+extra:
+  homepage: https://cursorinvisivel.pt/   # header logo target (company site, new tab)
+
 extra_css:
   - assets/stylesheets/brand.css
 

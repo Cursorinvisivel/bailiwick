@@ -217,6 +217,15 @@ svg.lucide {
   margin-left: 0.2rem;
 }
 
+.md-header__title a.ci-header__home {
+  display: block;
+  color: inherit;
+}
+.md-header__title a.ci-header__home:hover,
+.md-header__title a.ci-header__home:focus-visible {
+  color: var(--ci-accent);
+}
+
 [data-md-color-scheme="night"] .md-logo img.ci-logo--paper,
 [data-md-color-scheme="paper"] .md-logo img.ci-logo--night {
   display: none;
