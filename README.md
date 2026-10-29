@@ -1,6 +1,7 @@
 # Bailiwick
 
 [![CI](https://img.shields.io/github/actions/workflow/status/Cursorinvisivel/bailiwick/ci.yml?branch=main&label=CI)](https://github.com/Cursorinvisivel/bailiwick/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-cursorinvisivel.github.io%2Fbailiwick-0a6168)](https://cursorinvisivel.github.io/bailiwick/)
 [![Views](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCursorinvisivel%2Fbailiwick%2Ftraffic-data%2Fviews.json)](https://github.com/Cursorinvisivel/bailiwick/graphs/traffic)
 [![Unique clones](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCursorinvisivel%2Fbailiwick%2Ftraffic-data%2Fclones.json&label=unique%20clones)](https://github.com/Cursorinvisivel/bailiwick/graphs/traffic)
 
@@ -144,6 +145,9 @@ point it at another stack and you grow a different library.
 The full, honest self-assessment lives in **[FRAMEWORK.md §14 — Strengths & limitations](docs/FRAMEWORK.md)**.
 
 ## Documentation
+
+Read it as a website at **<https://cursorinvisivel.github.io/bailiwick/>** (searchable, with
+navigation), or browse the same files under [`docs/`](docs/README.md) here.
 
 **To use it:**
 
