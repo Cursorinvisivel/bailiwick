@@ -98,6 +98,16 @@ ensure_mirror() {
   # Explicit refspec guarantees refs/remotes/origin/<branch> is created when it exists upstream
   # (a bare 'fetch origin <branch>' only updates FETCH_HEAD, which the checks below would miss).
   git -C "$MIRROR" fetch --quiet origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" 2>/dev/null || true
+  # A conflicted rebase left behind by an earlier run makes EVERY later run die at the checkout
+  # below with "error: you need to resolve your current index first" — surfacing as a recurring
+  # Stop hook failure in unrelated sessions, long after the run that wedged it. The mirror is a
+  # derived cache and the abort keeps our unpushed commits, so recover unattended rather than
+  # leaving the backup dead until a human goes looking.
+  if [ -d "$MIRROR/.git/rebase-merge" ] || [ -d "$MIRROR/.git/rebase-apply" ]; then
+    bw_health capture_backup warn "mirror had a conflicted rebase in progress — aborted and recovered"
+    git -C "$MIRROR" rebase --abort 2>/dev/null || git -C "$MIRROR" rebase --quit 2>/dev/null || true
+  fi
+  if [ -f "$MIRROR/.git/MERGE_HEAD" ]; then git -C "$MIRROR" merge --abort 2>/dev/null || true; fi
   if git -C "$MIRROR" rev-parse --verify -q "refs/heads/$BRANCH" >/dev/null 2>&1; then
     # Local branch exists — keep it (never reset to origin; that would discard
     # unpushed ciphertext). Divergence is reconciled by rebase at push time.
@@ -115,6 +125,35 @@ ensure_mirror() {
 # Machine-generated ciphertext commits: never sign. Inheriting a user's global commit.gpgsign=true
 # makes every Stop/SessionEnd hook fire a pinentry prompt (or hang/fail headless).
 git_id() { git -C "$MIRROR" -c user.name=bailiwick -c user.email=backup@local -c commit.gpgsign=false "$@"; }
+
+# Reconcile a conflicted mirror rebase unattended — and never leave one in progress. The conflict
+# this mirror actually produces is a purge (upstream deletion) meeting a capture commit that still
+# carries the blob. Deletion wins: resurrecting purged ciphertext is exactly what the tombstone
+# exists to prevent. A content clash keeps the replayed (newer) ciphertext — in a rebase, --theirs
+# is the commit being replayed. Anything still unresolved aborts — a stuck rebase breaks every
+# later run at ensure_mirror's checkout.
+rebase_resolve() {
+  local guard=0 line st p
+  while [ -d "$MIRROR/.git/rebase-merge" ] || [ -d "$MIRROR/.git/rebase-apply" ]; do
+    guard=$((guard + 1)); [ "$guard" -le 50 ] || break
+    while IFS= read -r line; do
+      st="${line:0:2}"; p="${line:3}"
+      case "$st" in
+        DU|UD|DD) git_id rm -q -f --ignore-unmatch -- "$p" >/dev/null 2>&1 || true;;
+        *) git -C "$MIRROR" checkout -q --theirs -- "$p" >/dev/null 2>&1 || true
+           git_id add -- "$p" >/dev/null 2>&1 || true;;
+      esac
+    done < <(git -C "$MIRROR" status --porcelain 2>/dev/null | grep -E '^(DD|AU|UD|UA|DU|AA|UU)' || true)
+    GIT_EDITOR=true git_id rebase --continue >/dev/null 2>&1 \
+      || GIT_EDITOR=true git_id rebase --skip >/dev/null 2>&1 || break
+  done
+  if [ -d "$MIRROR/.git/rebase-merge" ] || [ -d "$MIRROR/.git/rebase-apply" ]; then
+    git -C "$MIRROR" rebase --abort 2>/dev/null || git -C "$MIRROR" rebase --quit 2>/dev/null || true
+    bw_health capture_backup warn "mirror rebase could not be auto-resolved — aborted (ciphertext safe locally)"
+    return 1
+  fi
+  return 0
+}
 
 case "$MODE" in
   push)
@@ -150,13 +189,28 @@ case "$MODE" in
     [ -n "$repo_name" ] || repo_name="$(PYTHONPATH="$BAILIWICK_ROOT/hooks" python3 -c 'import sys, capture_session; sys.stdout.write(capture_session.repo_key(sys.argv[1]))' "$PROJECT_DIR" 2>/dev/null || true)"
     [ -n "$repo_name" ] || repo_name="$(basename "$PROJECT_DIR")"
     destdir="$MIRROR/$mtoken/$repo_name"
-    mkdir -p "$destdir"
     # Tombstoned relpaths — union of the worktree manifest and origin's: a purge issued from
     # ANOTHER machine lands on origin first, and this worktree only syncs at the next
     # push-reject→rebase. Reading both closes that window.
     PURGED="$( { cat "$MIRROR/.purged" 2>/dev/null || true; git -C "$MIRROR" show "origin/$BRANCH:.purged" 2>/dev/null || true; } | sort -u )"
     enc_args=(); for r in "${RCPTS[@]}"; do enc_args+=(--recipient "$r"); done
     changed=0
+    # Tombstoned blobs must LEAVE this mirror's tree, not merely be skipped on re-encrypt: a purge
+    # pushed from elsewhere deletes them on origin only, and ensure_mirror never resets the worktree
+    # to origin. A tree that still carries them makes the next `add -A` resurrect the ciphertext and
+    # the next rebase conflict (modify/delete — which no -X strategy resolves). changed=1 so a
+    # purge-only run commits the staged deletions instead of leaving them in the index.
+    if [ -n "$PURGED" ]; then
+      while IFS= read -r trel; do
+        [ -n "$trel" ] || continue
+        th="$(printf '%s' "$trel" | sha256sum | awk '{print $1}')"
+        printf '%s\n' "$PURGED" | grep -qx "$th" || continue
+        git_id rm -q -f --ignore-unmatch -- "$trel" "$trel.sha256" >/dev/null 2>&1 || true
+        changed=1
+      done < <(git -C "$MIRROR" ls-files 2>/dev/null | grep '\.gpg$' || true)
+    fi
+    # After the sweep, not before: `git rm` of a directory's last blob removes the directory too.
+    mkdir -p "$destdir"
     shopt -s nullglob
     for f in "$RAW"/*.jsonl "$RAW"/*.md; do
       [ -f "$f" ] || continue
@@ -207,7 +261,9 @@ case "$MODE" in
     git_id add -A
     git_id commit -q -m "capture: $mtoken/$repo_name $(date -u +%Y-%m-%dT%H:%M:%SZ)" || exit 0
     if ! git_id push -q origin "$BRANCH" 2>/dev/null; then
-      git -C "$MIRROR" fetch -q origin "$BRANCH" 2>/dev/null && git_id rebase -q "origin/$BRANCH" 2>/dev/null || true
+      if git -C "$MIRROR" fetch -q origin "$BRANCH" 2>/dev/null; then
+        git_id rebase -q "origin/$BRANCH" >/dev/null 2>&1 || rebase_resolve || true
+      fi
       git_id push -q origin "$BRANCH" 2>/dev/null || {
         unp="$(git -C "$MIRROR" rev-list --count "origin/$BRANCH..$BRANCH" 2>/dev/null || echo '?')"
         bw_health capture_backup error "push failed ($BRANCH; $unp unpushed commit(s); ciphertext safe in local mirror)"

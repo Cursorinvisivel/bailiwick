@@ -152,7 +152,7 @@ fi
 # .bailiwick-sync.json is gitignored by design, so a fresh clone silently loses it — and with it
 # the machine role, encrypted capture backup, and gh account pinning, all reverting to defaults.
 CFG="$BAILIWICK_ROOT/.bailiwick-sync.json"
-role="satellite"; machine=""; cb_enabled=""; cb_recipients=""
+role="satellite"; machine=""; cb_enabled=""; cb_branch=""; cb_recipients=""
 if [ ! -f "$CFG" ]; then
   # The silent demotion: a reinstalled central comes back as a satellite, the fleet is left with no
   # merge authority, and every sync/* PR waits forever (see the stale-PR check in section 6).
@@ -170,6 +170,7 @@ print("|".join([
     d.get("role") or "satellite",
     d.get("machine") or "",
     "1" if cb.get("enabled") else "0",
+    cb.get("branch") or "",
     " ".join(r for r in recips if isinstance(r, str)),
 ]))
 PY
@@ -179,7 +180,8 @@ PY
   else
     role="${cfg_line%%|*}"; rest="${cfg_line#*|}"
     machine="${rest%%|*}"; rest="${rest#*|}"
-    cb_enabled="${rest%%|*}"; cb_recipients="${rest#*|}"
+    cb_enabled="${rest%%|*}"; rest="${rest#*|}"
+    cb_branch="${rest%%|*}"; cb_recipients="${rest#*|}"
     ok ".bailiwick-sync.json present (role: ${role}${machine:+, machine: $machine})"
   fi
 else
@@ -236,6 +238,25 @@ if [ "$cb_enabled" = "1" ]; then
         ok "satellite is encrypt-only for $fpr (secret key intentionally absent here)"
       fi
     done
+  fi
+  # Local mirror health (read-only; compares against the last-fetched origin ref, no network).
+  # A conflicted rebase left in the mirror kills every later push at its checkout, and a growing
+  # unpushed backlog means pushes have been failing — both invisible until a Stop hook complains.
+  CB_MIRROR="${XDG_CACHE_HOME:-$HOME/.cache}/bailiwick/capture-mirror"
+  cb_branch="${cb_branch:-capture/$machine}"
+  if [ -d "$CB_MIRROR/.git" ]; then
+    if [ -d "$CB_MIRROR/.git/rebase-merge" ] || [ -d "$CB_MIRROR/.git/rebase-apply" ] || [ -f "$CB_MIRROR/.git/MERGE_HEAD" ]; then
+      fail "capture mirror is wedged mid-rebase/merge ($CB_MIRROR) — backups stopped; the next push self-heals it, or now: git -C \"$CB_MIRROR\" rebase --abort"
+    elif git -C "$CB_MIRROR" rev-parse -q --verify "refs/remotes/origin/$cb_branch" >/dev/null 2>&1; then
+      unp="$(git -C "$CB_MIRROR" rev-list --count "origin/$cb_branch..$cb_branch" 2>/dev/null || echo 0)"
+      if [ "$unp" -gt 3 ]; then
+        fail "capture mirror has $unp unpushed commit(s) on $cb_branch — backup pushes are failing (ciphertext safe locally; see /metrics fleet view)"
+      elif [ "$unp" -gt 0 ]; then
+        warn "capture mirror has $unp unpushed commit(s) on $cb_branch — the next push should drain them"
+      else
+        ok "capture mirror in sync with origin/$cb_branch"
+      fi
+    fi
   fi
 fi
 

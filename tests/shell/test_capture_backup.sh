@@ -32,6 +32,8 @@ mkdir -p "$PROJ/.bailiwick-outputs/raw"
 echo "SECRET-PAYLOAD-ALPHA" > "$PROJ/.bailiwick-outputs/raw/s1.jsonl"
 push() { echo '{"hook_event_name":"SessionEnd"}' | CLAUDE_PROJECT_DIR="$PROJ" bash "$INST/hooks/capture_backup.sh" push; }
 HEALTH="$BAILIWICK_HOME/health/testsat.jsonl"
+assert_dir()    { if [ -d "$2" ]; then t_ok "$1"; else t_fail "$1 (missing dir $2)"; fi; }
+assert_no_dir() { if [ -d "$2" ]; then t_fail "$1 (unexpected dir $2)"; else t_ok "$1"; fi; }
 MIRROR="$XDG_CACHE_HOME/bailiwick/capture-mirror"
 
 echo "== refuses without confidentiality_ack, source intact"
@@ -175,5 +177,51 @@ push2 >/dev/null 2>&1
 after2="$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat2)"
 assert_contains "machine 2's new capture still lands after the remote purge" "r2.jsonl.gpg" "$after2"
 assert_not_contains "purged blob does NOT resurrect from machine 2's un-retired source" "r1.jsonl.gpg" "$after2"
+
+echo "== remote purge vs an unpushed local rewrite of the same blob: rebase reconciles, never wedges"
+# The production wedge: this mirror holds an unpushed commit that rewrote a blob (resumed session,
+# earlier push failed) while /curate on another machine purged that blob on origin. The reject ->
+# rebase replay is a modify/delete conflict, which no -X strategy resolves; left in progress it
+# broke every later Stop hook at ensure_mirror's checkout.
+purge_from_m2() { XDG_CACHE_HOME="$T_SANDBOX/cache-m2" bash "$INST2/hooks/capture_backup.sh" purge "$1" >/dev/null 2>&1; }
+echo "SECRET-PAYLOAD-INDIA" > "$PROJ/.bailiwick-outputs/raw/s7.jsonl"
+push >/dev/null 2>&1
+rel7="$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat | grep 's7\.jsonl\.gpg$' | head -1)"
+assert_contains "s7 landed before the race" "s7.jsonl.gpg" "${rel7:-<none>}"
+echo "rewritten-ciphertext" >> "$MIRROR/$rel7"
+git -C "$MIRROR" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -am "capture: unpushed rewrite"
+purge_from_m2 "$rel7"
+echo "SECRET-PAYLOAD-JULIET" > "$PROJ/.bailiwick-outputs/raw/s8.jsonl"
+out="$(push 2>&1)"; rc=$?
+assert_exit "push across the modify/delete conflict exits 0" 0 "$rc"
+after="$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat)"
+assert_contains "new capture lands despite the conflict" "s8.jsonl.gpg" "$after"
+assert_not_contains "deletion wins: purged blob not resurrected by the replayed rewrite" "s7.jsonl.gpg" "$after"
+assert_no_dir "no conflicted rebase left in the mirror" "$MIRROR/.git/rebase-merge"
+assert_no_file "purged blob gone from the mirror worktree too" "$MIRROR/$rel7"
+
+echo "== a mirror wedged mid-rebase by an older run self-heals on the next push"
+# Isolate from the section above: a clean mirror at origin, so only the wedge built here is in play.
+git -C "$MIRROR" rebase --abort >/dev/null 2>&1 || true
+git -C "$MIRROR" fetch -q origin "+refs/heads/capture/testsat:refs/remotes/origin/capture/testsat"
+git -C "$MIRROR" reset -q --hard origin/capture/testsat
+echo "SECRET-PAYLOAD-KILO" > "$PROJ/.bailiwick-outputs/raw/s9.jsonl"
+push >/dev/null 2>&1
+rel9="$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat | grep 's9\.jsonl\.gpg$' | head -1)"
+echo "rewritten-ciphertext" >> "$MIRROR/$rel9"
+git -C "$MIRROR" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -am "capture: unpushed rewrite"
+purge_from_m2 "$rel9"
+git -C "$MIRROR" fetch -q origin "+refs/heads/capture/testsat:refs/remotes/origin/capture/testsat"
+git -C "$MIRROR" -c user.name=t -c user.email=t@t -c commit.gpgsign=false rebase -q origin/capture/testsat >/dev/null 2>&1
+assert_dir "precondition: mirror is wedged mid-rebase" "$MIRROR/.git/rebase-merge"
+echo "SECRET-PAYLOAD-LIMA" > "$PROJ/.bailiwick-outputs/raw/s10.jsonl"
+out="$(push 2>&1)"; rc=$?
+assert_exit "push on a wedged mirror exits 0" 0 "$rc"
+assert_not_contains "no 'resolve your current index' hook error" "resolve your current index" "$out"
+after="$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat)"
+assert_contains "new capture lands after self-heal" "s10.jsonl.gpg" "$after"
+assert_not_contains "purged blob stays purged after self-heal" "s9.jsonl.gpg" "$after"
+assert_no_dir "wedge cleared" "$MIRROR/.git/rebase-merge"
+assert_contains "self-heal logs a health warning" "conflicted rebase" "$HEALTH"
 
 t_summary
