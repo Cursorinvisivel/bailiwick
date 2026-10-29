@@ -105,6 +105,25 @@ out="$(GNUPGHOME="$GNUPG" doctor)"; rc=$?
 assert_exit "bad recipient key -> exit 1" 1 "$rc"
 assert_contains "the failure names capture backup" "capture backup pushes will fail" "$out"
 
+echo "== a capture mirror wedged mid-rebase is BROKEN; an in-sync one passes"
+CBM="$XDG_CACHE_HOME/bailiwick/capture-mirror"
+git init -q --bare "$T_SANDBOX/cb-holding.git"
+git clone -q "$T_SANDBOX/cb-holding.git" "$CBM" 2>/dev/null
+git -C "$CBM" checkout -q -b capture/doctest
+git -C "$CBM" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m seed
+git -C "$CBM" push -q origin capture/doctest 2>/dev/null
+cat > "$INST/.bailiwick-sync.json" <<'EOF'
+{ "role": "satellite", "machine": "doctest",
+  "capture_backup": { "enabled": true, "gpg_recipients": ["DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF"] } }
+EOF
+out="$(GNUPGHOME="$GNUPG" doctor)"
+assert_contains "in-sync mirror passes" "capture mirror in sync with origin/capture/doctest" "$out"
+mkdir -p "$CBM/.git/rebase-merge"
+out="$(GNUPGHOME="$GNUPG" doctor)"
+assert_contains "wedged mirror is flagged broken" "capture mirror is wedged" "$out"
+rm -rf "$CBM" "$T_SANDBOX/cb-holding.git"
+echo '{ "role": "satellite", "machine": "doctest" }' > "$INST/.bailiwick-sync.json"
+
 echo "== a present but sign-only recipient key is BROKEN (the encrypt probe's quiet case)"
 SGN="$T_SANDBOX/gnupg-signonly"; mkdir -p "$SGN" && chmod 700 "$SGN"
 # usage 'sign' is what matters: a primary with no [E] subkey, which --list-keys still reports
