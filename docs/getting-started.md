@@ -243,7 +243,7 @@ The other global skills round out the workflow:
   `/curate` promotes under the normal gate. Writes no knowledge itself.
 - **`/metrics`** — a read-only health report on the knowledge library (retrieval, the
   load→applied→used funnel, cold/stale candidates) plus a fleet view of framework health. Writes
-  nothing.
+  nothing. [Reading the metrics report](metrics.md) walks through a real one.
 - **`/investigate`** — research a reference (URL, repo, article) or an open question and distil the
   findings into gated knowledge candidates with provenance — including "evaluated, not adopted"
   verdicts worth remembering.

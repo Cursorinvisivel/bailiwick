@@ -21,3 +21,6 @@
 __pycache__/
 *.pyc
 site/
+
+# Local docs-site preview environment (see website/README.md)
+.venv/

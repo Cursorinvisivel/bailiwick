@@ -92,6 +92,7 @@ nav:
       - Framework reference: FRAMEWORK.md
       - Threat model: threat-model.md
       - History purge: history-purge.md
+      - Reading the metrics report: metrics.md
       - Telemetry validation: telemetry-validation-protocol.md
       - Traffic metrics: traffic-metrics.md
   - Decisions:

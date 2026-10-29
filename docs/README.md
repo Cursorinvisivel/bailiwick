@@ -37,6 +37,8 @@ Start with the [project README](../README.md) for the overview, then pick a path
   mitigations, and the residual risks the design explicitly accepts.
 - **[compatibility.md](compatibility.md)** — per-adapter status and the tool versions Bailiwick is
   verified against (the guardrail/hook surfaces are fast-moving; revalidate on CLI upgrades).
+- **[metrics.md](metrics.md)** — how to read the `/metrics` report, section by section, using a
+  de-identified real report, plus an honest reading of whether its numbers are good yet.
 - **[telemetry-validation-protocol.md](telemetry-validation-protocol.md)** — a lightweight protocol
   for checking that the usage-telemetry signal is trustworthy before letting it drive any decisions.
 - **[traffic-metrics.md](traffic-metrics.md)** — how the repo's views/cloners badges accumulate
