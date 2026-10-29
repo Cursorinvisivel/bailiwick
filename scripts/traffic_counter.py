@@ -6,7 +6,12 @@ GitHub's traffic API (/traffic/views, /traffic/clones) only returns the last
 run daily by .github/workflows/traffic-counter.yml: it merges the current
 14-day window into a per-day ledger (re-snapshotting a day overwrites it, so
 the partial count for "today" self-corrects on later runs), then emits
-shields.io endpoint-badge JSON with the running totals for the README.
+shields.io endpoint-badge JSON with the running totals for the README: all-time
+views and unique visitors. The badges are meant to show adoption, so clones are
+deliberately not badged: they are dominated by automation (this repo's own CI
+checkouts, archivers, code-search and AI crawlers, scanners), which outnumbers
+human visitors by orders of magnitude. Clone totals stay in the ledger and the
+report.
 
 Requires TRAFFIC_TOKEN — a PAT that can read the traffic API (fine-grained
 with repository permission "Administration: read-only", or classic with the
@@ -15,7 +20,7 @@ with repository permission "Administration: read-only", or classic with the
 Note on "unique" figures: GitHub's uniques are deduplicated only within the
 window it reports, so the accumulated unique totals here are sums of per-day
 uniques — an upper bound, not true all-time uniques (hence the "~" on the
-cloners badge).
+visitors badge).
 
 With --referrers-data it additionally snapshots /traffic/popular/referrers and
 /traffic/popular/paths into a separate ledger. Those endpoints return a whole
@@ -103,6 +108,19 @@ def badge(label: str, message: str, color: str) -> dict:
     }
 
 
+def write_badges(badge_dir: Path, t: dict) -> None:
+    """Write the README's endpoint-badge JSON from the ledger totals."""
+    badge_dir.mkdir(parents=True, exist_ok=True)
+    (badge_dir / "views.json").write_text(
+        json.dumps(badge("views", humanize(t["views"]), "blue")) + "\n"
+    )
+    # "~" because summed per-day uniques are an upper bound, not true all-time uniques.
+    (badge_dir / "visitors.json").write_text(
+        json.dumps(badge("unique visitors", "~" + humanize(t["unique_views"]), "brightgreen"))
+        + "\n"
+    )
+
+
 def record_popular(store: dict, day: str, referrers: list, paths: list) -> dict:
     """Store one day's top-referrers/top-paths snapshot, overwriting by date.
 
@@ -137,8 +155,11 @@ def render_report(data: dict | None, store: dict) -> str:
         t = data["totals"]
         parts += [
             f"**All-time since {data['since']}:** {t['views']} views · "
-            f"{t['clones']} clones · ~{t['unique_clones']} unique cloners "
-            f"(day-sum upper bound) · {len(data['days'])} days recorded.",
+            f"~{t['unique_views']} unique visitors (day-sum upper bound) · "
+            f"{len(data['days'])} days recorded.",
+            "",
+            f"Clones: {t['clones']} · ~{t['unique_clones']} unique cloners. Not an adoption "
+            "signal: mostly CI checkouts and automated cloners, so they are not badged.",
             "",
         ]
     parts += [
@@ -200,18 +221,7 @@ def main() -> None:
         data["days"] = dict(sorted(data["days"].items()))
         data_path.write_text(json.dumps(data, indent=2) + "\n")
 
-        badge_dir = Path(args.badge_dir)
-        badge_dir.mkdir(parents=True, exist_ok=True)
-        (badge_dir / "views.json").write_text(
-            json.dumps(badge("views", humanize(data["totals"]["views"]), "blue")) + "\n"
-        )
-        # "~" because summed per-day uniques are an upper bound, not true all-time uniques.
-        (badge_dir / "clones.json").write_text(
-            json.dumps(
-                badge("unique clones", "~" + humanize(data["totals"]["unique_clones"]), "brightgreen")
-            )
-            + "\n"
-        )
+        write_badges(Path(args.badge_dir), data["totals"])
 
         t = data["totals"]
         print(

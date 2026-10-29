@@ -58,7 +58,7 @@ jobs:
           mkdir -p badges
           placeholder='{"schemaVersion":1,"label":"%s","message":"collecting…","color":"lightgrey","cacheSeconds":300}\n'
           printf "$placeholder" "views" > badges/views.json
-          printf "$placeholder" "unique clones" > badges/clones.json
+          printf "$placeholder" "unique visitors" > badges/visitors.json
           printf '{"days": {}}\n' > traffic-data.json
       - name: Snapshot traffic API and accumulate
         id: snapshot
@@ -77,7 +77,7 @@ jobs:
         run: |
           set -e
           mkdir publish
-          cp traffic-data.json badges/views.json badges/clones.json publish/
+          cp traffic-data.json badges/views.json badges/visitors.json publish/
           # Absent when the first-ever snapshot failed and we publish placeholders only.
           for f in referrers-data.json traffic-report.md; do
             [ -f "$f" ] && cp "$f" publish/ || true

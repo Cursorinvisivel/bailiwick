@@ -3,7 +3,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/Cursorinvisivel/bailiwick/ci.yml?branch=main&label=CI)](https://github.com/Cursorinvisivel/bailiwick/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-cursorinvisivel.github.io%2Fbailiwick-0a6168)](https://cursorinvisivel.github.io/bailiwick/)
 [![Views](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCursorinvisivel%2Fbailiwick%2Ftraffic-data%2Fviews.json)](https://github.com/Cursorinvisivel/bailiwick/graphs/traffic)
-[![Unique clones](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCursorinvisivel%2Fbailiwick%2Ftraffic-data%2Fclones.json&label=unique%20clones)](https://github.com/Cursorinvisivel/bailiwick/graphs/traffic)
+[![Unique visitors](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCursorinvisivel%2Fbailiwick%2Ftraffic-data%2Fvisitors.json)](https://github.com/Cursorinvisivel/bailiwick/graphs/traffic)
 
 **Your curated engineering knowledge, preserved and reused across sessions, projects, and AI
 coding agents — with runtime guardrails so an agent that acts on it stays within your rules.**

@@ -71,6 +71,18 @@ def test_badge_matches_shields_endpoint_schema():
     assert b["color"] == "blue"
 
 
+def test_write_badges_publishes_views_and_visitors_not_clones(tmp_path):
+    import json
+
+    t = {"views": 140, "unique_views": 13, "clones": 196, "unique_clones": 93}
+    tc.write_badges(tmp_path, t)
+    assert sorted(f.name for f in tmp_path.iterdir()) == ["views.json", "visitors.json"]
+    visitors = json.loads((tmp_path / "visitors.json").read_text())
+    assert visitors["label"] == "unique visitors"
+    assert visitors["message"] == "~13"
+    assert json.loads((tmp_path / "views.json").read_text())["message"] == "140"
+
+
 def test_record_popular_overwrites_by_day_and_keeps_older_days():
     store = {}
     tc.record_popular(store, "2026-07-27", [{"referrer": "news.ycombinator.com"}], [])
@@ -100,7 +112,8 @@ def test_render_report_shows_totals_and_latest_snapshot_only():
         }
     }
     report = tc.render_report(data, store)
-    assert "~93 unique cloners" in report
+    assert "~13 unique visitors" in report
+    assert "~93 unique cloners" in report  # still reported, just not badged
     assert "14 days ending 2026-07-28" in report
     assert "| news.ycombinator.com | 40 | 30 |" in report
     assert "| /Cursorinvisivel/bailiwick | 90 | 40 |" in report

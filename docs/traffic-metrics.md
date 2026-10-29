@@ -8,7 +8,8 @@ How the repository's usage metrics work, and where to read the ones that don't e
 |---|---|---|
 | CI status | README badge | shields.io reading the `ci.yml` workflow status |
 | All-time views | README badge | accumulated ledger (below) |
-| Unique clones (~) | README badge | accumulated ledger (below) |
+| Unique visitors (~) | README badge | accumulated ledger (below) |
+| Clones & unique cloners | traffic report only | accumulated ledger (below) |
 | Top referrers & top content | [traffic report](https://github.com/Cursorinvisivel/bailiwick/blob/traffic-data/traffic-report.md) | daily snapshots (below) |
 
 GitHub's traffic API (and the Insights → Traffic page) only keeps a **rolling 14-day window**, so
@@ -31,10 +32,15 @@ successful snapshot, grey "collecting…" placeholders are published instead of 
 
 ## Caveats
 
-- **"~" on unique clones:** GitHub dedupes uniques only within each reported day, so the
+- **"~" on unique visitors:** GitHub dedupes uniques only within each reported day, so the
   accumulated figure is a sum of per-day uniques — an upper bound, not true all-time uniques.
-- Raw clone counts inflate easily (CI, mirrors, your own machines); unique cloners is the more
-  honest adoption signal, which is why it gets the badge instead of raw clones.
+- **Why clones are not badged:** the badges are meant to show adoption, and clones mostly measure
+  automation. Every Actions job's `actions/checkout` is a clone from a fresh runner, and public
+  repos are also cloned by archivers, code-search and AI crawlers, and scanners. Netting out CI
+  doesn't fix it: measured over 90 days (Oct 2026), unique cloners still exceeded CI checkouts by
+  ~260 while the repo page had ~3 unique viewers a month. That is far more cloners than viewers,
+  which humans don't produce, since people look at a repo before cloning it. Unique visitors and
+  referrers are the human signals; clones stay in the ledger and the traffic report.
 
 ## Setup (once per repository)
 
