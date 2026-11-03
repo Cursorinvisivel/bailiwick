@@ -51,7 +51,7 @@ printf '{"hook_event_name":"SessionEnd","session_id":"e2e-sess","transcript_path
 assert_file "capture staged in the project dirty zone" "$PROJ/.bailiwick-outputs/raw/e2e-sess.jsonl"
 
 echo "== 4. the capture gets a durable encrypted copy off-machine"
-echo '{"hook_event_name":"SessionEnd"}' | CLAUDE_PROJECT_DIR="$PROJ" bash "$INST/hooks/capture_backup.sh" push >/dev/null 2>&1
+echo '{"hook_event_name":"SessionEnd"}' | BW_BACKUP_SYNC=1 CLAUDE_PROJECT_DIR="$PROJ" bash "$INST/hooks/capture_backup.sh" push >/dev/null 2>&1
 assert_contains "ciphertext on the holding branch" "e2e-sess.jsonl.gpg" \
   "$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/e2esat 2>/dev/null)"
 assert_file "source capture still present after backup" "$PROJ/.bailiwick-outputs/raw/e2e-sess.jsonl"

@@ -67,6 +67,9 @@ try:
 except Exception:
     pass
 ' "$CFG" 2>/dev/null || true)
+# A detached SessionEnd child (see push) has no stdin payload; the parent hands it over via env.
+[ -n "${BW_HOOK_EVENT:-}" ] && EVENT="$BW_HOOK_EVENT"
+[ -n "${BW_HOOK_CWD:-}" ] && PAYLOAD_CWD="$BW_HOOK_CWD"
 
 # Enabled-but-broken states must reach the health shard: from a hook, stderr goes nowhere,
 # and a bare exit 0 here is a month-long backup outage /metrics never sees.
@@ -86,6 +89,25 @@ fi
 [ -n "$BRANCH" ] || BRANCH="capture/$mtoken"
 MIRROR="${XDG_CACHE_HOME:-$HOME/.cache}/bailiwick/capture-mirror"
 BW_HOME="${BAILIWICK_HOME:-$HOME/.bailiwick}"
+
+# Serialise every writer of the mirror: a detached SessionEnd push can overlap the next session's
+# Stop push or a /curate pull/purge. mkdir is atomic and portable (no flock on macOS).
+# Usage: mirror_lock <max-wait-seconds>   — returns 1 if still busy after waiting.
+LOCK="$MIRROR.lock"
+mirror_lock() {
+  local waited=0
+  mkdir -p "$(dirname "$MIRROR")"
+  while ! mkdir "$LOCK" 2>/dev/null; do
+    # Stale-lock takeover: a holder killed hard (SIGKILL, reboot) never runs its trap.
+    if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
+      bw_health capture_backup warn "stale mirror lock (>10 min) — taken over"
+      rm -rf "$LOCK"; continue
+    fi
+    [ "$waited" -lt "$1" ] || return 1
+    sleep 1; waited=$((waited + 1))
+  done
+  trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+}
 
 ensure_mirror() {
   if [ ! -d "$MIRROR/.git" ]; then
@@ -179,6 +201,29 @@ case "$MODE" in
       last=$(cat "$STAMP" 2>/dev/null || echo 0)
       [ $(( now - last )) -lt $(( THROTTLE * 60 )) ] && exit 0
     fi
+    # SessionEnd runs under Claude Code's quit-time budget — 1500 ms by default
+    # (CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS), NOT the 600 s per-hook default. fetch+gpg+push
+    # cannot fit; the harness aborts it ("Hook cancelled"). Hand the network leg to a detached
+    # child and return at once. stdout/stderr MUST be redirected: an inherited pipe keeps the hook
+    # "running" until the child exits, which is the same timeout again.
+    # BW_BACKUP_SYNC=1 keeps it in the foreground (tests, manual runs).
+    if [ "$event" = "SessionEnd" ] && [ -z "${BW_BACKUP_DETACHED:-}" ] && [ -z "${BW_BACKUP_SYNC:-}" ]; then
+      runner=(nohup); command -v setsid >/dev/null 2>&1 && runner=(setsid nohup)
+      BW_BACKUP_DETACHED=1 BW_HOOK_EVENT="$event" BW_HOOK_CWD="$PROJECT_DIR" \
+        "${runner[@]}" bash "${BASH_SOURCE[0]:-$0}" push </dev/null >/dev/null 2>&1 &
+      disown 2>/dev/null || true
+      exit 0
+    fi
+    # Detached child: let the parallel SessionEnd capture_session.py finish writing the final
+    # capture first. The two hooks run concurrently, so without this the forced push can miss it.
+    [ -n "${BW_BACKUP_DETACHED:-}" ] && sleep "${BW_BACKUP_SETTLE_S:-3}"
+    # Stop must stay snappy: if another push holds the mirror, skip (don't touch STAMP, so the next
+    # Stop retries). The detached child can afford to wait.
+    if [ -n "${BW_BACKUP_DETACHED:-}" ]; then
+      mirror_lock 120 || { bw_health capture_backup warn "mirror busy >120 s — SessionEnd push skipped (next Stop retries)"; exit 0; }
+    else
+      mirror_lock 0 || exit 0
+    fi
     ensure_mirror
     # Destination blob dir is keyed by the SAME collision-resistant, ORIGIN-based key as central
     # staging and the pending-capture nag (capture_session.repo_key = basename + sha8 of the git
@@ -257,9 +302,19 @@ case "$MODE" in
       fi
     fi
     date +%s > "$STAMP"
-    [ "$changed" = "1" ] || exit 0
-    git_id add -A
-    git_id commit -q -m "capture: $mtoken/$repo_name $(date -u +%Y-%m-%dT%H:%M:%SZ)" || exit 0
+    if [ "$changed" = "1" ]; then
+      git_id add -A
+      git_id commit -q -m "capture: $mtoken/$repo_name $(date -u +%Y-%m-%dT%H:%M:%SZ)" || true
+    fi
+    # Push whenever the mirror is AHEAD of origin, not only when this run encrypted something:
+    # a push killed after commit (SessionEnd timeout, crash, offline) otherwise strands its
+    # ciphertext until some unrelated future capture changes.
+    if git -C "$MIRROR" rev-parse -q --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
+      ahead="$(git -C "$MIRROR" rev-list --count "origin/$BRANCH..$BRANCH" 2>/dev/null || echo 0)"
+    else
+      ahead="$(git -C "$MIRROR" rev-list --count "$BRANCH" 2>/dev/null || echo 0)"
+    fi
+    [ "${ahead:-0}" -gt 0 ] || exit 0
     if ! git_id push -q origin "$BRANCH" 2>/dev/null; then
       if git -C "$MIRROR" fetch -q origin "$BRANCH" 2>/dev/null; then
         git_id rebase -q "origin/$BRANCH" >/dev/null 2>&1 || rebase_resolve || true
@@ -278,6 +333,7 @@ case "$MODE" in
   pull)
     DEST="${2:-$BAILIWICK_ROOT/.bailiwick-inbox/raw}"
     mkdir -p "$DEST"
+    mirror_lock 120 || { echo "[backup] capture mirror busy — retry shortly" >&2; exit 1; }
     ensure_mirror
     # Blobs are per-machine BRANCHES (capture/<machine>), and ensure_mirror fetches only ours —
     # the cross-machine pool /curate and /purge sweep lives on the other branches. Fetch them all
@@ -364,6 +420,7 @@ case "$MODE" in
     # A bare session name matches neither blob (two per session: .jsonl.gpg + .md.gpg) and
     # exits 0 as "nothing to purge" — warn before it fails quiet.
     case "$rel" in *.gpg) ;; *) echo "[backup] warning: relpath should end in .jsonl.gpg or .md.gpg — a bare session name never matches (two blobs per session)" >&2;; esac
+    mirror_lock 120 || { echo "[backup] capture mirror busy — retry shortly" >&2; exit 1; }
     ensure_mirror
     # Another machine's blob lives on ITS branch (capture/<machine>), which our worktree never
     # checks out. Purge it there via a throwaway detached worktree — the main worktree must stay
