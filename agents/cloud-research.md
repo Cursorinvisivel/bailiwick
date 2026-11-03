@@ -3,6 +3,7 @@ name: bailiwick-cloud-research
 description: Cloud Research stage of the Bailiwick Quality Workflow — current, authoritative external research (GCP, Terraform, cloud architecture) with exact sources and dates. Dispatched by the Lead orchestrator when a task needs verified up-to-date external facts; research only, never generates code.
 model: sonnet
 effort: medium
+fixed_host_effort: medium
 tools: Read, Grep, Glob, WebFetch, WebSearch
 ---
 <!-- tools: read + web research only. No Edit/Write/Bash — findings hand off to the Implement stage. -->

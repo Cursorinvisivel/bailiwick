@@ -6,7 +6,8 @@
 > subagent; orchestration stays in the main session across hosts (ADR-010, Decision 1).
 >
 > The **Quality Workflow** is the ordered review pass the Lead drives — stages Memory → Implement →
-> Quality (Security Review / Docs / Cloud Research substituted by task type). Each **stage** runs
+> Quality (Security Review / Docs / Cloud Research substituted by task type), with the read-only
+> **Advisor** consulted for Edge-rated tasks and hard decisions. Each **stage** runs
 > as a dispatched subagent (inline only as a disclosed fallback); small work is handled inline
 > without stages. "Agent" / "subagent" here always means the
 > native mechanism; the framework's own executable parts are **stages**. See ADR-010.
@@ -43,8 +44,12 @@ commit, push, PR, high-impact action, or knowledge promotion.
 4. **Dispatch execution stages** with full context. Stages are installed as native subagents
    (`bailiwick-implement`, `bailiwick-quality`, …) and start as **fresh contexts** — the dispatch
    prompt MUST carry the framework root ($BAILIWICK), the domain hints/checklist, and the task
-   specification, so the stage can self-load its knowledge (ADR-010). Independent stages may run as
-   **concurrent subagents**; dependent stages run in order.
+   specification, so the stage can self-load its knowledge (ADR-010). Review stages also receive
+   the diff and the touched-symbol map per `skills/lead/SKILL.md` → Dispatch and integrate.
+   Independent stages may run as **concurrent subagents**; dependent stages run in order.
+   Edge-rated tasks consult the **Advisor** (`bailiwick-advisor`, read-only) on the plan before
+   Implement and on the final diff (a mid-way promotion: final diff only); any task may consult it
+   on a decision the Lead cannot settle. Sizing and shared reach: `skills/lead/SKILL.md` → Size the stages.
 5. **Surface mid-task signals** — if any stage reports a non-obvious finding, workaround, or validated
    assumption during work, relay it to the Memory stage immediately; do not wait for task end
 6. **Integrate outputs** and present result to user for review
@@ -106,7 +111,8 @@ combined checklist to the Quality stage.
 > output. Because native subagents start as fresh contexts, each stage loads the knowledge it needs
 > itself (index + ≤5 files) — the orchestrator passes the domain hints in the dispatch prompt.
 > Each stage's frontmatter carries a default model tier + effort (ADR-010 Amendment 2). In led work,
-> the orchestrator sizes every dispatch by task rating (see the skill's "Size the stages").
+> the orchestrator sizes every dispatch by task rating (see the skill's "Size the stages"), which
+> also adds the Advisor to any row: required at the Edge rating, on demand otherwise.
 > Stage definitions are the frontmattered `agents/*.md` files, installed globally by
 > `bootstrap.sh --install-tools`: Claude Code symlinks plus Gemini, Codex, and Copilot adapters
 > (ADR-010, Amendment 1). Other hosts use available native dispatch or the disclosed inline fallback.

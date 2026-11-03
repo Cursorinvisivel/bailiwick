@@ -72,7 +72,7 @@ This is idempotent (re-run it any time — e.g. after adding a new skill) and in
   `/learn`, `/metrics`, `/investigate`, `/purge`, `/sign`.
 - The **Quality Workflow stages as native Claude Code subagents** — symlinks in `~/.claude/agents/`
   (`bailiwick-implement`, `bailiwick-quality`, `bailiwick-memory`, `bailiwick-security-review`,
-  `bailiwick-docs`, `bailiwick-cloud-research`, `bailiwick-federation`). This is what lets the Lead
+  `bailiwick-docs`, `bailiwick-cloud-research`, `bailiwick-federation`, `bailiwick-advisor`). This is what lets the Lead
   dispatch stages as real, concurrent subagents (ADR-010); never seeded per-repo.
 - The **same stages as generated adapters for the other tools** — Gemini (`~/.gemini/agents/`),
   Codex (`~/.codex/agents/`, TOML) and Copilot (`~/.copilot/agents/`), produced from the canonical

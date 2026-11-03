@@ -23,6 +23,7 @@ only as a disclosed fallback when delegation is unavailable. See ADR-010.
 | Memory stage | memory.md | Knowledge library management |
 | Cloud Research stage | cloud-research.md | External research from official sources |
 | Federation stage | federation.md | External/company memory: read-only consult + gated ingest |
+| Advisor stage | advisor.md | Read-only second opinion (Fable) on Edge plans/diffs and hard decisions |
 
 Orchestration is proportional: substantial or multi-step work runs under the Lead skill (`/lead`)
 by default — no prefix needed — and trivial edits and direct questions are handled inline with

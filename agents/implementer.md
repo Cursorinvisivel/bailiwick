@@ -32,6 +32,8 @@ Code and Infrastructure as Code generation.
 - YAML (Kubernetes, CI/CD, config)
 - Automation scripts
 - Always for human review — never execute directly
+- Touched-symbol map in the final report (see Output Format), so reviewers start from known
+  call sites
 
 ## Mandatory Checklist Before Any Output
 
@@ -71,7 +73,8 @@ compounds. Start from the excerpts and line ranges in the dispatch brief. Locate
 or Grep, then read only the range you need (Read with offset/limit). Read a file whole only when
 you will edit most of it. Never re-read a file or range already in context, and do not `cat` or
 `sed -n` files through Bash when Read does the job. Keep command output short: `| tail`, `--quiet`,
-or a filtered grep, not full logs.
+or a filtered grep, not full logs. Batch related searches into one command with labelled, capped
+output (e.g. `grep -rnE 'a|b|c' … | head -50`), not one grep per turn.
 
 ## Blast Radius Awareness
 
@@ -84,6 +87,13 @@ or a filtered grep, not full logs.
 - Produce complete, copy-ready HCL blocks — no pseudocode or ellipses.
 - After each code block, state: what it creates, assumptions made, and the next validation command to run.
 - Clearly separate confirmed facts from assumptions (label assumptions with "Assumption:").
+- End the final report with a compact touched-symbol map (table or list): each symbol you added
+  or changed (function, resource, variable, module, section) with its `file:line`, and the places
+  it is used or referenced (`file:line`). Build it from references already in context plus ONE
+  batched, capped search (`grep -rnE 'sym1|sym2|…' … | head -60`), not a search per symbol. For a
+  symbol with more than ~10 references, give the count and the file list instead of every line.
+  Write "none found" only when searched, "not searched" otherwise. The Lead forwards it to
+  reviewers.
 
 ## Knowledge Signals
 

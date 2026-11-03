@@ -202,4 +202,49 @@ assert_contains "old definition restored" '"mcp-server-fetch"' "$(cat "$HOME/.cl
 unset CLAUDE_STUB_LOG
 rm -f "$BAILIWICK_HOME/allowlist"
 
+# ---- multi-tool stage adapters: sizing + read-only translation (ADR-010 Amendments 1/2) ----------
+# Runs the REAL generator (the python heredoc inside bootstrap.sh) against a copy of agents/ plus
+# fixtures. Pins two silent failures: a per-task-rated reviewer whose Standard `effort:` got pinned
+# into its Codex file (Codex agent files override spawn-time effort, so Complex/Edge reviews ran at
+# medium), and a writing stage misclassified read-only because its write tool wasn't Edit/Write.
+echo "== generated adapters: fixed_host_effort sizing, write-tool detection, no key leakage"
+GEN="$T_SANDBOX/adapter-gen.py"
+awk -v start="CODEX_HOME=\"\${CODEX_HOME:-}\" python3 <<'PY'" \
+  'index($0, start) {f=1; next} f && $0 == "PY" {exit} f' "$BOOTSTRAP" > "$GEN"
+assert_contains "generator extracted from bootstrap.sh" "WRITE_TOOL_RE" "$GEN"
+AR="$T_SANDBOX/adapter-root"; mkdir -p "$AR/agents"
+cp "$REPO_ROOT"/agents/*.md "$AR/agents/"
+fixture() {  # <name> <tools>
+  printf -- '---\nname: bailiwick-zz-%s\ndescription: fixture stage\nmodel: sonnet\neffort: low\ntools: %s\n---\nbody\n' \
+    "$1" "$2" > "$AR/agents/zz-$1.md"
+}
+fixture notebook "Read, Grep, NotebookEdit"
+fixture mcpwrite "Read, mcp__fs__write_file"
+fixture readonly "Read, Grep, Glob, Bash"
+CX="$T_SANDBOX/codex-home"
+out="$(BAILIWICK_ROOT="$AR" CODEX_HOME="$CX" python3 "$GEN" 2>&1)"; rc=$?
+assert_exit "generator exits 0" 0 "$rc"
+assert_contains "generator reports its run" "multi-tool stage adapters" "$out"
+for st in quality security-review docs cloud-research implement; do
+  f="$CX/agents/bailiwick-$st.toml"
+  assert_file "codex adapter for $st generated" "$f"
+  assert_not_contains "codex $st is task-sized (no pinned model_reasoning_effort)" "model_reasoning_effort" "$f"
+done
+assert_contains "codex quality stays read-only" 'sandbox_mode = "read-only"' "$CX/agents/bailiwick-quality.toml"
+CP="$HOME/.copilot/agents"
+for f in "$CP/bailiwick-quality.agent.md" "$CP/bailiwick-security-review.agent.md" "$CP/bailiwick-docs.agent.md"; do
+  assert_file "copilot adapter $(basename "$f") generated" "$f"
+done
+assert_contains "copilot quality uses fixed_host_effort (high)" "reasoning-effort: high" "$CP/bailiwick-quality.agent.md"
+assert_contains "copilot security-review uses fixed_host_effort (high)" "reasoning-effort: high" "$CP/bailiwick-security-review.agent.md"
+assert_contains "copilot docs uses fixed_host_effort (medium)" "reasoning-effort: medium" "$CP/bailiwick-docs.agent.md"
+assert_file "codex notebook fixture generated" "$CX/agents/bailiwick-zz-notebook.toml"
+assert_not_contains "NotebookEdit stage is NOT read-only" "sandbox_mode" "$CX/agents/bailiwick-zz-notebook.toml"
+assert_file "codex mcp-write fixture generated" "$CX/agents/bailiwick-zz-mcpwrite.toml"
+assert_not_contains "MCP write_file stage is NOT read-only" "sandbox_mode" "$CX/agents/bailiwick-zz-mcpwrite.toml"
+assert_contains "a toolset with no write tool IS read-only" 'sandbox_mode = "read-only"' "$CX/agents/bailiwick-zz-readonly.toml"
+assert_contains "a non-task-sized stage keeps its pinned effort" 'model_reasoning_effort = "low"' "$CX/agents/bailiwick-zz-readonly.toml"
+leak="$(grep -rl "fixed_host_effort" "$HOME/.gemini/agents" "$CP" "$CX/agents" 2>/dev/null || true)"
+assert_eq "fixed_host_effort never copied into any adapter" "" "$leak"
+
 t_summary

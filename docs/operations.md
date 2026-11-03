@@ -365,6 +365,10 @@ skill links. Existing directory discovery picks up `skills/lead/` for Claude Cod
 Start a fresh Claude Code session (or use `/clear`) after installation so it discovers
 the new skill.
 
+Pitfall: installed stages (`~/.claude/agents/bailiwick-*.md`) are symlinks into the clone that ran
+`bootstrap.sh --install-tools`. A stage-instruction change is only in effect for dispatched stages
+after `--install-tools` from the clone under test (check with `scripts/doctor.sh`).
+
 - Claude Code: `/lead Implement X and have the draft independently reviewed.`
 - Codex: `$bailiwick-lead Implement X and have the draft independently reviewed.`
 - Gemini, Copilot, Antigravity, or another host: `Follow $BAILIWICK/skills/lead/SKILL.md

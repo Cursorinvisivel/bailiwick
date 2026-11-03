@@ -85,6 +85,8 @@ here.
 - **Quality** after any implementation or document draft. Add Security Review when the change
   affects IAM, network exposure, secrets, or data exposure. Research-only work also requires
   Quality, scoped to evidence, freshness, and applicability rather than a code checklist.
+- **Advisor** (`agents/advisor.md`, read-only): required for Edge-rated tasks, on the plan
+  before Implement and on the final diff; otherwise on demand (see "Size the stages").
 - **Memory Collect** after integration, including research-only and partially completed tasks.
 
 Once you decide to lead a task, these applicable stages are required even when it turns out
@@ -106,28 +108,52 @@ Rate the task before dispatch and add model tier and effort to each stage's plan
 skill explicitly instructs per-dispatch sizing: pass both on every delegated stage where the
 host accepts them, never leaving them to the session default by omission.
 
-| Task rating | Signals | Implement | Docs / Cloud Research | Quality / Security Review |
-|---|---|---|---|---|
-| **Trivial** | One file, no IAM/network/state impact, pattern already in KB | standard, low | standard, low | deep, medium |
-| **Standard** | Default; a module or document, bounded blast radius | session model, medium | standard, medium | deep, high |
-| **Complex / high-risk** | Multi-module, IAM, networking, state moves, prod, unfamiliar API | deep, high | standard, high | deep, high |
+| Task rating | Signals | Implement | Docs / Cloud Research | Quality / Security Review | Advisor |
+|---|---|---|---|---|---|
+| **Trivial** | One file, no IAM/network/state impact, pattern already in KB | sonnet, low | sonnet, low | sonnet, medium | — |
+| **Standard** | Default; a module or document, bounded blast radius | sonnet, medium | sonnet, medium | opus, medium | on demand |
+| **Complex / high-risk** | Multi-module, IAM, networking, state moves, prod, unfamiliar API | opus, high | sonnet, high | opus, high | on demand |
+| **Edge** | Complex, plus any of: no precedent in the KB, the repo, or the vendor's documented patterns; a novel design or architecture choice; an irreversible or high-blast step | opus, high | sonnet, high | opus, high | fable, high: on the plan before Implement and on the final diff |
 
-Memory, Federation, and freshness checks stay **light, low** regardless of rating; they navigate
-and read. A reviewer never runs below the implementer's tier or effort. The canonical frontmatter
-(`model:`/`effort:` in `agents/*.md`) holds the Standard defaults. A stage with `model: inherit`
-(Implement) is task-sized and must always be sized explicitly.
+**Shared reach** — the change is consumed by many downstream units: shared Terraform modules, CI
+templates, org policies, landing-zone/host projects; in the framework repo, stage instructions,
+skills, hooks and guardrails. Shared reach raises Quality and Security Review to the Complex row;
+Implement and Docs / Cloud Research stay at the rating the edit itself earns.
+
+Tiers: light = `haiku`, standard = `sonnet`, deep = `opus`, advisor = `fable`. Use the cheapest
+tier that fits the rating; do not default to `opus`. Memory Query, Federation, and freshness
+checks run **haiku, low** regardless of rating; they navigate and read. Memory Collect runs
+**sonnet, low**, because it judges what is reusable. A reviewer never runs below the
+implementer's tier or effort. The canonical frontmatter (`model:`/`effort:` in `agents/*.md`)
+holds the Standard defaults. A stage with `model: inherit` (Implement) is task-sized and must
+always be sized explicitly. Memory Query (haiku, low) differs from `memory.md`'s frontmatter
+(sonnet, low = Memory Collect), so pass its sizing explicitly at dispatch.
+
+The Lead is the main session and sizes every dispatch, brief, and scope, so it is where a deep
+model pays across the whole task: run it on `opus` (`fable` for sessions dominated by Edge work).
+The Lead's model is the user's session choice; record it as a `Lead (main session)` row in the execution table.
+
+Consult the **Advisor** on demand at any rating when the Lead cannot settle a decision on its
+own: conflicting material findings, a design choice with no precedent in the KB, the repo, or the vendor's documented patterns, or an irreversible or
+high-blast step. Brief it compactly with the question, the options, the constraints, and the
+evidence (about 2k tokens excluding the diff; pass a diff as a file path), never with the whole
+task history. It never edits. The final-diff consult: give it the diff file, the reviewers'
+findings and the plan decision; ask whether the result realises the decision and which edge
+risks remain unaddressed, not a line-by-line review. A task promoted to Edge mid-way consults
+the Advisor on the final diff only.
 
 Tiers map per host. Honour what the current runtime actually exposes, and record anything it
 cannot express:
 
-| Host | Light / standard / deep | Effort | Per-dispatch override |
+| Host | Light / standard / deep / advisor | Effort | Per-dispatch override |
 |---|---|---|---|
-| Claude Code | `haiku` / `sonnet` / `opus` (`inherit` = session model) | `low`/`medium`/`high` | Agent tool `model` and `effort` override frontmatter |
-| Codex | Not mapped; the session model is used unless the user names one | `model_reasoning_effort` | Spawn values apply only where the agent file sets none; Implement's adapter omits it, so pass effort at spawn. Other stages' file values are fixed |
-| GitHub Copilot | Not mapped; uses the selected model | `reasoning-effort` in the adapter | None; adapter values are fixed. Record Implement as "file default" |
+| Claude Code | `haiku` / `sonnet` / `opus` / `fable` (`inherit` = session model) | `low`/`medium`/`high` | Agent tool `model` and `effort` override frontmatter |
+| Codex | Not mapped; the session model is used unless the user names one | `model_reasoning_effort` | Spawn values apply only where the agent file sets none. The rated stages (Implement, Quality, Security Review, Docs, Cloud Research) have no effort in their adapter, so pass effort at spawn; other stages' file values are fixed |
+| GitHub Copilot | Not mapped; uses the selected model | `reasoning-effort` in the adapter | None; adapter values are fixed. Rated stages use their `fixed_host_effort` (frontmatter: the effort for hosts that cannot size per dispatch; reviewers high, Docs/Research medium). Record sizing as "file default" |
 | Gemini CLI / Antigravity | Not mapped; inherits the session model | No field | None; record sizing as "host default" |
 
-Never invent another vendor's model names to fill a tier; record "inherit" instead. Do not
+Never invent another vendor's model names to fill a tier; record "inherit" instead (the advisor
+tier is not mapped outside Claude Code). Do not
 raise or lower sizing to save time once the plan is stated. If a stage proves harder than
 rated (failed validation, material review findings), re-dispatch it one level up and record
 the change.
@@ -140,14 +166,31 @@ model cannot change its own size. For each delegated stage, send a self-containe
 containing:
 
 - Framework root and canonical role file (`agents/implementer.md`, `quality.md`, `memory.md`,
-  `security-review.md`, `docs.md`, `cloud-research.md`, or `federation.md` as appropriate).
+  `security-review.md`, `docs.md`, `cloud-research.md`, `federation.md`, or `advisor.md` as
+  appropriate).
 - User objective, acceptance criteria, project instructions, domain hints/checklist, relevant
   knowledge facts/IDs, and upstream outputs. Do not assume the stage inherits main-session context.
 - The evidence you already hold, so the stage does not rediscover it: file paths with line
-  ranges, and the excerpts that matter. A reviewer gets the full diff to review, inline. A
-  stage's reads stay in its context for every later turn, so supplied evidence is cheaper than
-  re-reads. Supplying it does not limit the stage: reviewers still verify independently and
-  read whatever they judge necessary.
+  ranges, and the excerpts that matter. A stage's reads stay in its context for every later
+  turn, so supplied evidence is cheaper than re-reads. Supplying it does not limit the stage:
+  reviewers still verify independently and read whatever they judge necessary.
+- **Reviewer briefs carry the diff itself (required, checked at completion).** Build it from
+  `git status --porcelain` plus `git diff HEAD`, and add the contents of new untracked files,
+  which `git diff` omits. For committed branch work plus uncommitted changes use
+  `git diff $(git merge-base <base> HEAD)` instead of `git diff HEAD`. Small change (rough guide:
+  up to ~400 diff lines): paste it inline. Larger: write it to a scratch file OUTSIDE the repo
+  (session scratchpad) with ONE shell redirect (bash / Git Bash), scoping untracked files to the
+  task's paths:
+  `{ git status --porcelain; git diff HEAD; git ls-files -o --exclude-standard -z -- <paths> | xargs -0 -r -n1 git diff --no-index -- /dev/null; } > <file>`
+  Skip binaries, secrets (.tfvars, .env, key JSON) and large generated files. Exit 123 is expected
+  (`diff --no-index` returns 1 when files differ); sanity-check with `grep -c '^diff --git' <file>`.
+  It is an exact byte copy that costs no generated tokens; give the reviewer the path and line
+  count. Never hand over "run git diff": that sends the reviewer fetching file by file. The cap
+  exists because a pasted diff is the Lead's own output: it is paid once per reviewer (twice with
+  Quality and Security Review in parallel), stays in the Lead's context and the capture
+  transcripts, and a long hand copy can silently alter lines. If the supplied diff and the working
+  tree disagree, the tree wins; flag the mismatch. Include the implementer's touched-symbol map
+  (symbol → file:line → references) when one exists.
 - Exact file/module ownership and allowed side effects. Tell writers they share the workspace,
   must preserve others' edits, and must not revert unrelated work. Avoid concurrent ownership
   of the same files; assign a single integrator when boundaries overlap.
@@ -160,7 +203,8 @@ integrate artifacts, and verify the acceptance criteria against the actual resul
 contradictions with existing knowledge as soon as found.
 
 Keep implementation and review in separate agent contexts when delegation is available. Give
-the reviewer the task, final draft/diff, and raw validation evidence; request its own assessment.
+the reviewer the task, the final diff (inline or as a diff file, per the brief requirement
+above), the touched-symbol map, and raw validation evidence; request its own assessment.
 Resolve material findings, rerun affected checks, and return revised portions to review. If a
 material issue cannot be resolved within the authorized scope, report the unfinished requirement
 and its blocker; do not label the task complete. If delegation fails, record the failed attempt
@@ -177,8 +221,11 @@ Include a concise execution table:
 
 Populate it with actual executions, including failures, inline fallbacks, and reasons for
 omissions. Record the sizing actually applied (`opus / high`, `inherit / file default`,
-`host default`), not the planned one. Planning a stage is not evidence it ran. Distinguish completed work from blocked or
-unverified requirements; retain that distinction when context is compacted or the task resumes.
+`host default`), not the planned one. For each review stage, state the diff delivery in its
+Result / evidence cell: `diff inline`, `diff file: <path> (<n> lines)`, or
+`not inline: <reason>`. Planning a stage is not evidence it ran. Distinguish completed work from
+blocked or unverified requirements; retain that distinction when context is compacted or the
+task resumes.
 
 Run Memory Collect on the integrated outputs and unresolved questions. Use its read-only
 candidate/report operation, not its curation write/telemetry/commit steps. When the host's
