@@ -14,6 +14,9 @@ SAT_GNUPG="$T_SANDBOX/gnupg-sat"
 FPR="$(t_gen_gpg_key "$SAT_GNUPG" backup-test-key)"
 [ -n "$FPR" ] || { echo "SKIP: could not generate gpg key"; exit 0; }
 export GNUPGHOME="$SAT_GNUPG"
+# Every contract test below asserts on the remote right after a push, so SessionEnd runs in the
+# foreground here. The detached SessionEnd path has its own section at the end (unsets it).
+export BW_BACKUP_SYNC=1
 
 INST="$T_SANDBOX/inst"; t_make_instance "$INST"
 git init -q --bare "$T_SANDBOX/holding.git"
@@ -223,5 +226,76 @@ assert_contains "new capture lands after self-heal" "s10.jsonl.gpg" "$after"
 assert_not_contains "purged blob stays purged after self-heal" "s9.jsonl.gpg" "$after"
 assert_no_dir "wedge cleared" "$MIRROR/.git/rebase-merge"
 assert_contains "self-heal logs a health warning" "conflicted rebase" "$HEALTH"
+
+echo "== SessionEnd detaches: hook returns fast, the push still lands"
+# Claude Code bounds ALL SessionEnd hooks to ~1.5 s on quit; fetch+gpg+push can't fit, so the
+# hook must hand off to a detached child and return immediately.
+wait_for_blob() {  # <name> : poll the remote up to 30 s
+  local i=0
+  while [ "$i" -lt 60 ]; do
+    git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat 2>/dev/null | grep -q "$1" && return 0
+    sleep 0.5; i=$((i + 1))
+  done
+  return 1
+}
+echo "SECRET-PAYLOAD-MIKE" > "$PROJ/.bailiwick-outputs/raw/s11.jsonl"
+t0=$(date +%s%N)
+echo '{"hook_event_name":"SessionEnd"}' | env -u BW_BACKUP_SYNC BW_BACKUP_SETTLE_S=0 \
+  CLAUDE_PROJECT_DIR="$PROJ" bash "$INST/hooks/capture_backup.sh" push >/dev/null 2>&1
+rc=$?; ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+assert_exit "detached SessionEnd exits 0" 0 "$rc"
+if [ "$ms" -lt 1000 ]; then t_ok "detached SessionEnd returns in < 1000 ms (${ms} ms)"; else t_fail "detached SessionEnd took ${ms} ms (budget 1500 ms)"; fi
+if wait_for_blob 's11\.jsonl\.gpg$'; then t_ok "detached child still pushes the capture"; else t_fail "detached child never pushed s11"; fi
+
+echo "== SessionEnd releases the hook's stdout/stderr (no inherited pipe)"
+# A child that keeps the pipe open makes the harness wait for it — the same timeout again.
+echo "SECRET-PAYLOAD-NOVEMBER" > "$PROJ/.bailiwick-outputs/raw/s12.jsonl"
+echo '{"hook_event_name":"SessionEnd"}' | env -u BW_BACKUP_SYNC BW_BACKUP_SETTLE_S=5 \
+  CLAUDE_PROJECT_DIR="$PROJ" timeout 2 bash -c "bash '$INST/hooks/capture_backup.sh' push 2>&1 | cat" >/dev/null
+assert_exit "hook output closes before the child finishes" 0 "$?"
+wait_for_blob 's12\.jsonl\.gpg$' || true
+# Let any child finish before the lock tests below (it holds the mirror lock while it runs).
+i=0; while [ -d "$MIRROR.lock" ] && [ "$i" -lt 60 ]; do sleep 0.5; i=$((i + 1)); done
+
+stop_push() { echo '{"hook_event_name":"Stop"}' | CLAUDE_PROJECT_DIR="$PROJ" bash "$INST/hooks/capture_backup.sh" push; }
+
+echo "== stranded commit drains even when nothing new was encrypted"
+# A push killed after `git commit` (SessionEnd budget, crash, offline) must not wait for an
+# unrelated future capture to change before it reaches origin.
+echo "stranded" > "$MIRROR/stranded.txt"
+git -C "$MIRROR" -c user.name=t -c user.email=t@t -c commit.gpgsign=false add stranded.txt
+git -C "$MIRROR" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m "capture: stranded"
+sc="$(git -C "$MIRROR" rev-parse HEAD)"
+# The health shard grows on every push and is itself encrypted as "new" content — set it aside so
+# this run truly has nothing new to encrypt, and only the drain can move the commit.
+mv "$HEALTH" "$HEALTH.aside"
+stop_push >/dev/null 2>&1
+{ cat "$HEALTH.aside"; cat "$HEALTH" 2>/dev/null; } > "$HEALTH.merged"; mv "$HEALTH.merged" "$HEALTH"; rm -f "$HEALTH.aside"
+if git -C "$T_SANDBOX/holding.git" merge-base --is-ancestor "$sc" capture/testsat 2>/dev/null; then
+  t_ok "stranded mirror commit pushed by a no-new-capture Stop"
+else
+  t_fail "stranded mirror commit still not on origin"
+fi
+
+echo "== busy mirror lock: Stop skips without touching the throttle stamp"
+STAMPF="$PROJ/.bailiwick-outputs/.backup-last"
+echo 12345 > "$STAMPF"
+echo "SECRET-PAYLOAD-OSCAR" > "$PROJ/.bailiwick-outputs/raw/s13.jsonl"
+mkdir "$MIRROR.lock"
+stop_push >/dev/null 2>&1
+assert_exit "Stop with a busy lock exits 0" 0 "$?"
+assert_eq "throttle stamp untouched (next Stop retries)" "12345" "$(cat "$STAMPF")"
+assert_not_contains "nothing pushed while the lock is held" "s13.jsonl.gpg" \
+  "$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat)"
+assert_dir "a held lock is not stolen" "$MIRROR.lock"
+
+echo "== stale mirror lock (>10 min) is taken over"
+touch -d '20 minutes ago' "$MIRROR.lock"
+stop_push >/dev/null 2>&1
+assert_exit "Stop over a stale lock exits 0" 0 "$?"
+assert_contains "stale lock takeover pushes the waiting capture" "s13.jsonl.gpg" \
+  "$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat)"
+assert_contains "stale lock takeover logs a health warning" "stale mirror lock" "$HEALTH"
+assert_no_dir "lock released after the run" "$MIRROR.lock"
 
 t_summary
