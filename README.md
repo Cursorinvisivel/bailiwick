@@ -101,7 +101,8 @@ Windows PowerShell mirrors every flag with a single dash: `bootstrap.ps1 -Instal
 `/enrich`, `/learn`, `/metrics`, `/investigate`, `/purge`, `/sign` — plus an optional encrypted off-machine
 capture backup and multi-machine central/satellite sync over plain git.
 
-For explicit team execution, use **`/lead`** (Codex: **`$bailiwick-lead`**). The shared
+Substantial work runs under the **Lead skill** by default (**`/lead`**; Codex:
+**`$bailiwick-lead`**), while trivial edits and questions stay inline. The shared
 [Lead skill](skills/lead/SKILL.md) requires applicable stages, review, and an execution report.
 Gemini, Copilot, Antigravity, and other hosts can follow the same file by reference; native
 delegation depends on the current runtime, with any inline fallback disclosed. See

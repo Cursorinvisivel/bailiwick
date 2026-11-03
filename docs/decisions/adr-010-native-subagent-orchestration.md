@@ -169,3 +169,51 @@ a different sizing surface:
 **Accepted residuals:** on Codex/Copilot/Gemini the model tier is the session's. Copilot and the
 fixed Codex stages cannot be resized per task. No Antigravity `~/.gemini/config/agents/` adapter
 exists yet.
+
+## Amendment 3 (2026-11-03) — the Lead skill is the default for substantial work
+
+**Finding.** Decision 4 kept routing proportional, and the stricter `/lead` contract (required
+stages, explicit sizing, execution table) ran only when the user remembered to invoke it. Measured
+on captures since 2026-10-25: 2 explicit `/lead` invocations against 102 stage dispatches. Most
+substantial work ran under the lighter `agents/lead.md` routing, so docs and runbooks went
+unreviewed and sizing was left to frontmatter defaults. The skill's own description ("Use only
+when the user explicitly invokes /lead") actively blocked description-matched invocation.
+
+**Decision.**
+1. In a Bailiwick-wired repository, substantial work runs under the Lead skill **by default**.
+   The skill's description and the session-start defaults instruct the session to invoke it
+   unasked. Outside wired repositories the globally installed skill stays opt-in, so it does not
+   self-invoke in unrelated projects.
+2. The line is defined once, as a canonical one-line rule in the skill's **"When to lead"**
+   section, which the session-start banner and the Codex/Antigravity templates copy verbatim (a
+   test keeps them in sync). Led: more than one file beyond typos, comments, formatting, and
+   mechanical renames; any other IaC change; any IAM, network, secrets, or security-control
+   change in any file; a single-file change that adds behaviour beyond a small fix; a new module,
+   document, or test suite, or a substantive doc rewrite; a design decision; a requested review or
+   researched recommendation.
+   Inline: questions, lookups, explanations, those mechanical edits, and small single-file fixes.
+   The mechanical edits stay inline even across files or in IaC; otherwise any led trigger wins.
+3. Loading the skill does not make a task led: the session applies the rule first and, for inline
+   work, says so in one line and continues without stages. When unsure, it states its choice in
+   one line and proceeds without waiting.
+4. The user's words override the rule both ways (force: `/lead`, "lead it", "run the full Quality
+   Workflow", naming the stages; keep inline: "just do it", "inline"). They change routing only and
+   never satisfy a human gate. A task that outgrows the inline rules mid-way switches to the Lead.
+5. This amends Decision 4 (where the line sits and which contract applies above it) and narrows
+   Decision 2: small work is handled inline with no stages, and a led stage runs inline only as the
+   skill's disclosed fallback when delegation is unavailable.
+
+**Accepted residuals:** led tasks gain Memory Query, Quality, and Memory Collect stages, so a
+small led task costs more than it did under matrix routing. The Trivial sizing row lowers effort,
+but Quality stays deep, so every led task pays at least one deep review. Invocation is policy, not
+a runtime switch: a session can still misjudge the line, which is why it states its choice when
+unsure. Copilot and the seeded instruction files get the rule only indirectly (via
+`agents/lead.md`) until the Copilot instructions, project CLAUDE.md, and project AGENTS.md templates
+in `knowledge/templates/` are updated through `/curate`; those still offer the old `Lead:` prefix.
+
+**Trial rollout.** This ships to the private framework clones first (merged into
+`bailiwick-private` main) and is judged with `scripts/stage_cost.py` before the public merge. If the
+trial is undone with `git revert -m 1 <merge>`, git still records the commits as merged, so a later
+pull of the same commits from public `main` silently brings nothing back. Before re-merging, revert
+the revert commit. Check that the change is really present with
+`grep -q '^## When to lead' skills/lead/SKILL.md`.

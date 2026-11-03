@@ -1,15 +1,42 @@
 ---
 name: lead
-description: Coordinate a Bailiwick task through specialist agents, explicit stage dependencies, independent review, and an execution report. Use only when the user explicitly invokes /lead or asks for the Bailiwick Lead by name; proportional routing and ordinary lookups do not need this skill.
+description: Default way of working for substantial tasks in a Bailiwick-wired repository (framework defaults are active in the session, a CLAUDE.local.md/.bailiwick.local.md complement references the framework, the repo is in ~/.bailiwick/allowlist, BAILIWICK_SHADOW=1 is set, or it is the framework repo itself) — more than one file beyond typos/formatting/mechanical renames, any other IaC change, any IAM/network/secrets/security-control change, a single-file change adding behaviour beyond a small fix, a new module/document/test suite or substantive doc rewrite, a design decision, or a requested review or researched recommendation. Coordinates specialist stage agents with explicit dependencies, independent review, and an execution report; use it without being asked. Skip it for questions, lookups, explanations, typos/formatting/mechanical renames, and small single-file fixes, which the main session handles inline. Outside wired repositories, use it only when the user invokes /lead.
 ---
 
 # /lead — coordinate the Quality Workflow
 
 Use the current main session as Lead. Read `$BAILIWICK/agents/lead.md` for domain routing
-and its stage matrix; this skill adds the execution contract for an explicitly requested team,
-including the stages it adds to that matrix (see "Plan the stages").
+and its stage matrix; this skill adds the execution contract for substantial work, including
+the stages it adds to that matrix (see "Plan the stages").
 It is shared across tools. Keep orchestration in the main session, even when a runtime permits
 nested agents, so one coordinator owns dependencies, integration, and the final report.
+
+## When to lead
+
+Loading this skill does not make a task led. Decide first, with these rules; if the task stays
+inline, say so in one line and continue in the main session without stages or an execution table.
+
+1. **Wired repository?** The default applies only where Bailiwick is wired: framework defaults
+   are active in the session, a `CLAUDE.local.md`/`.bailiwick.local.md` complement references the
+   framework, the repo is listed in `~/.bailiwick/allowlist`, `BAILIWICK_SHADOW=1` is set, or it
+   is the framework repo itself.
+   Elsewhere, lead only when the user invokes `/lead`.
+2. **Apply the rule.** This one line is canonical; the session-start banner and the host
+   templates copy it verbatim:
+
+   > Lead it: more than one file (beyond typos, comments, formatting, mechanical renames); any other IaC change; any IAM, network, secrets, or security-control change in any file; a single-file change that adds behaviour beyond a small fix; a new module, document or test suite, or a substantive doc rewrite; a design decision; a requested review or researched recommendation. Inline: questions, lookups, explanations, those mechanical edits, and small single-file fixes.
+
+   Precedence: typos, comments, formatting, and mechanical renames stay inline even when they span
+   files, touch IaC, or ship. Otherwise any *Lead it* trigger wins over the inline list. "Explain
+   this code" or "what does X do" is inline; "review this module/PR" or "what's the best way to do
+   X on GCP" is a requested review or researched recommendation, so it is led.
+3. **Unsure?** Pick one, state it in one line ("leading this: touches IAM" / "handling inline:
+   one-line typo fix"), then proceed. Do not block on a reply; the user can redirect.
+
+The user's words override the rule both ways. Force: `/lead`, "lead it", "run the full Quality Workflow", or naming the stages. Keep inline: "just do it" or "inline".
+These phrases change routing only. They never approve a commit, push, PR, high-impact action, or
+knowledge promotion. A task that grows past the inline rules mid-way (a second file, an IAM
+change) switches to this contract at that point; say so and plan the remaining stages.
 
 ## Resolve context and capabilities
 
@@ -45,9 +72,9 @@ effort, see "Size the stages"), and execution mode (`delegated`, `inline fallbac
 `not applicable` with reason). Include:
 
 Start from the Lead's matrix row for the task type, then apply these additions. They are
-deliberate: explicit invocation is stricter than proportional routing, so rows that omit Memory
-Query or Quality (for example Module documentation, Operational runbook, External research)
-gain them here.
+deliberate: this contract is stricter than the matrix alone, so rows that omit Memory Query or
+Quality (for example Module documentation, Operational runbook, External research) gain them
+here.
 
 - **Memory Query** before execution, using domain hints and the KB loading budget from the Lead.
   Alongside it, run the **Federation** consult (`agents/federation.md`, read-only) when
@@ -60,8 +87,9 @@ gain them here.
   Quality, scoped to evidence, freshness, and applicability rather than a code checklist.
 - **Memory Collect** after integration, including research-only and partially completed tasks.
 
-Explicit invocation requires these applicable stages even for a small task; keep the scope of
-each stage small. **Split large Implement work into slices.** Give each module or file-ownership
+Once you decide to lead a task, these applicable stages are required even when it turns out
+small; keep the scope of each stage small (rate it Trivial in "Size the stages" when its signals
+fit). **Split large Implement work into slices.** Give each module or file-ownership
 boundary its own Implement dispatch, each starting fresh, rather than one long run. A stage
 re-reads its whole context on every turn, so one long run costs far more than the same work done
 in fresh slices. Run independent slices concurrently and dependent ones in order. Review the
@@ -166,7 +194,8 @@ where `/curate` gathers, using the same seeded/shadow split as `/learn` (seeded 
   `<repo-key>` computed by `capture_session.repo_key` as `/learn` does. Nothing is written into
   the repository.
 
-Invoking Lead authorizes orchestration of the requested task, not extra external actions.
+Leading a task, whether invoked or by default, authorizes orchestration of that task only, not
+extra external actions.
 Preserve existing human gates for high-impact actions, commits/pushes/PRs, and knowledge
 promotion. Research that should enter the KB goes through `/investigate` or `/curate` with
 its explicit approval gate; Lead and its subagents do not promote knowledge themselves.

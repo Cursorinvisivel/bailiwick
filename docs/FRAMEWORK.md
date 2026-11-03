@@ -92,8 +92,8 @@ The **Lead** is the **orchestrator**: the native Claude Code main session that p
 dispatches **real native subagents** (the Agent/Task mechanism), running them **concurrently where
 the work is independent**. The Lead is not itself a subagent — native subagents cannot spawn further
 subagents, so orchestration lives in the main session. The ordered review pass it drives is the
-**Quality Workflow**; each step is a **stage** that runs as a dispatched subagent or inline for small
-work. "Agent" / "subagent" means the native mechanism; the framework's own executable parts are
+**Quality Workflow**; each step is a **stage** that runs as a dispatched subagent (inline only as a
+disclosed fallback), while small work is handled inline without stages. "Agent" / "subagent" means the native mechanism; the framework's own executable parts are
 stages. Stage definitions are the frontmattered `agents/*.md` files, installed globally as
 `~/.claude/agents/bailiwick-*.md` symlinks by `bootstrap.sh --install-tools` (never seeded per-repo
 — shadow stays zero-footprint). The same install generates **multi-tool stage adapters** from the
@@ -117,10 +117,11 @@ ADR-010. 14 files in three tiers.
 
 ### Flow
 1. A task arrives. **Proportional routing:** trivial edits / direct questions are answered inline
-   with knowledge loaded; substantial work routes through the **Lead**. Stating a substantial task
-   *is* the invocation; explicit phrasing forces the full Quality Workflow when routing
-   under-evaluates a task, and `/lead` (Codex: `$bailiwick-lead`) adds the explicit execution
-   contract with required stage evidence.
+   with knowledge loaded; substantial work runs under the **Lead skill** (`/lead`, Codex
+   `$bailiwick-lead`) by default, with its execution contract and required stage evidence
+   (ADR-010 Amendment 3). The skill's "When to lead" section defines the line. Force: `/lead`,
+   "lead it", "run the full Quality Workflow", or naming the stages; keep inline: "just do it" or
+   "inline" (routing only, never a human-gate approval).
 2. Lead identifies relevant **domain context file(s)**, reads them for Memory tags + checklist.
 3. Lead dispatches the **Memory stage (Query)** with those tags — it descends the `INDEX.md` tree
    on-demand, loads ≤5 content files, checks manual session outputs (seeded `.bailiwick-outputs/`
