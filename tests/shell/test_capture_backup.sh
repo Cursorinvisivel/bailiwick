@@ -238,11 +238,14 @@ wait_for_blob() {  # <name> : poll the remote up to 30 s
   done
   return 1
 }
+# Portable clocks/timestamps: BSD date has no %N, BSD touch has no relative -d, macOS has no timeout.
+now_ms() { python3 -c 'import time; print(int(time.time() * 1000))'; }
+age_minutes() { python3 -c 'import os, sys, time; t = time.time() - 60 * int(sys.argv[2]); os.utime(sys.argv[1], (t, t))' "$1" "$2"; }
 echo "SECRET-PAYLOAD-MIKE" > "$PROJ/.bailiwick-outputs/raw/s11.jsonl"
-t0=$(date +%s%N)
+t0=$(now_ms)
 echo '{"hook_event_name":"SessionEnd"}' | env -u BW_BACKUP_SYNC BW_BACKUP_SETTLE_S=0 \
   CLAUDE_PROJECT_DIR="$PROJ" bash "$INST/hooks/capture_backup.sh" push >/dev/null 2>&1
-rc=$?; ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+rc=$?; ms=$(( $(now_ms) - t0 ))
 assert_exit "detached SessionEnd exits 0" 0 "$rc"
 if [ "$ms" -lt 1000 ]; then t_ok "detached SessionEnd returns in < 1000 ms (${ms} ms)"; else t_fail "detached SessionEnd took ${ms} ms (budget 1500 ms)"; fi
 if wait_for_blob 's11\.jsonl\.gpg$'; then t_ok "detached child still pushes the capture"; else t_fail "detached child never pushed s11"; fi
@@ -250,9 +253,18 @@ if wait_for_blob 's11\.jsonl\.gpg$'; then t_ok "detached child still pushes the 
 echo "== SessionEnd releases the hook's stdout/stderr (no inherited pipe)"
 # A child that keeps the pipe open makes the harness wait for it — the same timeout again.
 echo "SECRET-PAYLOAD-NOVEMBER" > "$PROJ/.bailiwick-outputs/raw/s12.jsonl"
-echo '{"hook_event_name":"SessionEnd"}' | env -u BW_BACKUP_SYNC BW_BACKUP_SETTLE_S=5 \
-  CLAUDE_PROJECT_DIR="$PROJ" timeout 2 bash -c "bash '$INST/hooks/capture_backup.sh' push 2>&1 | cat" >/dev/null
-assert_exit "hook output closes before the child finishes" 0 "$?"
+# The child sleeps 5 s before pushing, so a reader still blocked after 3 s means the pipe is held.
+( echo '{"hook_event_name":"SessionEnd"}' | env -u BW_BACKUP_SYNC BW_BACKUP_SETTLE_S=5 \
+    CLAUDE_PROJECT_DIR="$PROJ" bash "$INST/hooks/capture_backup.sh" push 2>&1 | cat >/dev/null ) &
+rpid=$!; i=0
+while kill -0 "$rpid" 2>/dev/null && [ "$i" -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
+if kill -0 "$rpid" 2>/dev/null; then
+  t_fail "hook output closes before the child finishes (reader still blocked after 3 s)"
+  kill "$rpid" 2>/dev/null || true
+else
+  t_ok "hook output closes before the child finishes"
+fi
+wait "$rpid" 2>/dev/null || true
 wait_for_blob 's12\.jsonl\.gpg$' || true
 # Let any child finish before the lock tests below (it holds the mirror lock while it runs).
 i=0; while [ -d "$MIRROR.lock" ] && [ "$i" -lt 60 ]; do sleep 0.5; i=$((i + 1)); done
@@ -290,7 +302,7 @@ assert_not_contains "nothing pushed while the lock is held" "s13.jsonl.gpg" \
 assert_dir "a held lock is not stolen" "$MIRROR.lock"
 
 echo "== stale mirror lock (>10 min) is taken over"
-touch -d '20 minutes ago' "$MIRROR.lock"
+age_minutes "$MIRROR.lock" 20
 stop_push >/dev/null 2>&1
 assert_exit "Stop over a stale lock exits 0" 0 "$?"
 assert_contains "stale lock takeover pushes the waiting capture" "s13.jsonl.gpg" \
