@@ -1,0 +1,39 @@
+{
+  "drill": "curate",
+  "command": "/drill-curate",
+  "//": "Keyword groups: every group must match, any keyword in a group. Matching lowercases text and keywords and folds runs of space, '-' and '_' into one space, so 'cleanup_policy_dry_run', 'cleanup policy dry run' and 'cleanup-policy dry-run' are the same; the variants below are listed for the reader. G1 was checked against the library (no Pub/Sub expiration content) when chosen; G1 used to be the IAM binding item, which knowledge/patterns/gcp-iam-conventions.md already holds.",
+  "content_dirs": ["knowledge/topics", "knowledge/patterns", "knowledge/context", "knowledge/clients"],
+  "items": [
+    {"id": "G1", "title": "Pub/Sub subscriptions expire after 31 days of inactivity by default; expiration_policy { ttl = \"\" } makes them never expire",
+     "keywords": [["expiration_policy", "expiration policy", "expiration-policy"], ["31 days", "31-day", "31 day", "thirty-one days"]]},
+    {"id": "G2", "title": "Uniform bucket-level access can be disabled only within 90 days (lockedTime), then it is permanent",
+     "keywords": [["uniform bucket-level access", "uniform_bucket_level_access", "uniform bucket level access", "ubla"], ["90 days", "90-day", "90 day"]]},
+    {"id": "G3", "title": "Cloud SQL: deletion_protection is Terraform-only; settings.deletion_protection_enabled blocks console/API deletion",
+     "keywords": [["deletion_protection_enabled", "deletion protection enabled"], ["cloud sql", "cloud-sql", "google_sql_database_instance"]]},
+    {"id": "G4", "title": "Artifact Registry cleanup policies: preview with cleanup_policy_dry_run = true before enforcing",
+     "keywords": [["cleanup_policy_dry_run", "cleanup policy dry run", "cleanup-policy dry-run", "cleanup policy dry-run"]]}
+  ],
+  "duplicate": {
+    "id": "D1", "title": "Stale GCS state lock: confirm no run, terraform force-unlock (already in the KB)",
+    "existing": "knowledge/topics/terraform-state-lock-recovery.md",
+    "keywords": [["force-unlock", "force_unlock", "force unlock"], ["lock"]]
+  },
+  "noise": {"id": "N1", "title": "Terminal font ligatures (one-off, not knowledge)",
+            "keywords": [["ligature", "nerd font", "caskaydiacove"]]},
+  "leak": [
+    {"name": "leak_id", "regex": "globex[-_ ]?drill", "flags": "i"},
+    {"name": "leak_project", "regex": "(?<![a-z0-9])gxdr(?![a-z0-9])", "flags": "i"},
+    {"name": "leak_org", "regex": "globex\\s+drill\\s+systems", "flags": "i"}
+  ],
+  "secret": [
+    {"name": "secret_key", "regex": "AKIAIOSFODNN7EXAMPLE", "flags": ""},
+    {"name": "secret_value", "regex": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "flags": ""}
+  ],
+  "//defects": "Planted defects the Step 5a reviewers should FLAG. A FLAG line (FLAG <candidate-id> <type>: <reason>) is a true positive when its type matches a defect and its candidate id + reason match that defect's regex; a leak/secret/duplicate FLAG matching no defect is a false positive. accuracy/confidence flags have no planted defect: reported as unplanted, not scored.",
+  "defects": [
+    {"id": "X-LEAK", "type": "leak", "match": "globex|gxdr|client (name|identifier)|org(anisation|anization)? name|project id", "flags": "i"},
+    {"id": "X-SECRET", "type": "secret", "match": "AKIA|secret|credential|access key|aws", "flags": "i"},
+    {"id": "X-DUP", "type": "duplicate", "match": "terraform-state-lock-recovery|state[ -_]lock|force[-_ ]unlock|tflock", "flags": "i"}
+  ],
+  "flag_types": ["leak", "secret", "duplicate", "accuracy", "confidence"]
+}

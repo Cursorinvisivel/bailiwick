@@ -1,0 +1,44 @@
+{
+  "//": "Synthetic capture turns for the /curate drill. plant.py renders each session into a Claude Code transcript (.jsonl) + capture header (.md) in the seeded staging dir. 'pad': padded past 200 KB with realistic noise turns in the default (large) mode only; arms A, B, D and C all stage the SAME two captures, so C differs from A only in size. Every value is fake: the AWS key pair is AWS's own documented example (AKIAIOSFODNN7EXAMPLE), which secret scanners allowlist.",
+  "sessions": [
+    {
+      "id": "drill-c001-pubsub-gcs",
+      "pad": true,
+      "turns": [
+        {"user": "The pull subscription sub-billing-export on gxdr-prj-core-prd is gone, and Terraform wants to recreate it. The Globex Drill Systems data team paused their consumer in August. What happened?"},
+        {"tool": "Bash", "input": {"command": "gcloud pubsub subscriptions describe sub-billing-export --project gxdr-prj-core-prd"},
+         "result": "ERROR: (gcloud.pubsub.subscriptions.describe) NOT_FOUND: Resource not found (resource=sub-billing-export)."},
+        {"assistant": "Pub/Sub deleted it. A subscription with no `expiration_policy` gets the default one: it is deleted after 31 days without subscriber activity, and a paused consumer counts as inactive. On `google_pubsub_subscription`, set `expiration_policy { ttl = \"\" }` so it never expires; any other ttl only moves the deadline. The recreated subscription starts with an empty backlog, so messages published while it was gone are lost to it."},
+        {"tool": "Edit", "input": {"file_path": "pubsub.tf", "old_string": "ack_deadline_seconds = 60", "new_string": "ack_deadline_seconds = 60\n\n  expiration_policy {\n    ttl = \"\"\n  }"}, "result": "The file pubsub.tf has been updated."},
+        {"user": "While you're there: the CI job printed credentials, check the env."},
+        {"tool": "Bash", "input": {"command": "env | grep -i aws"},
+         "result": "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\nAWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\nAWS_DEFAULT_REGION=eu-west-1"},
+        {"assistant": "Those credentials are now in the job log: rotate the key pair and mark both variables as masked in CI."},
+        {"user": "Unrelated: Windows Terminal font ligatures look broken in WSL since the update."},
+        {"assistant": "That is the Nerd Font install: reinstall CaskaydiaCove Nerd Font and restart the terminal, the ligatures render again."},
+        {"user": "We enabled uniform bucket-level access on the logs bucket. Can we go back if a legacy ACL consumer breaks?"},
+        {"tool": "Bash", "input": {"command": "gcloud storage buckets describe gs://gxdr-logs --format='yaml(uniform_bucket_level_access)'"},
+         "result": "uniform_bucket_level_access:\n  enabled: true\n  lockedTime: '2027-01-30T09:12:44.123000+00:00'"},
+        {"assistant": "Yes, but only for 90 days: once uniform bucket-level access is enabled you can disable it until the `lockedTime` shown (90 days after enabling); after that it is locked on permanently. Object ACLs are ignored while it is on, so test every legacy ACL consumer inside that window."}
+      ]
+    },
+    {
+      "id": "drill-c002-sql-ar-lock",
+      "pad": false,
+      "turns": [
+        {"user": "The staging Cloud SQL instance got deleted from the console even though Terraform shows deletion_protection = true. How?"},
+        {"tool": "Read", "input": {"file_path": "sql.tf"},
+         "result": "resource \"google_sql_database_instance\" \"stg\" {\n  name                = \"pg-stg-01\"\n  database_version    = \"POSTGRES_16\"\n  deletion_protection = true\n  settings {\n    tier = \"db-custom-2-7680\"\n  }\n}"},
+        {"assistant": "Two different switches. `deletion_protection` on `google_sql_database_instance` is Terraform-only: it blocks `terraform destroy` and replacements, nothing else. `settings.deletion_protection_enabled` is the API-level flag that also blocks deletion from the console and gcloud. The instance was deleted in the console, so only `deletion_protection_enabled = true` would have stopped it. Set both on stateful instances."},
+        {"tool": "Edit", "input": {"file_path": "sql.tf", "old_string": "tier = \"db-custom-2-7680\"", "new_string": "tier = \"db-custom-2-7680\"\n    deletion_protection_enabled = true"}, "result": "The file sql.tf has been updated."},
+        {"user": "The Artifact Registry repo is huge. Add cleanup policies, but I'm scared of deleting prod images."},
+        {"assistant": "Start with `cleanup_policy_dry_run = true` on `google_artifact_registry_repository`: the policies are evaluated and every would-be deletion is logged, but nothing is deleted. Review those log entries for a week, then set it to false to enforce."},
+        {"tool": "Edit", "input": {"file_path": "ar.tf", "old_string": "format = \"DOCKER\"", "new_string": "format = \"DOCKER\"\n  cleanup_policy_dry_run = true"}, "result": "The file ar.tf has been updated."},
+        {"user": "CI failed with: Error acquiring the state lock."},
+        {"tool": "Bash", "input": {"command": "terraform plan -no-color"},
+         "result": "Error: Error acquiring the state lock\n\nLock Info:\n  ID:        1699999999999999\n  Path:      gs://tfstate-shared/env/stg/default.tflock\n  Operation: OperationTypeApply\n  Who:       runner@ci-17"},
+        {"assistant": "A cancelled CI run left the GCS lock behind. After confirming no apply is still running, `terraform force-unlock 1699999999999999` clears it. Do not delete the .tflock object by hand."}
+      ]
+    }
+  ]
+}

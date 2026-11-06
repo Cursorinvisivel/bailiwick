@@ -1,6 +1,6 @@
 ---
 name: bailiwick-curate
-description: Curate Bailiwick captures and session outputs into the knowledge library under the same human gate as Claude Code `/curate`. Use when the user asks Codex to curate, run `/curate`, process pending `.bailiwick-outputs/` or `~/.bailiwick/captures/` items, restore encrypted dirty-zone captures, update telemetry, deduplicate candidates, or propose knowledge-library updates.
+description: Curate Bailiwick captures and session outputs into the knowledge library under the same human gate as Claude Code `/curate`. Use when the user asks Codex to curate, run `/curate`, process pending `.bailiwick-outputs/` or `$BAILIWICK_HOME/captures/` (default `~/.bailiwick`) items, restore encrypted dirty-zone captures, update telemetry, deduplicate candidates, or propose knowledge-library updates.
 ---
 
 # Bailiwick Curate
@@ -23,7 +23,7 @@ prompt. This is a thin Codex wrapper; the canonical procedure remains in Bailiwi
 3. Follow the canonical `/curate` procedure exactly, with these Codex adaptations:
    - Treat a user request for `/curate`, `curate`, `bailiwick curate`, or pending-capture processing as an invocation of this skill.
    - Codex does not run the Claude Code slash-command UI; do the workflow directly in the current turn.
-   - Codex does not run Claude Code Stop/SessionEnd hooks; include manual Codex session outputs from `.bailiwick-outputs/*.md` and shadow-mode `~/.bailiwick/captures/*/*.md`.
+   - Codex does not run Claude Code Stop/SessionEnd hooks; include manual Codex session outputs from `.bailiwick-outputs/*.md` and shadow-mode `$BAILIWICK_HOME/captures/*/*.md` (`$BAILIWICK_HOME` defaults to `~/.bailiwick`).
    - For periodic requests, follow `$BAILIWICK/skills/curate/references/gcp-freshness.md` even when
      captures are empty. Dispatch `bailiwick-cloud-research-freshness` (fetch-only; pass the
      procedure and registry inline) using native delegation if available, alongside independent
@@ -33,6 +33,12 @@ prompt. This is a thin Codex wrapper; the canonical procedure remains in Bailiwi
      background execution is implied. Persist the result in the framework root and collect it
      before session end or explicitly mark the run incomplete. Only previously completed reports
      in the initial gather snapshot are curation candidates.
+   - For canonical Steps 2a (distill) and 5a (independent review), delegate when the host can spawn
+     the named stage; pass the sizing it can express (Codex cannot pick the model, so record the
+     model tier as inherit and pass effort where the adapter accepts it). Otherwise run them inline
+     and disclose "inline fallback" (never call an inline self-review independent). Honour the
+     canonical inbox rule: delete the decrypted `.bailiwick-inbox/` copies after extraction and
+     before any 5a dispatch, and use `bailiwick-security-review-local` for the 5a security pass.
    - Preserve the same human gate: do not write to `$BAILIWICK/knowledge/` unless the user explicitly approves the proposed batch in this session.
 4. When encrypted dirty-zone backup is enabled in `$BAILIWICK/.bailiwick-sync.json`, run the canonical restore command only when needed:
    - `bash $BAILIWICK/hooks/capture_backup.sh pull`

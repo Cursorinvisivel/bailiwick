@@ -358,6 +358,9 @@ reads Claude Code's own stage transcripts (`~/.claude/projects/*/*/subagents/`),
 per-turn token usage that captures lack, and prints per-stage medians before and after the date.
 It is read-only.
 
+Drills for `/purge` and `/curate` live in [tests/drills/README.md](../tests/drills/README.md): run
+them attended, via `launch.sh`.
+
 After pulling this change, run `scripts/bootstrap.sh --install-tools` (Windows:
 `scripts/bootstrap.ps1 -InstallTools`) from the framework clone to install the new global
 skill links. Existing directory discovery picks up `skills/lead/` for Claude Code and

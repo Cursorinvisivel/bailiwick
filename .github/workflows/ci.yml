@@ -23,6 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # tests/test_drills.py resolves a baseline commit from history; a shallow clone fails it by design
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -82,6 +85,8 @@ jobs:
           for f in files:
               if '/templates/' in f:            # blueprints legitimately hold placeholder links
                   continue
+              if '/fixtures/' in f and f.startswith('tests/drills/'):
+                  continue                      # drill fixtures copy KB content verbatim, incl. its relative links
               text = pathlib.Path(f).read_text(encoding="utf-8")
               text = inline.sub('', fence.sub('', text))   # drop code — it holds link-SYNTAX examples
               base = pathlib.Path(f).parent

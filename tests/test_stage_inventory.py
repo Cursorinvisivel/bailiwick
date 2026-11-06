@@ -6,6 +6,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AGENTS = REPO_ROOT / "agents"
+# Restricted variants of a stage (fetch-only / no-network, no-shell). They have no variant marker in
+# frontmatter, so they are identified by name suffix; add a new suffix here when adding a variant kind.
+VARIANT_SUFFIXES = ("-freshness", "-local")
 
 
 def text(rel):
@@ -13,12 +16,12 @@ def text(rel):
 
 
 def stages():
-    """{file basename: stage name} for agents/*.md with a name:, excluding -freshness variants."""
+    """{file basename: stage name} for agents/*.md with a name:, excluding restricted variants (VARIANT_SUFFIXES)."""
     found = {}
     for path in sorted(AGENTS.glob("*.md")):
         m = re.match(r"---\n(.*?)\n---\n", path.read_text(encoding="utf-8"), re.DOTALL)
         n = re.search(r"^name:[ \t]*(\S+)", m.group(1), re.MULTILINE) if m else None
-        if n and not n.group(1).endswith("-freshness"):
+        if n and not n.group(1).endswith(VARIANT_SUFFIXES):
             found[path.name] = n.group(1)
     return found
 

@@ -67,6 +67,9 @@ Enforced by harness hooks ($BAILIWICK/hooks/) — Claude Code, and Codex CLI for
   too (one script, both transcript shapes; inert until each Codex hook is trusted once). The
   SessionStart hook (Claude Code) asserts the framework defaults, injects the knowledge index (the
   map), and nags when captures are pending. The harness runs these — capture cannot be forgotten.
+  Exception: `/purge` sessions (and skills in `capture.skip_skills`) are never backed up; a typed or
+  sentinel-confirmed one is never captured, while an agent-invoked one without that confirmation is
+  held local (captured, never pushed).
 - **Curation (human-gated).** The `/curate` skill ($BAILIWICK/skills/curate/)
   distills captures into the knowledge library; promotion always requires approval.
 - **Durability (optional).** With `capture_backup` enabled in `.bailiwick-sync.json`, Stop/SessionEnd
@@ -74,7 +77,13 @@ Enforced by harness hooks ($BAILIWICK/hooks/) — Claude Code, and Codex CLI for
   dirty data survives disk loss; `/curate` decrypts, promotes, and purges. See hooks/README.md.
 
 ## Skills (global, in `~/.claude/skills/`)
-- **`/curate`** — human-gated distillation of captures into the knowledge library (above).
+- **`/curate`** — human-gated distillation of captures into the knowledge library (above). Large
+  inputs (>2 raw captures, or any >~200 KB) are distilled in fresh `bailiwick-memory` Collect subagents
+  (Step 2a, sonnet/low); decrypted inbox copies are deleted after extraction, before any reviewer.
+  Step 5a reviews blocking candidates only (skipped if none), sized by risk (sonnet/medium →
+  opus/medium → opus/high for client-scoped, security, contradicting, or new patterns/context), with
+  Quality + `bailiwick-security-review-local` for security-tagged candidates. Reviewers emit
+  `FLAG <id> type: reason`; delegated stages never write or gate; inline fallback is disclosed.
 - **`/enrich`** ($BAILIWICK/skills/enrich/) — scan a bootstrapped repo and draft
   project-context-filled instruction files for all four tools, both the committed team baselines
   (framework-agnostic) and the hidden complements (framework-aware). Drafts only; never commits.
@@ -116,7 +125,17 @@ Enforced by harness hooks ($BAILIWICK/hooks/) — Claude Code, and Codex CLI for
   backup repo's git history until rewritten/key-destroyed; `--history` **outputs** the rewrite commands
   for **both** the knowledge and backup repos, never executes them. `--attest` (output-only) drafts a
   safety-net attestation + non-reversible internal stub — an engineering record, never a legal assurance
-  (ADR-008). Pairs with `/curate --sanitized` (de-identified mode — stores no identifiers). Deep removal
+  (ADR-008). Step 1 runs the sentinel `hooks/mark_purge_session.sh` (the guardrail asks the user to
+  confirm it; it counts only once it has run successfully, and is ignored in subagent transcripts) and checks wiring (run from the Bailiwick clone, wired
+  for the session, e.g. started with `BAILIWICK_SHADOW=1`) so the hook skips capture and backup for
+  the session, and checks the machine role (a satellite never scrubs central-owned telemetry); the plan is reviewed by `bailiwick-security-review-local`
+  (3a, opus/high) and the Advisor (3b, fable/high, mechanically-checked redacted brief); commit
+  messages, branch, slug and PR text never name the client (each `grep -ciE -f tokens.ere` must print
+  0); the audit log/health/inbox are scrubbed last (5.7; `purge_scrub.py scrub` is a dry run unless
+  `--apply`, guardrail-asked, confined to the audit log and health shards); each surface
+  is recorded `tool|manual|not checked` (5a); the session's own Claude Code host state
+  (`${CLAUDE_CONFIG_DIR:-~/.claude}`) is user-deleted (5b); `--history` rewrites paths, contents
+  (`--replace-text`) and messages (`--replace-message`). Pairs with `/curate --sanitized` (de-identified mode — stores no identifiers). Deep removal
   (history rewrite/squash, crypto-erasure) follows `docs/history-purge.md`, gated by
   `scripts/purge_verify.sh` (`preflight` blocks while un-curated captures exist anywhere;
   `residual` measures tree/history/backup/host leftovers so erasure tiers are verifiable). Codex

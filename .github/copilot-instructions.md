@@ -8,7 +8,7 @@ See: copilot-instructions/terraform-gcp.md
 ## Structure
 - agents/ — role definitions (lead orchestrator + 5 domain-context: gcp, kubernetes, serverless, data,
   cicd + 8 Quality Workflow stages: implementer, quality, security-review, docs, memory, cloud-research, federation, advisor;
-  plus cloud-research-freshness, a fetch-only variant)
+  plus two restricted variants: cloud-research-freshness (fetch-only) and security-review-local (no network, no shell))
 - knowledge/ — knowledge library (INDEX.md is the entry point)
 - hooks/ — capture/guardrail/sync hooks (Claude Code only)
 - skills/ — /curate, /enrich, /learn, /metrics (canonical); codex-skills/ — Codex wrappers
