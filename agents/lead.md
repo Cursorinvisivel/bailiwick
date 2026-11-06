@@ -6,8 +6,10 @@
 > subagent; orchestration stays in the main session across hosts (ADR-010, Decision 1).
 >
 > The **Quality Workflow** is the ordered review pass the Lead drives — stages Memory → Implement →
-> Quality (Security Review / Docs / Cloud Research substituted by task type). Each **stage** runs
-> inline for small work, or as a dispatched subagent. "Agent" / "subagent" here always means the
+> Quality (Security Review / Docs / Cloud Research substituted by task type), with the read-only
+> **Advisor** consulted for Edge-rated tasks and hard decisions. Each **stage** runs
+> as a dispatched subagent (inline only as a disclosed fallback); small work is handled inline
+> without stages. "Agent" / "subagent" here always means the
 > native mechanism; the framework's own executable parts are **stages**. See ADR-010.
 
 ## Responsibility
@@ -18,15 +20,17 @@ Orchestration is proportional, not mandatory: trivial edits and direct questions
 inline with knowledge loaded — do not spin up the Quality Workflow for a one-line fix or a lookup.
 The framework (knowledge + conventions) is the default regardless of whether the Workflow runs.
 
-**Starting the Workflow:** stating a substantial task *is* the invocation — no command, no prefix.
-For an explicit execution contract with required stage evidence, use
-[`/lead`](../skills/lead/SKILL.md) (Codex: `$bailiwick-lead`); other hosts can follow that
-canonical skill by reference. Its explicit invocation requires applicable stages and disclosed
-fallbacks, rather than silently reducing the task to inline work.
+**Starting the Workflow:** substantial work runs under the [Lead skill](../skills/lead/SKILL.md)
+by default (Claude Code `/lead`, Codex `$bailiwick-lead`; other hosts follow that canonical skill
+by reference) — no command or prefix needed. Its "When to lead" section is the single definition
+of what is led and what stays inline; when unsure, the session states its choice in one line.
+The skill requires applicable stages and disclosed fallbacks, rather than silently reducing the
+task to inline work.
 
-To force the Workflow without the skill when proportional routing under-evaluates a task, say so
-explicitly: *"run the full Quality Workflow"* or name the stages
-(*"Memory → Implement → Quality, don't handle inline"*).
+The user's words override the rule both ways. Force: `/lead`, *"lead it"*, *"run the full
+Quality Workflow"*, or naming the stages (*"Memory → Implement → Quality, don't handle inline"*).
+Keep inline: *"just do it"* or *"inline"*. These change routing only; they never approve a
+commit, push, PR, high-impact action, or knowledge promotion.
 
 ## Quality Workflow (mandatory stages, in order)
 
@@ -40,8 +44,12 @@ explicitly: *"run the full Quality Workflow"* or name the stages
 4. **Dispatch execution stages** with full context. Stages are installed as native subagents
    (`bailiwick-implement`, `bailiwick-quality`, …) and start as **fresh contexts** — the dispatch
    prompt MUST carry the framework root ($BAILIWICK), the domain hints/checklist, and the task
-   specification, so the stage can self-load its knowledge (ADR-010). Independent stages may run as
-   **concurrent subagents**; dependent stages run in order.
+   specification, so the stage can self-load its knowledge (ADR-010). Review stages also receive
+   the diff and the touched-symbol map per `skills/lead/SKILL.md` → Dispatch and integrate.
+   Independent stages may run as **concurrent subagents**; dependent stages run in order.
+   Edge-rated tasks consult the **Advisor** (`bailiwick-advisor`, read-only) on the plan before
+   Implement and on the final diff (a mid-way promotion: final diff only); any task may consult it
+   on a decision the Lead cannot settle. Sizing and shared reach: `skills/lead/SKILL.md` → Size the stages.
 5. **Surface mid-task signals** — if any stage reports a non-obvious finding, workaround, or validated
    assumption during work, relay it to the Memory stage immediately; do not wait for task end
 6. **Integrate outputs** and present result to user for review
@@ -94,16 +102,17 @@ combined checklist to the Quality stage.
 | New pattern to register | — | Memory (register — requires human approval) |
 
 > **Execution model:** each stage runs through the host's **native subagent mechanism**
-> when available and warranted, or inline for small work under proportional routing. Explicit
-> `/lead` invocation follows the shared skill's stricter delegation and fallback contract, and
-> adds Memory Query, Quality (including on research-only work), and Federation when enabled to
-> the rows above.
+> when available, or as the skill's disclosed inline fallback when delegation is unavailable;
+> small work is handled inline with no stages. Led work
+> follows the shared skill's stricter delegation and fallback contract, which adds Memory Query,
+> Quality (including on research-only work), and Federation when enabled to the rows above.
 > Independent stages (e.g. two domain reviews) may run **concurrently**; dependent
 > stages ("Memory → Implement → Quality") run in order because each consumes the previous stage's
 > output. Because native subagents start as fresh contexts, each stage loads the knowledge it needs
 > itself (index + ≤5 files) — the orchestrator passes the domain hints in the dispatch prompt.
-> Each stage's frontmatter carries a default model tier + effort (ADR-010 Amendment 2). Under `/lead`,
-> the orchestrator sizes every dispatch by task rating (see the skill's "Size the stages").
+> Each stage's frontmatter carries a default model tier + effort (ADR-010 Amendment 2). In led work,
+> the orchestrator sizes every dispatch by task rating (see the skill's "Size the stages"), which
+> also adds the Advisor to any row: required at the Edge rating, on demand otherwise.
 > Stage definitions are the frontmattered `agents/*.md` files, installed globally by
 > `bootstrap.sh --install-tools`: Claude Code symlinks plus Gemini, Codex, and Copilot adapters
 > (ADR-010, Amendment 1). Other hosts use available native dispatch or the disclosed inline fallback.

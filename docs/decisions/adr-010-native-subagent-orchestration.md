@@ -169,3 +169,118 @@ a different sizing surface:
 **Accepted residuals:** on Codex/Copilot/Gemini the model tier is the session's. Copilot and the
 fixed Codex stages cannot be resized per task. No Antigravity `~/.gemini/config/agents/` adapter
 exists yet.
+
+## Amendment 3 (2026-11-03) — the Lead skill is the default for substantial work
+
+**Finding.** Decision 4 kept routing proportional, and the stricter `/lead` contract (required
+stages, explicit sizing, execution table) ran only when the user remembered to invoke it. Measured
+on captures since 2026-10-25: 2 explicit `/lead` invocations against 102 stage dispatches. Most
+substantial work ran under the lighter `agents/lead.md` routing, so docs and runbooks went
+unreviewed and sizing was left to frontmatter defaults. The skill's own description ("Use only
+when the user explicitly invokes /lead") actively blocked description-matched invocation.
+
+**Decision.**
+1. In a Bailiwick-wired repository, substantial work runs under the Lead skill **by default**.
+   The skill's description and the session-start defaults instruct the session to invoke it
+   unasked. Outside wired repositories the globally installed skill stays opt-in, so it does not
+   self-invoke in unrelated projects.
+2. The line is defined once, as a canonical one-line rule in the skill's **"When to lead"**
+   section, which the session-start banner and the Codex/Antigravity templates copy verbatim (a
+   test keeps them in sync). Led: more than one file beyond typos, comments, formatting, and
+   mechanical renames; any other IaC change; any IAM, network, secrets, or security-control
+   change in any file; a single-file change that adds behaviour beyond a small fix; a new module,
+   document, or test suite, or a substantive doc rewrite; a design decision; a requested review or
+   researched recommendation.
+   Inline: questions, lookups, explanations, those mechanical edits, and small single-file fixes.
+   The mechanical edits stay inline even across files or in IaC; otherwise any led trigger wins.
+3. Loading the skill does not make a task led: the session applies the rule first and, for inline
+   work, says so in one line and continues without stages. When unsure, it states its choice in
+   one line and proceeds without waiting.
+4. The user's words override the rule both ways (force: `/lead`, "lead it", "run the full Quality
+   Workflow", naming the stages; keep inline: "just do it", "inline"). They change routing only and
+   never satisfy a human gate. A task that outgrows the inline rules mid-way switches to the Lead.
+5. This amends Decision 4 (where the line sits and which contract applies above it) and narrows
+   Decision 2: small work is handled inline with no stages, and a led stage runs inline only as the
+   skill's disclosed fallback when delegation is unavailable.
+
+**Accepted residuals:** led tasks gain Memory Query, Quality, and Memory Collect stages, so a
+small led task costs more than it did under matrix routing. The Trivial sizing row lowers effort,
+but Quality stays deep, so every led task pays at least one deep review. Invocation is policy, not
+a runtime switch: a session can still misjudge the line, which is why it states its choice when
+unsure. Copilot and the seeded instruction files get the rule only indirectly (via
+`agents/lead.md`) until the Copilot instructions, project CLAUDE.md, and project AGENTS.md templates
+in `knowledge/templates/` are updated through `/curate`; those still offer the old `Lead:` prefix.
+
+**Trial rollout.** This ships to the private framework clones first (merged into
+`bailiwick-private` main) and is judged with `scripts/stage_cost.py` before the public merge. If the
+trial is undone with `git revert -m 1 <merge>`, git still records the commits as merged, so a later
+pull of the same commits from public `main` silently brings nothing back. Before re-merging, revert
+the revert commit. Check that the change is really present with
+`grep -q '^## When to lead' skills/lead/SKILL.md`.
+
+## Amendment 4 (2026-11-03) — tier economy and the Advisor grade
+
+**Finding.** Measured on captures since 2026-10-25 (satellite): reviewers (Quality, Security Review)
+processed about 2.6–2.9M tokens per run at opus/high, the most expensive stage per run; Implement
+about 0.9M. Amendment 2's table had no tier between "everything deep" and light for reviewers, so
+a Trivial or Standard change still paid a deep, high-effort review. It also had no reach signal: a
+change to framework instructions (stage files, skills, hooks, guardrails) was rated Standard by edit
+size although its blast radius is every later session. A first fix rated all framework-instruction
+changes Complex, which made almost every change in this repo Complex (opus/high Implement for a
+one-rule markdown change) and gave client repos no trigger. And it had no slot for the most capable
+model on genuinely novel or irreversible work.
+
+**Decision.**
+1. `/lead` sizes each dispatch from this table (Claude Code model, effort), using the cheapest tier
+   that fits (light=haiku, standard=sonnet, deep=opus, advisor=fable):
+
+   | Rating | Signals | Implement | Docs / Cloud Research | Quality / Security Review | Advisor |
+   |---|---|---|---|---|---|
+   | Trivial | one file, no IAM/network/state impact, pattern in KB | sonnet, low | sonnet, low | sonnet, medium | — |
+   | Standard | default; module or document, bounded blast radius | sonnet, medium | sonnet, medium | opus, medium | on demand |
+   | Complex / high-risk | multi-module, IAM, networking, state moves, prod, unfamiliar API | opus, high | sonnet, high | opus, high | on demand |
+   | Edge | Complex, plus any of: no precedent in the KB, the repo, or the vendor's documented patterns; a novel design or architecture choice; an irreversible or high-blast step | opus, high | sonnet, high | opus, high | fable, high (plan before Implement + final diff) |
+
+   The SKILL.md table is canonical; this is the as-adopted copy.
+
+   Memory Query, Federation, and freshness run haiku + low; Memory Collect runs sonnet + low. A
+   reviewer never runs below the implementer.
+2. **Shared reach is a reviewer signal.** Canonical definition: `skills/lead/SKILL.md` "Size the
+   stages". Shared reach means the change is consumed by many downstream units: shared Terraform
+   modules, CI templates, org policies, landing-zone/host projects; in the framework repo, stage
+   instructions, skills, hooks and guardrails. Shared reach raises Quality and Security Review to
+   the Complex row; Implement and Docs / Cloud Research stay at the rating the edit itself earns. This replaces the
+   framework-only "framework-wide reach" wording.
+3. **Lead model.** The Lead is the main session and sizes every dispatch (prompts, tasks, reach).
+   Recommended model: opus; fable for Edge-dominated sessions. This is the user's choice, not
+   enforced.
+4. **Advisor stage.** New `agents/advisor.md`: `bailiwick-advisor`, model fable, effort high, tools
+   Read/Grep/Glob (read-only, never edits). It gets a compact brief and returns a second opinion.
+   It runs on Edge work (reviewing the plan before Implement and the final diff) and on demand at
+   any rating when the Lead cannot settle a decision. It is installed by bootstrap like every
+   frontmattered `agents/*.md`. Rules:
+   - "Reviewers disagreeing" is not an Edge signal (it can only appear after review); it stays an
+     on-demand Advisor trigger.
+   - A task promoted to Edge mid-way consults the Advisor on the final diff only.
+   - The final-diff consult receives the diff file, the reviewers' findings, and the plan decision,
+     and asks "does the result realise the decision, and which edge risks remain" — not a third
+     line-by-line review.
+   - The brief is about 2k tokens excluding the diff, which is passed as a file.
+5. **Frontmatter defaults.** `quality.md` and `security-review.md` change from opus + high to opus +
+   medium. Frontmatter holds the Standard defaults, as Amendment 2 decision 1 intended. The Lead
+   raises effort for Complex and Edge. This amends the reviewer default in Amendment 2 decision 1.
+6. **Host effort.** New frontmatter key `fixed_host_effort` (quality, security-review: high; docs,
+   cloud-research: medium) is the effort for hosts that cannot be sized per dispatch. Codex adapters
+   for rated stages (Implement, Quality, Security Review, Docs, Cloud Research) omit
+   `model_reasoning_effort`, so the Lead passes effort at spawn. Copilot cannot size per dispatch and
+   uses `fixed_host_effort`, so reviewers stay at high there: quality over cost where sizing is
+   impossible. Read-only adapter detection also catches NotebookEdit and MCP write tools.
+
+**Accepted residuals:** Standard reviews at medium effort may catch less than at high, so review
+findings and post-merge defects need watching (`scripts/stage_cost.py` for cost). Round-1
+search/edit discipline and the effort change ship together, so `stage_cost.py` cannot attribute
+savings between them; watch review yield (findings per review vs post-merge defects) as the quality
+signal. Fable is the most expensive tier, so the Advisor is gated to Edge or explicit on-demand use.
+The advisor tier is Claude-Code-only: `model:` is still not translated, so on other hosts the
+Advisor runs on the session model. On Copilot, reviewers run at `fixed_host_effort` (high), costing
+more than Claude Code Standard reviews. The Lead model is a recommendation the user may ignore.

@@ -343,12 +343,20 @@ does not touch them. For a shared-team setup that *wants* the framework tracked,
 `--visible` instead.
 
 
-## 6. Explicit team execution (`/lead`)
+## 6. Team execution (`/lead`)
 
-The shared [Lead skill](../skills/lead/SKILL.md) turns a concrete task into an explicit
-Quality Workflow: Memory Query, selected execution stages, review, and Memory Collect. It
-requires an execution table showing actual agents or inline fallbacks, validation evidence,
-and unresolved issues. It is an instruction contract, not a runtime enforcement hook.
+The shared [Lead skill](../skills/lead/SKILL.md) is the default for substantial work: the session
+invokes it without being asked, and handles direct questions and trivial single-file edits inline
+(the skill's "When to lead" section defines the line; ADR-010 Amendment 3). Invoking it explicitly
+forces it. It turns a concrete task into an explicit Quality Workflow: Memory Query,
+selected execution stages, review, and Memory Collect. It requires an execution table showing
+actual agents or inline fallbacks, validation evidence, and unresolved issues. It is an
+instruction contract, not a runtime enforcement hook.
+
+To see what led work costs, run `python3 scripts/stage_cost.py [YYYY-MM-DD]` on each machine. It
+reads Claude Code's own stage transcripts (`~/.claude/projects/*/*/subagents/`), which hold the
+per-turn token usage that captures lack, and prints per-stage medians before and after the date.
+It is read-only.
 
 After pulling this change, run `scripts/bootstrap.sh --install-tools` (Windows:
 `scripts/bootstrap.ps1 -InstallTools`) from the framework clone to install the new global
@@ -356,6 +364,10 @@ skill links. Existing directory discovery picks up `skills/lead/` for Claude Cod
 `codex-skills/bailiwick-lead/` for Codex; no files are copied into client repositories.
 Start a fresh Claude Code session (or use `/clear`) after installation so it discovers
 the new skill.
+
+Pitfall: installed stages (`~/.claude/agents/bailiwick-*.md`) are symlinks into the clone that ran
+`bootstrap.sh --install-tools`. A stage-instruction change is only in effect for dispatched stages
+after `--install-tools` from the clone under test (check with `scripts/doctor.sh`).
 
 - Claude Code: `/lead Implement X and have the draft independently reviewed.`
 - Codex: `$bailiwick-lead Implement X and have the draft independently reviewed.`

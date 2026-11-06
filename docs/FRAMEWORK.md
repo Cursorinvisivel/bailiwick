@@ -92,8 +92,8 @@ The **Lead** is the **orchestrator**: the native Claude Code main session that p
 dispatches **real native subagents** (the Agent/Task mechanism), running them **concurrently where
 the work is independent**. The Lead is not itself a subagent — native subagents cannot spawn further
 subagents, so orchestration lives in the main session. The ordered review pass it drives is the
-**Quality Workflow**; each step is a **stage** that runs as a dispatched subagent or inline for small
-work. "Agent" / "subagent" means the native mechanism; the framework's own executable parts are
+**Quality Workflow**; each step is a **stage** that runs as a dispatched subagent (inline only as a
+disclosed fallback), while small work is handled inline without stages. "Agent" / "subagent" means the native mechanism; the framework's own executable parts are
 stages. Stage definitions are the frontmattered `agents/*.md` files, installed globally as
 `~/.claude/agents/bailiwick-*.md` symlinks by `bootstrap.sh --install-tools` (never seeded per-repo
 — shadow stays zero-footprint). The same install generates **multi-tool stage adapters** from the
@@ -101,7 +101,7 @@ canonical files — Gemini `~/.gemini/agents/*.md`, Codex `~/.codex/agents/*.tom
 `~/.copilot/agents/*.agent.md` — so all four tools can dispatch the stages natively (ADR-010
 Amendment 1; trigger model per tool in §10). A stage's **final report** is its only channel back
 and the only part the capture hooks record, so outputs and knowledge signals go in it. See
-ADR-010. 14 files in three tiers.
+ADR-010. 15 files in three tiers.
 
 ### Tiers
 - **Orchestrator (1):** `lead.md` — entry point for substantial/multi-step work; drives the Quality
@@ -109,18 +109,20 @@ ADR-010. 14 files in three tiers.
 - **Domain context (5, non-executing):** `gcp.md`, `kubernetes.md`, `serverless.md`, `data.md`,
   `cicd.md`. The Lead *reads* these to extract (a) Memory tags and (b) a generation/review checklist.
   They never execute; they encode domain best practice and "what to load".
-- **Stages (7):** `implementer.md` (code/IaC drafts), `quality.md` (technical review),
+- **Stages (8):** `implementer.md` (code/IaC drafts), `quality.md` (technical review),
   `security-review.md` (security + CIS mapping), `docs.md` (ADR/HLD/runbook/workshop),
   `memory.md` (library query + collect), `cloud-research.md` (authoritative external research),
-  `federation.md` (external-brain consult + gated ingest). Plus one restricted variant,
+  `federation.md` (external-brain consult + gated ingest), `advisor.md` (read-only second opinion
+  on Edge plans/diffs and hard decisions; Fable, ADR-010 Amendment 4). Plus one restricted variant,
   `cloud-research-freshness.md` (fetch-only, dispatched only by `/curate` periodic mode).
 
 ### Flow
 1. A task arrives. **Proportional routing:** trivial edits / direct questions are answered inline
-   with knowledge loaded; substantial work routes through the **Lead**. Stating a substantial task
-   *is* the invocation; explicit phrasing forces the full Quality Workflow when routing
-   under-evaluates a task, and `/lead` (Codex: `$bailiwick-lead`) adds the explicit execution
-   contract with required stage evidence.
+   with knowledge loaded; substantial work runs under the **Lead skill** (`/lead`, Codex
+   `$bailiwick-lead`) by default, with its execution contract and required stage evidence
+   (ADR-010 Amendment 3). The skill's "When to lead" section defines the line. Force: `/lead`,
+   "lead it", "run the full Quality Workflow", or naming the stages; keep inline: "just do it" or
+   "inline" (routing only, never a human-gate approval).
 2. Lead identifies relevant **domain context file(s)**, reads them for Memory tags + checklist.
 3. Lead dispatches the **Memory stage (Query)** with those tags — it descends the `INDEX.md` tree
    on-demand, loads ≤5 content files, checks manual session outputs (seeded `.bailiwick-outputs/`
@@ -578,7 +580,7 @@ delegation rule, and the user forces by asking for an agent by name; Copilot is 
 Codex subagents span the CLI **and the IDE extension** (same `~/.codex/agents/`); Gemini is
 **CLI-verified only** — Code Assist agent mode exposes a subset of the CLI and subagent support
 there is unverified; Copilot's covered surfaces are VS Code + CLI. Guardrail-hook coverage inside
-Codex/Gemini subagent threads is **unverified** — policy posture applies there. **Sizing (Amendment 2):** canonical `model:`/`effort:` frontmatter sets per-stage defaults; `/lead` sizes each dispatch by task rating; adapters carry effort only (Codex `model_reasoning_effort`, Copilot `reasoning-effort`; none for Gemini). Mechanics: each
+Codex/Gemini subagent threads is **unverified** — policy posture applies there. **Sizing (Amendments 2 and 4):** canonical `model:`/`effort:` frontmatter sets per-stage Standard defaults (reviewers opus + medium); `/lead` sizes each dispatch by task rating (Trivial / Standard / Complex / Edge; shared reach raises the reviewers to Complex, see `skills/lead/SKILL.md` "Size the stages") on the cheapest tier that fits (light=haiku, standard=sonnet, deep=opus, advisor=fable); the Advisor tier is Claude-Code-only; adapters carry effort only (Copilot `reasoning-effort` takes the frontmatter `fixed_host_effort`, so reviewers stay at high there because it cannot size per dispatch; Codex rated stages omit `model_reasoning_effort` and the Lead passes effort at spawn; none for Gemini). Mechanics: each
 tool's official subagent docs.
 
 Key consequences (the four tools do not share one uniform integration):
@@ -685,7 +687,7 @@ bailiwick/
   scripts/        bootstrap.sh  bootstrap.ps1
   knowledge/      INDEX.md  .telemetry.json  topics/ patterns/ context/ clients/ templates/ …
   definitions/    README.md — per-client document build specs (clients/<id>/), outside knowledge/ (ADR-011)
-  agents/         lead + 5 domain + 7 execution + 1 restricted variant (14 files)
+  agents/         lead + 5 domain + 8 execution + 1 restricted variant (15 files)
   hooks/          session_start.sh  capture_session.py  capture_backup.sh  sync_knowledge.sh
                   guardrails.py  install_hooks.py  settings.template.json  health_common.sh
                   install_global_layer.sh  install_adapter_hooks.py  install_desktop_mcp.py

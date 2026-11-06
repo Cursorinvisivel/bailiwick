@@ -64,7 +64,7 @@ fi
 cat <<'EOF'
 [bailiwick] Framework defaults active for this session:
 - Knowledge library + conventions are always in play. The current knowledge index is included below; use it to judge relevance, then load the topics/patterns it lists on-demand (max 5 files). Do not re-read files already in context.
-- Orchestration is proportional: the Lead (orchestrator) drives the Quality Workflow — route substantial or multi-step work through it; handle trivial edits and direct questions inline with knowledge loaded. Stating a substantial task IS the invocation; no prefix is required. Say "run the full Quality Workflow" to force it.
+- Orchestration is proportional: substantial work in this repo runs under the lead skill by default — invoke it without being asked, and trivial single-file edits stay inline. Lead it: more than one file (beyond typos, comments, formatting, mechanical renames); any other IaC change; any IAM, network, secrets, or security-control change in any file; a single-file change that adds behaviour beyond a small fix; a new module, document or test suite, or a substantive doc rewrite; a design decision; a requested review or researched recommendation. Inline: questions, lookups, explanations, those mechanical edits, and small single-file fixes. When unsure, state the choice in one line and proceed. Force: `/lead`, "lead it", "run the full Quality Workflow", or naming the stages. Keep inline: "just do it" or "inline" (routing only — never a human-gate approval).
 - Capture is enforced via hooks; promotion to the knowledge library stays human-gated via /curate.
 EOF
 

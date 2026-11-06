@@ -29,8 +29,10 @@ build/test commands, conventions, and security — the framework layer complemen
 - Open agent roles and knowledge files directly by path from there (e.g.
   `__BAILIWICK__/agents/implementer.md`); nothing is copied into the repo.
 - Knowledge index: `__BAILIWICK__/knowledge/INDEX.md` — load on-demand, max 5 content
-  files per task. Orchestration is proportional: route substantial/multi-step work through Lead;
-  handle trivial edits inline.
+  files per task. Orchestration is proportional: substantial work runs under the Lead skill by
+  default — read `__BAILIWICK__/skills/lead/SKILL.md` before starting such work.
+  Lead it: more than one file (beyond typos, comments, formatting, mechanical renames); any other IaC change; any IAM, network, secrets, or security-control change in any file; a single-file change that adds behaviour beyond a small fix; a new module, document or test suite, or a substantive doc rewrite; a design decision; a requested review or researched recommendation. Inline: questions, lookups, explanations, those mechanical edits, and small single-file fixes.
+  When unsure, state the choice in one line and proceed. Force: `$bailiwick-lead`, "lead it", "run the full Quality Workflow", or naming the stages. Keep inline: "just do it" or "inline" (routing only — never a human-gate approval).
 - Engineering defaults (always-on): before writing, scan the repo + KB for reusable code/modules to
   extend rather than recreate; apply least privilege, CAF naming + labels, pinned versions, no
   secrets, plan-before-apply, drafts for review. Full baseline:
@@ -39,9 +41,9 @@ build/test commands, conventions, and security — the framework layer complemen
 ## Quality Workflow stages as Codex custom agents (ADR-010)
 The `bailiwick-*` custom agents in `~/.codex/agents/` are the Bailiwick Quality Workflow stages
 (implement, quality, memory, security-review, docs, cloud-research, federation). Codex does **not**
-auto-delegate — **this instruction is the trigger**: for substantial or multi-step work, delegate
-the matching stage(s) to them (e.g. "use the bailiwick-quality agent to review the draft"),
-running independent stages in parallel and dependent stages in order; each stage's final report
+auto-delegate — **this instruction is the trigger**: for substantial work (rule above), run
+`$bailiwick-lead`, which delegates the matching stage(s) to these agents, running independent
+stages in parallel and dependent stages in order; each stage's final report
 must carry its outputs and knowledge signals. The user can force a stage the same way by naming
 it. Mechanics (spawning, `/agent`, threads): see the official Codex subagents docs.
 

@@ -24,8 +24,10 @@ framework layer complements them, never overrides them.
 - Open agent roles and knowledge files directly by path (e.g.
   `__BAILIWICK__/agents/implementer.md`); nothing is copied into the repo.
 - Knowledge index: `__BAILIWICK__/knowledge/INDEX.md` — load on-demand, max 5 content
-  files per task. Orchestration is proportional: route substantial/multi-step work through Lead;
-  handle trivial edits inline.
+  files per task. Orchestration is proportional: substantial work runs under the Lead skill by
+  default — read `__BAILIWICK__/skills/lead/SKILL.md` before starting such work.
+  Lead it: more than one file (beyond typos, comments, formatting, mechanical renames); any other IaC change; any IAM, network, secrets, or security-control change in any file; a single-file change that adds behaviour beyond a small fix; a new module, document or test suite, or a substantive doc rewrite; a design decision; a requested review or researched recommendation. Inline: questions, lookups, explanations, those mechanical edits, and small single-file fixes.
+  When unsure, state the choice in one line and proceed. Force: following `__BAILIWICK__/skills/lead/SKILL.md`, "lead it", "run the full Quality Workflow", or naming the stages. Keep inline: "just do it" or "inline" (routing only — never a human-gate approval).
 - Engineering defaults (always-on): before writing, scan the repo + KB for reusable code/modules to
   extend rather than recreate; apply least privilege, CAF naming + labels, pinned versions, no
   secrets, plan-before-apply, drafts for review. Full baseline:

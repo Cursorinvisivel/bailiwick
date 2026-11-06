@@ -10,7 +10,8 @@ Location: $BAILIWICK/agents/
 
 The **Lead** is the orchestrator; the **Quality Workflow** is the ordered review pass it drives.
 Each stage runs as a **native Claude Code subagent** (the Agent/Task mechanism) — concurrently
-where the work is independent — or inline for small work. See ADR-010.
+where the work is independent. Small work is handled inline without stages; a led stage runs inline
+only as a disclosed fallback when delegation is unavailable. See ADR-010.
 
 | Part | File | Role |
 |---|---|---|
@@ -22,12 +23,14 @@ where the work is independent — or inline for small work. See ADR-010.
 | Memory stage | memory.md | Knowledge library management |
 | Cloud Research stage | cloud-research.md | External research from official sources |
 | Federation stage | federation.md | External/company memory: read-only consult + gated ingest |
+| Advisor stage | advisor.md | Read-only second opinion (Fable) on Edge plans/diffs and hard decisions |
 
-Orchestration is proportional: route substantial or multi-step work through the Lead
-(it dispatches stages by task type); handle trivial edits and direct questions inline with knowledge
-loaded. No prefix is required — stating a substantial task *is* the invocation. To force the full
-Quality Workflow when routing under-evaluates a task, say so ("run the full Quality Workflow" or
-name the stages); for the stricter execution contract with required stage evidence, invoke `/lead`.
+Orchestration is proportional: substantial or multi-step work runs under the Lead skill (`/lead`)
+by default — no prefix needed — and trivial edits and direct questions are handled inline with
+knowledge loaded. The skill's "When to lead" section defines the line; when unsure, the session
+states its choice in one line. Force: `/lead`, "lead it", "run the full Quality Workflow", or
+naming the stages; keep inline: "just do it" or "inline" — routing only, never a human-gate
+approval (ADR-010 Amendment 3).
 
 **Execution model:** the Lead is the native main session; it dispatches real native Claude Code
 subagents (not role-play in one context). Independent stages run **concurrently**; dependent stages
@@ -82,7 +85,8 @@ Enforced by harness hooks ($BAILIWICK/hooks/) — Claude Code, and Codex CLI for
   shadow: `~/.bailiwick/captures/<repo-key>/`) — promotion rides the standard capture→curate
   human gate; writes no knowledge itself. Complement to `/enrich` (instruction files vs knowledge
   candidates). Codex wrapper: `$bailiwick-learn`.
-- **`/lead`** ($BAILIWICK/skills/lead/) — explicit team execution: the main session coordinates
+- **`/lead`** ($BAILIWICK/skills/lead/) — team execution, the default for substantial work (runs
+  without being invoked; trivial work stays inline): the main session coordinates
   the Quality Workflow through native stage subagents with stated dependencies, independent review,
   and an execution table of what actually ran; unavailable delegation is disclosed as inline
   fallback. Adds Memory Query and Quality to the stage matrix's rows. Authorizes orchestration only, not

@@ -3,6 +3,7 @@ name: bailiwick-docs
 description: Docs stage of the Bailiwick Quality Workflow — technical documentation and client materials (module READMEs, ADRs, HLD/LLD, runbooks, workshops) from the framework templates. Dispatched by the Lead orchestrator for documentation tasks; all output is drafts for human review.
 model: sonnet
 effort: medium
+fixed_host_effort: medium
 tools: Read, Grep, Glob, Edit, Write
 ---
 <!-- tools: read + draft-writing. No Bash — documentation needs no command execution. -->
@@ -58,12 +59,21 @@ No definitions for the client (or no client at all) → draft as usual from the 
 4. Generate based on context provided by the orchestrator
 5. Adapt technical level to defined audience
 
-## Reading Discipline
+## Reading and Editing Discipline
 
 Every tool result stays in your context and is re-read on every later turn, so reading cost
 compounds. Start from the excerpts and line ranges in the dispatch brief. Locate with Grep, then
 read only the range you need (Read with offset/limit). Read a file whole only when you will
 document most of it. Never re-read a file or range already in context.
+
+Each tool call is a turn that re-sends the whole context, so batch work. Batch searches: one Grep
+with a combined pattern (`foo|bar|baz`), not one Grep per term. Plan every change to a file
+before editing it, then apply them in as few Edit calls as possible (one Edit can replace a whole
+section), or one Write when rewriting most of the file; a full rewrite must still respect the
+target document's own length and structure conventions. Use Write only on files this dispatch owns exclusively;
+before a rewrite, check the draft keeps every existing section unless removing it is the task.
+Draft new text completely before writing it, rather than writing a rough version and patching it
+in follow-up edits.
 
 ## Quality Criteria
 

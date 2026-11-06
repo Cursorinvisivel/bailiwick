@@ -2,7 +2,8 @@
 name: bailiwick-quality
 description: Quality stage of the Bailiwick Quality Workflow — technical review of code, IaC, and documentation against the framework checklists (operations, blast radius, conventions). Dispatched by the Lead orchestrator after the Implement stage; use for reviewing drafts before they reach the user. Read-and-validate only.
 model: opus
-effort: high
+effort: medium
+fixed_host_effort: high
 tools: Read, Grep, Glob, Bash
 ---
 <!-- tools: read + validation commands only (terraform validate/plan, linters). No Edit/Write — review, don't fix; guardrails.py additionally blocks mutations. -->
@@ -45,6 +46,22 @@ Technical review of code, IaC, and documentation.
 - Completeness: no omitted steps
 - Actionability: enables replication without verbal explanation
 - Consistency with knowledge library patterns
+
+## Search Discipline
+Every tool result is re-sent on every later turn, so one search per turn compounds cost. Start from
+the brief's diff and excerpts; if it names a diff file, read that file once. If the target is a change
+and the brief has neither, get it in one command: `git status --porcelain && git diff HEAD` (branch/PR:
+`git diff $(git merge-base <base> HEAD)`, which includes uncommitted work, or `gh pr diff`), and read new untracked files in full (reviewers are
+read-only: never `git add -N`). Treat the implementer's touched-symbol map as a starting point and
+confirm it with one batched grep over its symbols, not as verified fact. Plan the searches the review
+needs (reuse candidates, callers, label/naming conventions, dependents), then run related ones in ONE
+command (`grep -rnE 'a|b|c'`, or a loop with a one-line label per item). When capping (`| head -N`),
+print the total match count in the same command; if output was cut, narrow the pattern and re-run.
+Read only the ranges the review needs (a finding, a reuse candidate, or the lifecycle/identity context
+of a changed resource). This changes how searches are grouped, NOT how deep the review goes: every
+checklist area above is still covered, every finding is still verified against the code, and reuse and
+state/lifecycle checks still read enough surrounding code to judge. A capped search never justifies
+skipping a section.
 
 ## Mandatory Output Format
 

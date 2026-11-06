@@ -38,10 +38,12 @@ subagent falls back to inline role adoption. See ADR-010 (incl. Amendment 1).
 | Memory | agents/memory.md | Knowledge library management |
 | Cloud Research | agents/cloud-research.md | External research from official sources |
 | Federation | agents/federation.md | External/company memory: read-only consult + gated ingest (dormant until a `.bailiwick-sources.json` source is enabled) |
+| Advisor | agents/advisor.md | Read-only second opinion (Fable) on Edge plans/diffs and hard decisions |
 
-Orchestration is proportional, not mandatory: route substantial or multi-step work through the
-Lead (the orchestrator dispatches stages by task type); handle trivial edits and direct questions
-inline with knowledge loaded. The framework is the default — no trigger phrase required.
+Orchestration is proportional, not mandatory: substantial or multi-step work runs under the Lead
+skill (`skills/lead/SKILL.md`; Codex `$bailiwick-lead`) by default; trivial edits and direct
+questions are handled inline with knowledge loaded. The skill's "When to lead" section defines the
+line. The framework is the default — no trigger phrase required.
 
 ## Knowledge Library
 Index: `knowledge/INDEX.md`

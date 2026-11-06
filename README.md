@@ -101,7 +101,8 @@ Windows PowerShell mirrors every flag with a single dash: `bootstrap.ps1 -Instal
 `/enrich`, `/learn`, `/metrics`, `/investigate`, `/purge`, `/sign` — plus an optional encrypted off-machine
 capture backup and multi-machine central/satellite sync over plain git.
 
-For explicit team execution, use **`/lead`** (Codex: **`$bailiwick-lead`**). The shared
+Substantial work runs under the **Lead skill** by default (**`/lead`**; Codex:
+**`$bailiwick-lead`**), while trivial edits and questions stay inline. The shared
 [Lead skill](skills/lead/SKILL.md) requires applicable stages, review, and an execution report.
 Gemini, Copilot, Antigravity, and other hosts can follow the same file by reference; native
 delegation depends on the current runtime, with any inline fallback disclosed. See
@@ -173,7 +174,7 @@ A map of the whole set is in **[docs/README.md](docs/README.md)**.
 ```
 knowledge/   INDEX.md · topics/ patterns/ context/ templates/ · .telemetry.json
 definitions/ per-client document build specs for a documentation tool (ADR-011; empty in the public repo)
-agents/      role definitions (lead orchestrator + 5 domain-context + 7 Quality Workflow stages + a fetch-only freshness variant)
+agents/      role definitions (lead orchestrator + 5 domain-context + 8 Quality Workflow stages + a fetch-only freshness variant)
 hooks/       guardrail + capture + sync + health hooks, and the installers
 skills/      /lead · /curate · /enrich · /learn · /metrics · /investigate · /purge · /sign  (+ codex-skills/ wrappers)
 scripts/     bootstrap.sh · bootstrap.ps1  (repo onboarding) · doctor.sh (wiring preflight)

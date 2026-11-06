@@ -28,6 +28,8 @@ printf 'uses $BAILIWICK\n' > "$P1/CLAUDE.local.md"
 out="$(CLAUDE_PROJECT_DIR="$P1" bash "$SS" 2>/dev/null)"; rc=$?
 assert_exit "wired exit 0" 0 "$rc"
 assert_contains "defaults banner present" "Framework defaults active" "$out"
+assert_contains "banner makes the lead skill the default for substantial work" "runs under the lead skill by default" "$out"
+assert_contains "banner keeps trivial work inline" "trivial single-file edits stay inline" "$out"
 assert_contains "knowledge index injected (the map)" "INDEX-SENTINEL-LINE" "$out"
 
 echo "== pending-capture nag counts raw transcripts"

@@ -72,7 +72,7 @@ This is idempotent (re-run it any time — e.g. after adding a new skill) and in
   `/learn`, `/metrics`, `/investigate`, `/purge`, `/sign`.
 - The **Quality Workflow stages as native Claude Code subagents** — symlinks in `~/.claude/agents/`
   (`bailiwick-implement`, `bailiwick-quality`, `bailiwick-memory`, `bailiwick-security-review`,
-  `bailiwick-docs`, `bailiwick-cloud-research`, `bailiwick-federation`). This is what lets the Lead
+  `bailiwick-docs`, `bailiwick-cloud-research`, `bailiwick-federation`, `bailiwick-advisor`). This is what lets the Lead
   dispatch stages as real, concurrent subagents (ADR-010); never seeded per-repo.
 - The **same stages as generated adapters for the other tools** — Gemini (`~/.gemini/agents/`),
   Codex (`~/.codex/agents/`, TOML) and Copilot (`~/.copilot/agents/`), produced from the canonical
@@ -189,8 +189,11 @@ context file for retrieval hints + checklist, runs the Memory stage, dispatches 
 Quality stages, integrates, and closes with a Memory (Collect). Everything comes back as **drafts
 for your review**.
 
-**Proportional routing.** Trivial edits and direct questions are answered **inline** — the Lead does
+**Proportional routing.** Substantial work runs under the **Lead skill** by default — you don't
+need to type `/lead`. Trivial edits and direct questions are answered **inline**: the Lead does
 *not* spin up the Quality Workflow for a one-line fix or a lookup. That's by design, not a misfire.
+The skill's "When to lead" section defines the line; when the call is close, the session says which
+way it went in one line, and "just do it" keeps a task inline.
 
 **Forcing the Workflow.** If the model under-evaluates a task and handles it inline when you wanted
 the full rigor, say so explicitly:
@@ -203,18 +206,18 @@ Naming the stages is the most reliable form — it pins the steps rather than re
 expand "Lead" into the whole pass. (This is a policy directive the session follows, not a
 runtime-enforced switch like the guardrails.)
 
-For the strictest form, invoke **`/lead`** (Codex: `$bailiwick-lead`): the session coordinates the
-stages as real subagents, requires independent review, discloses any inline fallback, and ends with
-an execution table of what actually ran.
+Invoking **`/lead`** (Codex: `$bailiwick-lead`) forces the same contract the default applies to
+substantial work: the session coordinates the stages as real subagents, requires independent review,
+discloses any inline fallback, and ends with an execution table of what actually ran.
 
 **Under the other tools** the same stages are installed as native agents (ADR-010 Amendment 1) —
 same names, different trigger conventions (mechanics: each tool's official subagent docs):
 
 | Tool | Automatic? | To force a stage |
 |---|---|---|
-| Claude Code | ✅ on description match, proportional | name the stage / "run the full Quality Workflow" |
+| Claude Code | ✅ Lead skill by default for substantial work in wired repos; trivial work inline | `/lead`, "lead it", name the stage / "run the full Quality Workflow" |
 | Gemini CLI¹ | ✅ auto-delegation | `@bailiwick-<stage> <task>` |
-| Codex (CLI + IDE ext.) | ❌ not by default — the operator layer instructs delegation for substantial work | ask by name: "use the bailiwick-quality agent to …" |
+| Codex (CLI + IDE ext.) | ✅ `$bailiwick-lead` by description match for substantial work; stages via the skill | `$bailiwick-lead`, or ask by name: "use the bailiwick-quality agent to …" |
 | Copilot (VS Code + CLI) | ❌ explicit selection (auto only agent-to-agent) | pick the agent in VS Code / CLI; cloud agent can't see them |
 
 ¹ CLI only for now — Gemini Code Assist agent mode (VS Code) exposes a subset of the CLI, and

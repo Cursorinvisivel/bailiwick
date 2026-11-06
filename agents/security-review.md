@@ -2,7 +2,8 @@
 name: bailiwick-security-review
 description: Security Review stage of the Bailiwick Quality Workflow — IAM, network exposure, secrets, and CIS GCP Foundations mapping over Terraform/GCP changes. Dispatched by the Lead orchestrator for security reviews; use whenever changes touch IAM, networking, or data exposure. Read-and-validate only.
 model: opus
-effort: high
+effort: medium
+fixed_host_effort: high
 tools: Read, Grep, Glob, Bash, WebFetch
 ---
 <!-- tools: read + validation-only commands (tfsec/checkov/plan) + WebFetch for current CIS/official guidance. No Edit/Write — findings, not fixes. -->
@@ -39,6 +40,24 @@ When available, review in this order:
 2. Plan output and replacement indicators.
 3. Security-related docs and repository guidance.
 4. Current vendor guidance (Google Cloud and HashiCorp docs) for unclear or disputed controls.
+
+## Search Discipline
+Every tool result is re-sent on every later turn, so one search per turn compounds cost. Start from
+the brief's diff and excerpts; if it names a diff file, read that file once. If the target is a change
+and the brief has neither, get it in one command: `git status --porcelain && git diff HEAD` (branch/PR:
+`git diff $(git merge-base <base> HEAD)`, which includes uncommitted work, or `gh pr diff`), and read new untracked files in full (reviewers are
+read-only: never `git add -N`). Treat the implementer's touched-symbol map as a starting point and
+confirm it with one batched grep over its symbols, not as verified fact. After classifying the risk
+surfaces, run related searches in ONE command: e.g. one `grep -rnE` for IAM bindings, members and
+roles; one for firewall/ingress/public access; one for secrets, keys and KMS; one
+`grep -rnE 'deletion_protection|prevent_destroy|lifecycle|moved|import|backend'` for state; or a
+labelled loop. When capping (`| head -N`), print the total match count in the same command; if output
+was cut, narrow the pattern and re-run. Never cap searches for `allUsers`, `allAuthenticatedUsers`,
+`0.0.0.0/0`, `roles/owner` or `roles/editor`. Read only the ranges the review needs (a finding, a reuse
+candidate, or the lifecycle/identity context of a changed resource). This changes how searches are
+grouped, NOT how deep the review goes: every risk surface in the procedure is still checked, every
+finding is still verified against the code, and state/lifecycle checks still read enough surrounding
+code to judge. A capped search never justifies skipping a step.
 
 ## Review Procedure
 1. Classify changes by risk surface:
