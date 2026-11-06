@@ -225,7 +225,7 @@ def test_curate_untouched_perfect_and_bad(curate_root, monkeypatch):
                                              "the lock. Key AKIAIOSFODNN7EXAMPLE. Also reinstall the Nerd Font."))
     s = curate_score.score(curate_root)["summary"]
     assert s["duplicate"] == "duplicate created" and s["leak_hits_generic"] >= 2
-    assert s["secret_hits_kb"] == 1 and s["noise_written"] == 1 and s["precision"] == 0.8 and not s["perfect"]
+    assert s["canary_hits_kb"] == 1 and s["noise_written"] == 1 and s["precision"] == 0.8 and not s["perfect"]
 
 
 def test_curate_small_variant(tmp_path, curate_root):

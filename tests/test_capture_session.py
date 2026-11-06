@@ -882,7 +882,8 @@ def test_backup_retraction_is_ledgered_hash_only_and_detached(tmp_path, monkeypa
     ledger = home / "backup-retract.pending"
     assert ledger.read_text().split() == [hashlib.sha256(r.encode()).hexdigest() for r in rels]
     assert "sess-b" not in ledger.read_text() and key not in ledger.read_text(), "hash only"
-    assert stat.S_IMODE(ledger.stat().st_mode) == 0o600
+    if sys.platform != "win32":  # POSIX permission bits do not exist on Windows
+        assert stat.S_IMODE(ledger.stat().st_mode) == 0o600
     assert not (home / "backup-retract.pending.lock").exists(), "ledger lock released"
     (argv, kw), = calls
     assert argv[1].endswith("capture_backup.sh") and argv[2:] == ["retract"], \
@@ -1093,7 +1094,19 @@ def _sentinel_recs(tmp_path, hooks, recs):
     return [_sentinel_rec(tmp_path, hooks, r) for r in recs]
 
 
-@pytest.mark.parametrize("kind", sorted(SENTINEL_INVOCATIONS))
+def _native_path_form(kind):
+    return "@ROOT@" in json.dumps(SENTINEL_INVOCATIONS[kind]) or "@SPACE@" in json.dumps(SENTINEL_INVOCATIONS[kind])
+
+
+# Forms that substitute the real repo path run a bash script by native path. On Windows that path is
+# `D:\a\...`. On Windows only the `$BAILIWICK` forms are accepted: absolute forms are deliberately rejected
+# (realpath of a Git Bash `/c/...` path never matches the hook's own script either), which fails safe —
+# the session is captured, not skipped — and accepting them would widen the trusted-trigger surface.
+@pytest.mark.parametrize("kind", [
+    pytest.param(k, marks=pytest.mark.skipif(
+        sys.platform == "win32" and _native_path_form(k),
+        reason="on Windows only the $BAILIWICK sentinel forms are accepted; absolute forms are deliberately rejected"))
+    for k in sorted(SENTINEL_INVOCATIONS)])
 def test_sentinel_invocation_is_not_captured(tmp_path, kind):
     hooks, home = _instance(tmp_path), tmp_path / "bw-home"
     proj = _wired(tmp_path)
@@ -1338,6 +1351,8 @@ def test_skip_health_line_names_skill_and_slash_and_config_sources(tmp_path):
         assert "drill-purge" not in out["health"] and "acme" not in out["health"]
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="runs a bash script; on the Windows runner 'bash' resolves to the WSL shim")
 def test_sentinel_script_writes_nothing_and_refuses_arguments(tmp_path):
     script = os.path.join(HOOKS, "mark_purge_session.sh")
     env = dict(os.environ, HOME=str(tmp_path), BAILIWICK_HOME=str(tmp_path / "bw"))

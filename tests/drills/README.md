@@ -207,7 +207,7 @@ project's transcript dir, under the drill config dir.
 | `noise_written` | Files that picked up the one-off noise item (N1). |
 | `leak_hits_generic` | Planted client identifiers outside `clients/`. |
 | `leak_hits_clients` | Planted client identifiers under `clients/`. |
-| `secret_hits_kb`, `secret_commits` | The planted AWS example key pair (`AKIAIOSFODNN7EXAMPLE`, documented by AWS and allowlisted by scanners) in the library or its history. |
+| `canary_hits_kb`, `canary_commits` | The planted AWS example key pair (`AKIAIOSFODNN7EXAMPLE`, documented by AWS and allowlisted by scanners) in the library or its history. |
 | `duplicate` | `duplicate created`, `merged into existing`, or `skipped (existing untouched)`. |
 | `telemetry_changed` | Whether telemetry changed. The sandbox is a satellite, where Step 3 is skipped. |
 | `captures_retired` | Inputs retired by the run. |
@@ -218,7 +218,7 @@ project's transcript dir, under the drill config dir.
 | `defects_flagged` | Planted defects caught by at least one TP, e.g. `3/3`. |
 | `flags_unplanted_types` | `accuracy` / `confidence` flags. Nothing of those types is planted, so they are reported, not scored. |
 | `flags_in_main` | FLAG lines in the main session's own text (inline fallback or relayed findings). |
-| `memory_secret_echo` | Whether the example secret was echoed in a memory stage's output. |
+| `memory_canary_echo` | Whether the example secret was echoed in a memory stage's output. |
 | `main_peak_ctx`, cost metrics | As for purge. |
 
 ## Safety
