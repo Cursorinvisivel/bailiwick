@@ -14,9 +14,10 @@
 #                    (post-curate cleanup) and tombstone it in that branch's root .purged
 #                    manifest so push never re-encrypts it while the source capture is still
 #                    un-retired somewhere.
-#   retract          drain the purge-session ledger ($BAILIWICK_HOME/backup-retract.pending, hashed
-#                    relpaths only) on this machine's branch. Run detached by capture_session.py;
-#                    every push retries what is left. Entries leave the ledger once origin has them.
+#   retract          drain the purge-session ledger ($BAILIWICK_HOME/backup-retract.pending plus any
+#                    .pending.spool-* file, hashed relpaths only) on this machine's branch. Run
+#                    detached by capture_session.py; every push retries what is left. Entries
+#                    leave the ledger (and spools) once origin has them.
 #
 # BW_DRILL_SANDBOX applies (its .drill-sandbox marker exists and the project is inside it) and this
 # clone is not "$BW_DRILL_SANDBOX/framework" => push is a silent no-op, every other mode exits 3.
@@ -253,11 +254,32 @@ push_branch() {
 # capture must leave the backup. No plaintext relpath is stored: drain_pending finds the blob by
 # hashing this mirror's own tree, and the `.purged` tombstone is the hash itself. Entries leave the
 # ledger only once origin holds the tombstone; until then every push (and `retract`) retries them.
-# Appends (python) and the rewrite below share the `$PENDING.lock` mkdir lock.
+# The ledger is only written under the `$PENDING.lock` mkdir lock (python's append, the rewrite in
+# pending_done). A python writer that finds the lock busy drops its hashes in a spool file,
+# `$PENDING.spool-<time_ns>-<pid>-<n>` (renamed into place whole), so the PENDING SET is the ledger
+# plus every spool; pending_done folds the spools it read into the ledger, under the lock, and deletes
+# exactly those — a spool created meanwhile is left for the next run.
 PENDING="$BW_HOME/backup-retract.pending"
 PLOCK="$PENDING.lock"
 DRAINED=""
-pending_hashes() { { grep -E '^[0-9a-f]{64}$' "$PENDING" 2>/dev/null || true; } | sort -u; }
+# The spool files present now, one per line (glob, not find: bash 3.2 + BSD safe, and an unmatched
+# pattern stays literal, which `-f` rejects).
+pending_spools() {
+  local f
+  for f in "$PENDING".spool-*; do
+    if [ -f "$f" ]; then printf '%s\n' "$f"; fi
+  done
+}
+# Valid hash lines of the ledger and the given spool list (stdin), unsorted.
+pending_lines() {
+  local f
+  grep -E '^[0-9a-f]{64}$' "$PENDING" 2>/dev/null || true
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    grep -E '^[0-9a-f]{64}$' "$f" 2>/dev/null || true
+  done
+}
+pending_hashes() { pending_spools | pending_lines | sort -u; }
 pending_count() { pending_hashes | grep -c . || true; }
 pending_lock() {
   local waited=0
@@ -293,8 +315,10 @@ EOF
   fi
 }
 # After origin has our branch: drop every DRAINED hash the committed tombstone manifest confirms.
+# Under the lock the ledger is rebuilt as (ledger ∪ the spools listed now) minus the done hashes,
+# then exactly those spools are deleted: no pending hash is ever dropped by the rewrite.
 pending_done() {
-  local h done_list="" committed
+  local h f spools done_list="" committed
   [ -n "$DRAINED" ] || return 0
   committed="$(git -C "$MIRROR" show "HEAD:.purged" 2>/dev/null || true)"
   while IFS= read -r h; do
@@ -307,9 +331,17 @@ EOF
   DRAINED=""
   [ -n "$done_list" ] || return 0
   pending_lock || { bw_health capture_backup warn "purge-session ledger busy — $(pending_count) retraction(s) stay pending (next push retries)"; return 0; }
-  if [ -f "$PENDING" ]; then
-    ( umask 077; { grep -vxF -f <(printf '%s' "$done_list") "$PENDING" || true; } > "$PENDING.tmp.$$" )
+  spools="$(pending_spools)"
+  if [ -f "$PENDING" ] || [ -n "$spools" ]; then
+    ( umask 077
+      printf '%s\n' "$spools" | pending_lines \
+        | { grep -vxF -f <(printf '%s' "$done_list") || true; } | sort -u > "$PENDING.tmp.$$" )
     if [ -s "$PENDING.tmp.$$" ]; then mv -f "$PENDING.tmp.$$" "$PENDING"; else rm -f "$PENDING.tmp.$$" "$PENDING"; fi
+    while IFS= read -r f; do
+      if [ -n "$f" ]; then rm -f "$f"; fi
+    done <<EOF
+$spools
+EOF
   fi
   rmdir "$PLOCK" 2>/dev/null || true
   while IFS= read -r h; do

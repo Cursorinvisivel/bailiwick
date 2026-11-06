@@ -121,6 +121,16 @@ MARK_PURGE_RE = re.compile(
 # sentinel (_codex_commands): any other key in the arguments is not what the tool executed.
 CODEX_SENTINEL_TOOLS = CODEX_EXEC_TOOLS | {"shell_command"}
 _SHELLS = ("bash", "sh", "zsh")
+# The shell a sentinel `-c`/`-lc` may be unwrapped from (and the `shell` an exec_command may name):
+# the bare name (PATH lookup, as the tool resolves it) or the system dirs, EXACTLY. Any other path —
+# /tmp/evil/bash, /usr/local/bin/bash, ./sh — is a program that could print the success line itself.
+# Deliberately narrow: /opt/homebrew/bin, /usr/local/bin and /run/current-system/sw/bin shells are
+# real but often user-writable, so a genuine sentinel run through one is NOT credited — that fails
+# safe (the session is captured, never skipped). The bare name stays trusted although PATH resolves
+# it: the Codex guardrail already denies the exact sentinel shapes, so this check only narrows
+# forgery by an agent-chosen non-system shell binary; it is not the sentinel's primary gate.
+_TRUSTED_SHELLS = frozenset(_SHELLS) | frozenset(
+    d + s for d in ("/bin/", "/usr/bin/") for s in _SHELLS)
 OWN_MARK_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mark_purge_session.sh")
 # The first stdout line mark_purge_session.sh prints on success (exit 0) — and only then. Keep the
 # two in step (tests/test_capture_session.py pins it against the script's real output).
@@ -148,11 +158,25 @@ def is_mark_purge_command(cmd):
         return False
 
 
+def _unique_pairs(pairs):
+    """json object_pairs_hook: a repeated key (at any depth) is a forgery shape — which copy the tool
+    ran is parser-defined — so the whole arguments object is rejected."""
+    obj = {}
+    for k, v in pairs:
+        if k in obj:
+            raise ValueError("duplicate key")
+        obj[k] = v
+    return obj
+
+
 def _codex_commands(raw, name, kind="function_call"):
     """The command a Codex tool call EXECUTES. A `function_call` yields only the one field its tool
     runs — exec_command/exec: `cmd` (str); shell_command: `command` (str); shell: `command` (argv) —
     so a stray or nested `cmd`/`command` key (which the guardrail never sees, since it is handed only
-    the executed command) cannot pass for the sentinel. Non-JSON or a wrong type yields nothing.
+    the executed command) cannot pass for the sentinel. Non-JSON, a duplicate key or a wrong type
+    yields nothing. A shell is trusted only in a _TRUSTED_SHELLS form: exec_command's `shell` must be
+    absent/null or trusted, and a `shell` argv is unwrapped (`<sh> -c|-lc <line>`) only when argv[0]
+    is trusted — otherwise its quoted join, which never matches the sentinel, is returned.
     Only a code-mode `custom_tool_call` (JS input, never more than a hold) is regex-scanned."""
     import shlex
     cmds = []
@@ -164,13 +188,15 @@ def _codex_commands(raw, name, kind="function_call"):
                 pass
         return cmds
     try:
-        args = json.loads(raw)
+        args = json.loads(raw, object_pairs_hook=_unique_pairs)
     except Exception:
         return cmds
     if not isinstance(args, dict):
         return cmds
     if name in ("exec_command", "exec"):
-        if isinstance(args.get("cmd"), str):
+        shell = args.get("shell")
+        if isinstance(args.get("cmd"), str) and (
+                shell is None or (isinstance(shell, str) and shell in _TRUSTED_SHELLS)):
             cmds.append(args["cmd"])
         return cmds
     command = args.get("command")
@@ -181,7 +207,7 @@ def _codex_commands(raw, name, kind="function_call"):
     if name != "shell":
         return cmds
     if isinstance(command, list) and command and all(isinstance(a, str) for a in command):
-        if (len(command) == 3 and os.path.basename(command[0]) in _SHELLS
+        if (len(command) == 3 and command[0] in _TRUSTED_SHELLS
                 and command[1] in ("-c", "-lc")):
             cmds.append(command[2])  # ["bash", "-lc", "<command line>"]
         else:
@@ -660,8 +686,18 @@ def drop_session_capture(project_dir, session_id):
 # later `capture_backup.sh push` retries it. No plaintext relpath is stored anywhere: the backup
 # side finds the blob by hashing its own mirror tree (`git ls-files`), and the `.purged` tombstone
 # IS the hash — so the ledger can neither leak an identifier nor need a second, secret file.
-# Appends and capture_backup.sh's rewrite share the `<ledger>.lock` mkdir lock.
+# The ledger is written ONLY under the `<ledger>.lock` mkdir lock it shares with capture_backup.sh's
+# rewrite (pending_done). When the lock stays busy, the new hashes go to a SPOOL file instead —
+# `<ledger>.spool-<time_ns>-<pid>-<n>`, same content rules, renamed into place whole — because an
+# unlocked append could land between the rewrite's read and its `mv` and be lost. The pending set is
+# always ledger ∪ spools (here and in capture_backup.sh); whoever next holds the lock folds them in.
+# Accepted residual: anything able to write $BAILIWICK_HOME (an agent included) can list a hash in
+# the ledger or a spool, and the guardrail-exempt `capture_backup.sh push` then retracts that blob
+# with no sentinel ask. Impact: this machine's backup branch drops the blob from its tip (the
+# ciphertext stays in git history) and tombstones it, so push never backs that capture up again —
+# its local source capture is untouched, but it loses off-machine durability and cross-machine pull.
 RETRACT_LEDGER = "backup-retract.pending"
+_SPOOL_PREFIX = RETRACT_LEDGER + ".spool-"
 _LEDGER_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -669,19 +705,67 @@ def ledger_path():
     return os.path.join(bw_home(), RETRACT_LEDGER)
 
 
-def pending_retractions():
-    """Hashes waiting in the ledger (empty when there is none or it cannot be read)."""
+def _spool_paths():
+    """The spool files next to the ledger (never the in-flight temp names, which do not match)."""
+    home = os.path.dirname(ledger_path())
     try:
-        with open(ledger_path(), "r", encoding="utf-8") as fh:
-            return sorted({ln.strip() for ln in fh if _LEDGER_HASH_RE.match(ln.strip())})
-    except Exception:
+        names = os.listdir(home)
+    except OSError:
         return []
+    return sorted(os.path.join(home, n) for n in names
+                  if n.startswith(_SPOOL_PREFIX) and os.path.isfile(os.path.join(home, n)))
+
+
+def _read_hashes(path):
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return {ln.strip() for ln in fh if _LEDGER_HASH_RE.match(ln.strip())}
+    except Exception:
+        return set()
+
+
+def pending_retractions():
+    """Hashes waiting in the ledger or any spool file (empty when none exists or none is readable)."""
+    found = _read_hashes(ledger_path())
+    for spool in _spool_paths():
+        found |= _read_hashes(spool)
+    return sorted(found)
+
+
+def _write_spool(hashes):
+    """Spool `hashes` to a fresh `<ledger>.spool-<time_ns>-<pid>-<n>` (0600): written under a temp name
+    that readers ignore, then renamed, so no reader ever folds (and deletes) a half-written spool."""
+    import time
+    home = os.path.dirname(ledger_path())
+    for attempt in range(100):
+        stem = "{}{}-{}-{}".format(_SPOOL_PREFIX, time.time_ns(), os.getpid(), attempt)
+        final = os.path.join(home, stem)
+        tmp = os.path.join(home, "." + stem + ".tmp")
+        if os.path.exists(final):
+            continue
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            continue
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write("".join(h + "\n" for h in hashes))
+            os.chmod(tmp, 0o600)
+            os.rename(tmp, final)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        return final
+    raise FileExistsError("no free retraction spool name")
 
 
 def _ledger_lock(path, wait_s=0.3):
     """mkdir lock shared with capture_backup.sh. Held for milliseconds on both sides; a holder older
-    than 60 s is stale. Returns False when still busy — the caller appends anyway (an append is never
-    worth losing the retraction), at worst racing one concurrent rewrite."""
+    than 60 s is stale. Returns False when still busy — the caller then spools (never appends to the
+    ledger unlocked: that could race a concurrent rewrite and be lost)."""
     import time
     deadline = time.time() + wait_s
     while True:
@@ -703,20 +787,38 @@ def _ledger_lock(path, wait_s=0.3):
 
 
 def add_retractions(hashes):
-    """Append the hashes not already listed (file mode 0600). Returns the pending count."""
+    """Record the hashes not already pending (mode 0600). Under the lock: append them — plus any
+    spooled hashes, whose spool files are then removed — to the ledger. Lock busy: spool them
+    (_write_spool). Returns the pending count (ledger ∪ spools)."""
     path = ledger_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     lock = path + ".lock"
     locked = _ledger_lock(lock)
     try:
-        listed = set(pending_retractions())
-        new = [h for h in dict.fromkeys(hashes) if h not in listed]
+        if not locked:
+            listed = set(pending_retractions())
+            new = [h for h in dict.fromkeys(hashes) if h not in listed]
+            if new:
+                _write_spool(new)
+            return len(listed | set(new))
+        in_ledger = _read_hashes(path)
+        spools = _spool_paths()  # exactly these are folded and removed; a later spool stays
+        spooled = set()
+        for spool in spools:
+            spooled |= _read_hashes(spool)
+        new = [h for h in dict.fromkeys(list(hashes) + sorted(spooled)) if h not in in_ledger]
         if new:
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             with os.fdopen(fd, "a", encoding="utf-8") as fh:
                 fh.write("".join(h + "\n" for h in new))
-        os.chmod(path, 0o600)
-        return len(listed | set(new))
+        if os.path.exists(path):
+            os.chmod(path, 0o600)
+        for spool in spools:  # only after their hashes are in the ledger
+            try:
+                os.unlink(spool)
+            except OSError:
+                pass
+        return len(in_ledger | set(new))
     finally:
         if locked:
             try:

@@ -121,3 +121,62 @@ is no longer exempt.
 (`terraform ap"ply"`) still evades. The transformation that would catch it is indistinguishable from
 the quoted-argument false positive above, so it joins `make apply`, wrappers, aliases, and MCP
 actions on the known-bypass list rather than being silently assumed covered.
+
+*Amendment (2026-11-06): partial quoting and backslash escapes are now folded.* The two cases turned
+out to be distinguishable after all. A shell *word* is now rebuilt from its pieces (unquoted
+characters, `\c` escapes, and quoted runs holding no whitespace, separator, or nested quote), so
+`terraform ap"ply"`, `terraform "ap"ply`, `kubectl de\lete`, `rm -r"f"`, `purge_delete.sh "--a"pply`
+and `mark_"purge"_session.sh` reach the tiers as the word the shell runs. The quoted-argument false
+positive stays suppressed in two ways. A run holding whitespace or a nested quote is not a word piece
+(`'protoPayload.methodName:"delete"'`, `echo "terraform apply"`). A quoted run right after `=` or `:`
+is treated as a *value* and blanked (`--filter="name:delete-me"`, `methodName:"delete"`); the /purge
+asks also read the value-unwrapped form, so a value-shaped quote cannot hide a purge script path.
+`--dry-run="client"` is the one value that is unwrapped, because its value decides the dry-run
+exemption; `--dry-run=none`/`=false` are live runs and ask. `strip_quoted()` now honours escapes,
+which closes `echo \" ; terraform apply ; echo \"`: the naive `"[^"]*"` blanked the middle command.
+
+No normalisation step may *create* a comment, quote or separator that the shell would not see. A
+`#` from an unwrapped `'#'`, or one left at a word start by an empty run (`""#x`), would read as a
+comment and hide the rest of the line. So would a blank right before a mid-word `#` (`'a b'#`). An
+unwrapped `'\'` would emit an escape that re-pairs the quotes. Specials inside an unwrapped run are
+therefore re-escaped, a word-start `#` from a fold is escaped, and a blank before `#` leaves a
+placeholder. Escaped spaces and separators (`-chdir=a\ b`) are rewritten to `_` before folding; this
+is linear, and `\\;` keeps its real separator. A property test checks the whole pipeline against a
+reference lexer over about 19.5k generated commands: HEAD hid 1,538 of them, and the first cut of
+this amendment hid 2,661.
+
+Line continuations are handled in two ways. Backslashes are consumed in pairs, so `a\\` followed by
+a newline is a real newline, not a continuation. Folding the second backslash had glued the next
+line on, and a regression on this branch hid `terraform apply` that way. Each physical line is
+also evaluated *unjoined*, as an extra layer after the joined form, because bash never continues a
+comment: in `echo x # note \` followed by `terraform apply`, line 2 runs. Both HEAD and the joined
+form hid it inside the comment. Extra layers only add decisions. The property test covers
+continuations, newlines and comments ending in a backslash: about 42k commands, with 0 hidden
+(1,521 under the earlier normalisation).
+
+Every matcher is now linear. `A + SEG + B` patterns run as staged searches, as do the quoted-path
+/purge companions and the fail-closed pre-filter. A test enforces that no stage can match a
+separator. As backtracking regexes, 30–50 KB inputs took seconds to minutes, and Codex/Antigravity
+kill a hook at 30 s, which fails *open*.
+
+Evaluation also runs under a 10 s wall-clock budget (SIGALRM; POSIX main thread only, a no-op
+elsewhere). An overrun is **denied unconditionally**, with the error path's break-glass and the
+audit event `deny-budget`. The pre-filter cannot stand in for the full tiers: a 24 MB
+`echo …; git push` once overran and was allowed. The expiry is a `BaseException`, so the
+`except Exception` guards inside the evaluation cannot swallow it. A decision disarms the timer
+before it is audited or printed, and only one decision is ever printed.
+
+The pre-filter's vocabulary now spans every tier (go-ahead and /purge included). The error path and
+the unsupported-shape path therefore never let through a whole tier. A tier table that fails to
+compile at import is kept as an error and routed to the fail-closed path, instead of aborting the
+import (a non-zero exit, read as no decision).
+
+Whole-word quoting keeps its earlier behaviour (unwrapped), so `git log --grep "merge"` still asks,
+as it did before. Remaining residuals are `$'..'` ANSI-C quoting with `\x`/octal escapes; variable,
+command and parameter substitution (`$v`, `$(…)`, `${x:="delete"}`); brace expansion
+(`rm -{r,}f x`); aliases/functions; and wrapper scripts.
+
+The same change shell-joins an argv-list `tool_input.command` (a list used to crash outside the
+evaluation `try` and fail open). Any other non-string shape gets the pre-filter over its JSON: deny
+on a match, otherwise a health warning. The outer command is also evaluated before any `bash -c`
+inner layer is parsed.

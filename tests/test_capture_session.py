@@ -1258,12 +1258,25 @@ CODEX_FORGED = {
     "exec_command-cmd-is-list": ("exec_command", {"cmd": ["bash", "-lc", "bash " + MARK]}),
     "shell_command-command-is-list": ("shell_command", {"command": ["bash", "-lc", "bash " + MARK]}),
     "shell-command-is-str": ("shell", {"command": "bash " + MARK}),
+    # A program merely NAMED like a shell runs the sentinel line as data and prints the success line.
+    "shell-argv0-untrusted-path": ("shell", {"command": ["/tmp/evil/bash", "-lc", "bash " + MARK]}),
+    "shell-argv0-usr-local": ("shell", {"command": ["/usr/local/bin/bash", "-c", "bash " + MARK]}),
+    "shell-argv0-relative": ("shell", {"command": ["./sh", "-c", "bash " + MARK]}),
+    "exec_command-untrusted-shell": ("exec_command", {"cmd": "bash " + MARK, "shell": "/tmp/evil/sh"}),
+    "exec_command-shell-is-list": ("exec_command", {"cmd": "bash " + MARK, "shell": ["/bin/bash"]}),
+    "exec_command-untrusted-shell-login": ("exec_command", {"cmd": "bash " + MARK, "shell": "/opt/x/zsh",
+                                                            "login": True}),
 }
 # The legitimate counterpart of each forged shape: the sentinel in the field the tool executes.
 CODEX_LEGIT = {
     "shell_command": ("shell_command", {"command": "bash " + MARK, "workdir": "/x"}),
     "exec_command": ("exec_command", {"cmd": "bash " + MARK, "yield_time_ms": 1000}),
     "shell": ("shell", {"command": ["bash", "-lc", "bash " + MARK], "workdir": "/x"}),
+    "shell-bin-bash": ("shell", {"command": ["/bin/bash", "-lc", "bash " + MARK]}),
+    "shell-usr-bin-zsh": ("shell", {"command": ["/usr/bin/zsh", "-c", "bash " + MARK]}),
+    "exec_command-shell-bin-bash": ("exec_command", {"cmd": "bash " + MARK, "shell": "/bin/bash", "login": True}),
+    "exec_command-shell-usr-bin-zsh": ("exec_command", {"cmd": "bash " + MARK, "shell": "/usr/bin/zsh"}),
+    "exec_command-shell-null": ("exec_command", {"cmd": "bash " + MARK, "shell": None}),
 }
 
 
@@ -1280,6 +1293,30 @@ def test_codex_non_json_arguments_are_not_a_sentinel():
     rec["payload"]["arguments"] = '{"cmd": "bash ' + MARK.replace('"', '\\"') + '"'  # truncated JSON
     st = _purge_state([rec, _codex_result("exec_command")])
     assert not st["purge"] and not st["held"]
+
+
+@pytest.mark.parametrize("raw", [
+    '{"cmd": "printf ok", "cmd": "bash ' + MARK.replace('"', '\\"') + '"}',   # last-wins forgery
+    '{"cmd": "bash ' + MARK.replace('"', '\\"') + '", "cmd": "printf ok"}',   # first-wins forgery
+    '{"cmd": "bash ' + MARK.replace('"', '\\"') + '", "x": {"a": 1, "a": 2}}',  # nested duplicate
+])
+def test_codex_duplicate_argument_keys_are_not_a_sentinel(raw):
+    """Which copy of a repeated key the tool ran is parser-defined: the whole object is rejected."""
+    assert capture_session._codex_commands(raw, "exec_command") == []
+    rec = _with_ids(_codex_tool("exec_command", {}))
+    rec["payload"]["arguments"] = raw
+    st = _purge_state([rec, _codex_result("exec_command")])
+    assert not st["purge"] and not st["held"]
+
+
+def test_codex_untrusted_shell_argv_is_returned_as_a_quoted_argv():
+    """Not unwrapped: the quoted join is what runs, and it never matches the sentinel."""
+    raw = json.dumps({"command": ["/tmp/evil/bash", "-lc", "bash " + MARK]})
+    (cmd,) = capture_session._codex_commands(raw, "shell")
+    assert cmd.startswith("/tmp/evil/bash -lc ") and not capture_session.is_mark_purge_command(cmd)
+    for name in ("exec_command", "exec"):  # an untrusted `shell` withholds `cmd`; a trusted one passes it
+        assert capture_session._codex_commands(json.dumps({"cmd": "x", "shell": "/tmp/evil/sh"}), name) == []
+        assert capture_session._codex_commands(json.dumps({"cmd": "x", "shell": "/bin/sh"}), name) == ["x"]
 
 
 @pytest.mark.parametrize("case", sorted(CODEX_LEGIT))
@@ -1473,6 +1510,40 @@ def test_ledger_lock_gives_up_within_a_third_of_a_second(tmp_path):
     t0 = time.time()
     assert capture_session._ledger_lock(lock) is False
     assert time.time() - t0 < 0.6
+
+
+def _spools(home):
+    return sorted(p for p in os.listdir(str(home)) if p.startswith("backup-retract.pending.spool-"))
+
+
+def test_busy_ledger_lock_spools_instead_of_appending(tmp_path, monkeypatch):
+    """Never an unlocked append (a concurrent pending_done rewrite could drop it): a busy lock spools
+    the new hashes to their own file, which every reader counts as pending."""
+    import re
+    import stat
+    home = tmp_path / "bw-home"
+    monkeypatch.setenv("BAILIWICK_HOME", str(home))
+    a, b, c = ("a" * 64), ("b" * 64), ("c" * 64)
+    assert capture_session.add_retractions([a]) == 1
+    ledger = home / "backup-retract.pending"
+    os.mkdir(str(home / "backup-retract.pending.lock"))  # a rewrite in progress
+    assert capture_session.add_retractions([a, b, b]) == 2, "already-pending a is not re-spooled"
+    assert ledger.read_text() == a + "\n", "ledger untouched while the lock is held"
+    spools = _spools(home)
+    assert len(spools) == 1 and (home / spools[0]).read_text() == b + "\n", "hash only, no duplicate"
+    assert re.match(r"^backup-retract\.pending\.spool-\d+-\d+-\d+$", spools[0])
+    if sys.platform != "win32":
+        assert stat.S_IMODE((home / spools[0]).stat().st_mode) == 0o600
+    assert sorted(os.listdir(str(home))) == sorted(["backup-retract.pending", "backup-retract.pending.lock"]
+                                                   + spools), "no temp spool left behind"
+    assert capture_session.pending_retractions() == [a, b]
+    assert capture_session.add_retractions([b]) == 2 and len(_spools(home)) == 1, "spooled b counts"
+    # The lock frees: the next locked add folds every spool it read into the ledger, then removes it.
+    os.rmdir(str(home / "backup-retract.pending.lock"))
+    assert capture_session.add_retractions([c]) == 3
+    assert sorted(ledger.read_text().split()) == [a, b, c] and len(ledger.read_text().split()) == 3
+    assert _spools(home) == [] and capture_session.pending_retractions() == [a, b, c]
+    assert not (home / "backup-retract.pending.lock").exists()
 
 
 def test_bad_skip_config_warns_once_per_run(tmp_path):

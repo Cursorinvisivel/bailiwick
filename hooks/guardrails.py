@@ -38,8 +38,11 @@ instead of mere instructions:
 Validation-only commands (terraform plan/validate/fmt, kubectl get/describe or --dry-run,
 read-only gcloud/aws/az, git status/diff/log, ...) match no pattern and run untouched.
 Shell line-continuations (backslash-newline) are folded before matching, so splitting a
-verb across continued lines does not evade the patterns; whole-token quoting is unwrapped, so
-`terraform "apply"` does not either. Tiers are evaluated PER SEGMENT (`;` `&&` `||` `|`, comments
+verb across continued lines does not evade the patterns. Backslashes are consumed in pairs (`a\\\\`
+then a newline is a real newline), and each physical line is ALSO evaluated unjoined, because bash
+never continues a comment (`echo x # note \\` then `terraform apply` runs line 2). Shell words are folded (whole-word, partial
+and backslash-escaped quoting), so `terraform "apply"`, `terraform ap"ply"` and `kubectl de\\lete` do
+not either. Tiers are evaluated PER SEGMENT (`;` `&&` `||` `|`, comments
 dropped), so a --dry-run flag or an EXEMPT match in one segment never speaks for a chained one.
 A command that is exactly `bash|sh|zsh -c/-lc '<cmd>'` (how a Codex argv call can arrive) is
 evaluated as given AND as the inner `<cmd>` it runs.
@@ -56,13 +59,29 @@ pre-filter trips, fail OPEN otherwise, so a bug never wedges the harness on a ha
 Scope & limits — NOT a complete security boundary. This is a DIRECT-command guardrail for the
 supported patterns only. It does NOT see destructive operations reached via `make apply`, wrapper /
 task-runner scripts, shell aliases/functions, or Terraform-MCP tool actions — those bypass it.
-Known residual evasion: quoting only PART of a token (`terraform ap"ply"`) still slips the patterns —
-the transformation that would catch it is indistinguishable from the quoted-argument false positive
-(`gcloud logging read 'methodName:"delete"'`) the tiers deliberately ignore. On an
-internal evaluation error it fails CLOSED (deny) for commands that trip the destructive pre-filter and
-fails OPEN otherwise (ADR-005) — never wedging the harness on a harmless command. A malformed payload
-(nothing to evaluate) still fails open. Treat it as a high-value safety rail for direct commands, not
-enforcement under indirection.
+Partial quoting and backslash escapes are folded (`terraform ap"ply"`, `"--a"pply`, `ap\\ply`); the
+quoted-argument false positive stays suppressed because a quoted run holding whitespace, a separator
+or a nested quote is not a word piece, and a quoted run right after `=` or `:` is treated as a VALUE
+and blanked (`--filter="name:delete-me"`, `methodName:"delete"`; `--dry-run="client"` excepted, since
+its value decides the exemption). An escaped space/separator (`-chdir=a\\ b`) is rewritten to `_` so it
+neither splits a segment nor stops a fold. No normalisation step may CREATE a comment, quote or
+separator the shell would not see: unwrapped specials are re-escaped and a blank before `#` leaves a
+placeholder (property-tested against a reference lexer). Known residual evasion: `$'..'` ANSI-C
+quoting with \\x / octal escapes; variable, command and parameter substitution (`$v`, `$(…)`,
+`${x:="delete"}`); brace expansion (`rm -{r,}f x`); aliases/functions and wrapper scripts.
+
+Cost: every matcher is linear (`A + SEG + B` patterns run as staged searches, see _Staged), and the
+evaluation runs under a wall-clock budget (EVAL_BUDGET_SECONDS, SIGALRM, POSIX main thread only):
+Codex/Antigravity kill a hook at 30 s and a killed hook fails OPEN, so an overrun is cut short and
+DENIED unconditionally (break-glass as the error path; audit event `deny-budget`) — an overrun proves
+nothing about which tier would have matched. A decision disarms the timer before it is audited or
+printed, and at most one decision is ever printed. A command value that is not a str or a list of
+str cannot be read by the tiers; the pre-filter runs over its JSON (deny on a match, else health
+warn). The pre-filter's vocabulary spans every tier. On an internal evaluation error (including a
+tier table that failed to compile at import) it fails CLOSED (deny) for commands that trip the
+pre-filter and fails OPEN otherwise (ADR-005) — never wedging the harness on a harmless command. A
+malformed payload (nothing to evaluate) still fails open. Treat it as a high-value safety rail for
+direct commands, not enforcement under indirection.
 
 ADAPTER MAPPING (the confirmation tiers are identical; only the decision vocabulary differs):
   - claude: every tier -> permissionDecision "ask" (the dialog IS the re-confirmation).
@@ -116,11 +135,50 @@ EXEMPT_DISQUALIFIERS = re.compile(r"--git-dir|--work-tree|--exec-path|://|\S+@\S
 # Segment separator: patterns must not read a verb from the NEXT chained command as belonging to
 # this tool ("terraform plan && kubectl apply" is not "terraform ... apply").
 SEG = r"[^;&|\n]*"
+_SEG_SPLIT = re.compile(r"[;&|\n]")
+
+
+class _Staged:
+    """`A SEG B SEG C` matched as successive searches inside each separator-free chunk.
+
+    As one regex, every occurrence of A re-scans the rest of the segment hunting for B, which is
+    quadratic (cubic with a third stage): `echo ` + `purge_scrub scrub ` * 1700 took 45 s, past the
+    Codex/Antigravity hook timeout, which fails open. Within a chunk that holds no separator, SEG
+    matches anything, so "some A, then later some B" holds exactly when the leftmost A is followed by
+    some B, and so on. Each chunk is therefore scanned once per stage, which is linear.
+
+    RULE for every stage: it must not be able to match a separator (`;&|` or newline). That is,
+    no `.`, no `\\s`/`\\S`/`\\W`/`\\D`, no negated class: use `[ \\t]+` for "whitespace". Then a
+    stage could never have crossed a separator in the one-regex form either, so the split into
+    chunks changes nothing. test_staged_stages_cannot_match_a_separator enforces this."""
+    __slots__ = ("stages",)
+
+    def __init__(self, parts, flags):
+        self.stages = [re.compile(p, flags) for p in parts]
+
+    def search(self, text):
+        for chunk in _SEG_SPLIT.split(text):
+            pos = 0
+            for stage in self.stages:
+                m = stage.search(chunk, pos)
+                if m is None:
+                    break
+                pos = m.end()
+            else:
+                return True
+        return False
+
+
+def _pattern(pattern, flags=re.IGNORECASE):
+    """Compile a tier pattern: a plain regex, or a _Staged matcher when it is built `A + SEG + B`."""
+    parts = pattern.split(SEG)
+    return re.compile(pattern, flags) if len(parts) == 1 else _Staged(parts, flags)
+
 
 # The dry-run exemption must be a standalone flag in the SAME segment that matched — a bare
 # `"--dry-run" in command` let `kubectl delete ns prod --dry-run=client; kubectl delete ns prod`
-# (and a trailing `# --dry-run` comment) suppress the live mutation.
-DRY_RUN_RE = re.compile(r"(?:^|\s)--dry-run(?:=\S+)?(?=\s|$)")
+# (and a trailing `# --dry-run` comment) suppress the live mutation. `=none` / `=false` are live runs.
+DRY_RUN_RE = re.compile(r"(?:^|\s)--dry-run(?:=(?!none\b|false\b)\S+)?(?=\s|$)")
 
 # The /purge sentinel (hooks/mark_purge_session.sh): capture_session.py reads its invocation as
 # "this is a /purge session", stops capturing it, deletes its earlier captures and tombstones their
@@ -129,7 +187,8 @@ MARK_PURGE_WHAT = ("mark_purge_session.sh marks this session as /purge: disables
                    "this session's captures (and requests their backup retraction)")
 # Raw-command companion for quoted paths that strip_quoted() blanks (`bash '/a b/hooks/mark…sh'`):
 # the same command position, the script inside a quoted token.
-MARK_PURGE_RAW_RE = re.compile(
+# (Compiled with the tier tables, inside the _TABLE_ERROR guard.)
+_MARK_PURGE_RAW = (
     r"(?:^|[;&|\n(])\s*(?:\w+=\S*\s+)*(?:(?:bash|sh|zsh|source|\.|exec|command|env)\s+)*"
     r"(?:\"[^\"\n]*|'[^'\n]*)mark_purge_session\.sh[\"']")
 PURGE_DELETE_WHAT = "purge_delete.sh --apply deletes client files irreversibly"
@@ -141,10 +200,39 @@ PURGE_SCRUB_WHAT = ("purge_scrub.py --apply rewrites the guardrail audit log / h
 _SCRUB_APPLY = r"\b(scrub|history)\b" + r"[^;&|\n]*" + r"--ap\w*"
 # Raw-command companions for the two --apply asks (same reason as MARK_PURGE_RAW_RE): a quoted
 # script path holding a space is blanked by strip_quoted(), taking the script name with it.
-PURGE_DELETE_RAW_RE = re.compile(r"(?:\"[^\"\n]*|'[^'\n]*)purge_delete\.sh[\"'][^;&|\n]*--apply\b")
-PURGE_SCRUB_RAW_RE = re.compile(r"(?:\"[^\"\n]*|'[^'\n]*)purge_scrub(?:\.py)?[\"'][^;&|\n]*?" + _SCRUB_APPLY)
-PURGE_RAW_ASKS = [(MARK_PURGE_RAW_RE, MARK_PURGE_WHAT), (PURGE_DELETE_RAW_RE, PURGE_DELETE_WHAT),
-                  (PURGE_SCRUB_RAW_RE, PURGE_SCRUB_WHAT)]
+
+
+class _QuotedHead:
+    """A quoted-script-path head, then staged tail patterns confined to the rest of ITS segment
+    (up to the next `;&|` or newline). Same matches as `head[^;&|\n]*tail…` as one regex, but linear:
+    as one regex every head re-scanned the remainder for the tail (`"purge_scrub.py" scrub ` * 1700
+    ran past the hook timeout). A tail window already searched is not searched again for a later head
+    whose window lies inside it."""
+    __slots__ = ("head", "tail")
+
+    def __init__(self, head, tail_parts):
+        self.head = re.compile(head)
+        self.tail = _Staged(tail_parts, 0)
+
+    def search(self, text):
+        pos, done_from, done_stop = 0, None, None
+        while True:
+            m = self.head.search(text, pos)
+            if m is None:
+                return False
+            end = m.end()
+            sep = _SEG_SPLIT.search(text, end)
+            stop = sep.start() if sep else len(text)
+            if not (stop == done_stop and end >= done_from):
+                if self.tail.search(text[end:stop]):
+                    return True
+                done_from, done_stop = end, stop
+            pos = m.start() + 1
+
+
+# (head, tail stages) for the two quoted-path --apply companions; built inside the _TABLE_ERROR guard.
+_PURGE_DELETE_RAW = (r"""(?:"[^"\n]*|'[^'\n]*)purge_delete\.sh["']""", [r"--apply\b"])
+_PURGE_SCRUB_RAW = (r"""(?:"[^"\n]*|'[^'\n]*)purge_scrub(?:\.py)?["']""", _SCRUB_APPLY.split(SEG))
 
 # The /purge asks run on EVERY segment BEFORE the EXEMPT filter (see main): an exemption claim
 # must never be able to swallow them (`…/capture_backup.sh/../../hooks/mark_purge_session.sh`).
@@ -167,7 +255,7 @@ ASK_IMPACT_PATTERNS = [
      "terraform/terragrunt apply|destroy changes real infrastructure"),
     (r"\bkubectl\b" + SEG + r"\b(apply|delete|patch|replace|scale|drain|cordon|uncordon)\b", True,
      "kubectl mutation changes live cluster state"),
-    (r"\bkubectl\b" + SEG + r"\brollout\s+(restart|undo|pause|resume)\b", True,
+    (r"\bkubectl\b" + SEG + r"\brollout[ \t]+(restart|undo|pause|resume)\b", True,
      "kubectl rollout mutation changes live cluster state"),
     (r"\bhelm\b" + SEG + r"\b(install|upgrade|uninstall|delete|rollback)\b", True,
      "helm release mutation changes live cluster state"),
@@ -175,7 +263,7 @@ ASK_IMPACT_PATTERNS = [
      "cloud CLI mutation (delete/destroy/update/patch/rm) changes real resources"),
     (r"\baws\b" + SEG + r"\b(delete-|terminate-|remove-|update-)", False,
      "mutating AWS CLI verb (delete-/terminate-/remove-/update-) changes real resources"),
-    (r"\baws\s+s3\b" + SEG + r"\b(rm|rb|mv)\b", False,
+    (r"\baws[ \t]+s3\b" + SEG + r"\b(rm|rb|mv)\b", False,
      "aws s3 rm/rb/mv changes real storage"),
     # /purge tooling (also evaluated ahead of EXEMPT — see PURGE_ASK_PATTERNS).
     *PURGE_ASK_PATTERNS,
@@ -191,8 +279,20 @@ ASK_IMPACT_PATTERNS = [
 # signature never lands by agent initiative (checked only on message-carrying git/gh commands).
 SIGNATURE_RE = re.compile(
     r"co-authored-by:\s*claude|generated with .{0,20}claude|\U0001F916", re.IGNORECASE)
-GIT_MESSAGE_RE = re.compile(
-    r"\bgit\b" + SEG + r"\bcommit\b|\bgh\b" + SEG + r"\bpr\b", re.IGNORECASE)
+
+
+class _AnyOf:
+    """`.search()` over several tier patterns (an alternation of _Staged matchers)."""
+    __slots__ = ("patterns",)
+
+    def __init__(self, *patterns):
+        self.patterns = [_pattern(p) for p in patterns]
+
+    def search(self, text):
+        return any(p.search(text) for p in self.patterns)
+
+
+_GIT_MESSAGE_PARTS = (r"\bgit\b" + SEG + r"\bcommit\b", r"\bgh\b" + SEG + r"\bpr\b")
 
 # ASK-GO-AHEAD: permitted, but only on a clear user go-ahead — never silent, never agent-initiated.
 ASK_GOAHEAD_PATTERNS = [
@@ -201,6 +301,25 @@ ASK_GOAHEAD_PATTERNS = [
     (r"\bgh\b" + SEG + r"\bpr\b" + SEG + r"\b(create|merge|close|ready)\b",
      "opening/merging a PR requires a clear user go-ahead — never agent initiative; confirm to proceed."),
 ]
+
+# Compile every tier pattern once; `A + SEG + B` patterns become linear _Staged matchers (ReDoS).
+# Guarded: a malformed pattern raising here would abort the import OUTSIDE __main__'s try — a
+# non-zero exit the harness treats as no decision, i.e. a silent fail-open on every command. Instead
+# the error is kept and main() routes every evaluation to the fail-closed path (ADR-005).
+_TABLE_ERROR = None
+try:
+    PURGE_ASK_PATTERNS = [(_pattern(p), dry, what) for p, dry, what in PURGE_ASK_PATTERNS]
+    ASK_IMPACT_PATTERNS = [(_pattern(p), dry, what) for p, dry, what in ASK_IMPACT_PATTERNS]
+    ASK_GOAHEAD_PATTERNS = [(_pattern(p), reason) for p, reason in ASK_GOAHEAD_PATTERNS]
+    EXEMPT_PATTERNS = [_pattern(p) for p in EXEMPT_PATTERNS]
+    GIT_MESSAGE_RE = _AnyOf(*_GIT_MESSAGE_PARTS)
+    MARK_PURGE_RAW_RE = re.compile(_MARK_PURGE_RAW)
+    PURGE_DELETE_RAW_RE = _QuotedHead(*_PURGE_DELETE_RAW)
+    PURGE_SCRUB_RAW_RE = _QuotedHead(*_PURGE_SCRUB_RAW)
+    PURGE_RAW_ASKS = [(MARK_PURGE_RAW_RE, MARK_PURGE_WHAT), (PURGE_DELETE_RAW_RE, PURGE_DELETE_WHAT),
+                      (PURGE_SCRUB_RAW_RE, PURGE_SCRUB_WHAT)]
+except Exception as _e:  # exercised by test_import_time_compile_failure_fails_closed
+    _TABLE_ERROR = _e
 
 # SIGNED-COMMIT SHAPE: in a repo that signs (commit.gpgsign=true or user.signingkey set), a commit
 # must take the /sign skill's shape — `-S` plus `-F <gitdir>/COMMIT_MSG_<slug>`. That shape is the
@@ -272,14 +391,57 @@ def file_has_signature(path, cwd):
         return False
 
 
-# DANGER pre-filter (ADR-005): a broad, cheap match on the raw command, used ONLY to pick the fail
-# direction if the main pattern engine errors — fail CLOSED (deny) when this trips, else fail open.
-# Aligned with the ASK-IMPACT tool/verb space; kept a single compiled regex (near-zero failure surface).
-DANGER_PREFILTER = re.compile(
-    r"\b(terraform|terragrunt|gcloud|gsutil|az|aws|kubectl|helm)\b[^\n]*"
-    r"\b(apply|destroy|delete|terminate|remove|update|patch|rm|drain|scale|uninstall|rollback)\b"
-    r"|(^|[;&|]\s*|\s)rm\s+-[a-zA-Z]*[rf]",
-    re.IGNORECASE)
+# DANGER pre-filter (ADR-005): a broad, cheap match on the raw command, used to pick the fail
+# direction when the main pattern engine errors (deny when this trips, else fail open) and to judge
+# a command value of an unsupported shape. Its vocabulary spans EVERY tier (impact, go-ahead, the
+# /purge asks), so neither fallback lets through a whole tier the engine would have asked about.
+# Kept tiny (near-zero failure surface) and LINEAR: as one regex, `tool[^\n]*verb` re-scanned the
+# line for every tool word — each (tool, verb) pair here is two left-to-right scans per line.
+class _Prefilter:
+    _PAIRS = [
+        (r"\b(terraform|terragrunt|gcloud|gsutil|az|aws|kubectl|helm)\b",
+         r"\b(apply|destroy|delete|terminate|remove|update|patch|rm|drain|scale|uninstall|rollback)\b"),
+        (r"\bkubectl\b", r"\b(replace|cordon|uncordon|rollout)\b"),
+        (r"\bhelm\b", r"\b(install|upgrade)\b"),
+        (r"\baws\b", r"\b(rb|mv)\b|\b(delete|terminate|remove|update)-"),
+        (r"\bgit\b", r"\b(commit|push|merge)\b"),
+        (r"\bgh\b", r"\b(create|merge|close|ready|delete|archive)\b"),
+    ]
+    _DIRECT = (r"(^|[;&|]\s*|\s)rm\s+(-[a-zA-Z]*[rf]|--recursive\b|--force\b)|"
+               r"purge_delete\.sh|purge_scrub|mark_purge_session\.sh")
+
+    def __init__(self):
+        flags = re.IGNORECASE
+        self.pairs = [(re.compile(t, flags), re.compile(v, flags)) for t, v in self._PAIRS]
+        self.direct = re.compile(self._DIRECT, flags)
+
+    def search(self, text):
+        if self.direct.search(text):
+            return True
+        for line in text.split("\n"):
+            for tool, verb in self.pairs:
+                m = tool.search(line)
+                if m and verb.search(line, m.end()):
+                    return True
+        return False
+
+
+class _DenyAll:
+    """Stand-in when the pre-filter itself failed to compile: every fallback decision is deny."""
+
+    def search(self, text):
+        return True
+
+
+# Built under a guard, like the tier tables. The pre-filter IS the fallback, so a failure here
+# cannot route to it: every path that relies on it (error, unsupported shape) then denies anything.
+# The tiers themselves are unaffected and still decide normally.
+_PREFILTER_ERROR = None
+try:
+    DANGER_PREFILTER = _Prefilter()
+except Exception as _e:  # exercised by test_import_time_compile_failure_fails_closed
+    _PREFILTER_ERROR = _e
+    DANGER_PREFILTER = _DenyAll()
 
 
 def normalize(command):
@@ -287,22 +449,143 @@ def normalize(command):
     lines cannot evade the patterns. The shell removes `\\<newline>` entirely (joining with
     nothing), so we replace it with the empty string — otherwise a mid-token split like
     `terraform app\\<newline>ly` would normalize to `app ly` and slip past `apply`. Plain
-    newlines stay — separate lines are separate commands."""
-    return re.sub(r"\\\r?\n", "", command)
+    newlines stay — separate lines are separate commands.
+
+    Backslashes are consumed in PAIRS, left to right (linear, one pass): `a\\\\<newline>` is an
+    escaped backslash followed by a REAL newline, not a continuation. Folding its second backslash
+    with the newline glued the next line onto this one (`a\\terraform apply` -> the fold read `\\t` as
+    `t`), and the command on the next line vanished."""
+    return _CONTINUATION.sub(_fold_continuation, command)
 
 
-# A quoted run that spans a WHOLE token and holds no whitespace, separator, or nested quote:
-# `terraform "apply"`, `rm '-rf'`, `kubectl "delete"`. The shell executes these exactly as the
-# unquoted form, so they are command tokens and must be unwrapped before quoted ARGUMENTS are
-# blanked — otherwise quoting the verb erased it from the string the tiers match against.
-_QUOTED_TOKEN = re.compile(r"(?<![^\s;&|])(['\"])([^'\"\s;&|]*)\1(?![^\s;&|])")
+# A backslash pair (kept) or a backslash-newline continuation, scanned left to right.
+_CONTINUATION = re.compile(r"\\(\\|\r?\n)")
 
 
-def unwrap_token_quotes(command):
-    """Unquote whole-token quoted words, leaving genuine quoted arguments intact for strip_quoted().
-    The two cases are distinguished by content: `echo "terraform apply"` holds whitespace and
-    `'protoPayload.methodName:"delete"'` holds a nested quote, so neither is unwrapped."""
-    return _QUOTED_TOKEN.sub(lambda m: m.group(2), command)
+def _fold_continuation(m):
+    return m.group(0) if m.group(1) == "\\" else ""
+
+
+def unjoin(command):
+    """The command with every continuation turned into a plain newline: each physical line on its own.
+    bash does NOT continue a COMMENT — in `echo x # note \\<newline>terraform apply` the backslash is
+    part of the comment and line 2 runs — so normalize() alone hid line 2 inside the comment. main()
+    evaluates this form as an extra layer after the joined one (extra layers only add decisions)."""
+    return _CONTINUATION.sub(lambda m: m.group(0) if m.group(1) == "\\" else "\n", command)
+
+
+def _needs_unjoin(command):
+    """True when some physical line other than the last holds a `#`. A comment that swallows a
+    continuation is the only case where bash differs from the joined form, so only then is the
+    unjoined form evaluated. A deliberate over-approximation (no quote tracking). Unconditionally,
+    it made multi-line validation commands ask: `kubectl delete ns x \\<newline> --dry-run=client`
+    split the dry-run flag off its segment."""
+    return "#" in command[:command.rfind("\n") + 1]
+
+
+def command_forms(raw_command):
+    """The forms main() evaluates, in order: the joined (normalized) command, then the unjoined one
+    (see unjoin) when a comment could have swallowed a continuation (see _needs_unjoin)."""
+    joined = normalize(raw_command)
+    if not _needs_unjoin(raw_command):
+        return [joined]
+    split = unjoin(raw_command)
+    return [joined] if split == joined else [joined, split]
+
+
+# One shell word built from concatenated pieces, none of which holds whitespace or a separator:
+#   unquoted char  [^\s;&|'"\\]      backslash escape  \\[^\s;&|]
+#   single-quoted  '[^'\s;&|"]*'     double-quoted     "[^"\s;&|'\\]*"
+# The shell executes `terraform "apply"`, `terraform ap"ply"`, `rm -r"f"` and `kubectl de\lete`
+# exactly as the unquoted word, so such a word is folded before quoted ARGUMENTS are blanked —
+# otherwise quoting (part of) the verb erased it from the string the tiers match against.
+# Linear by construction (ReDoS guard — this module already had one): every alternative starts with
+# a distinct character and no piece can cross whitespace or `;&|`, so no position inside a match is
+# itself a word start, and each piece's length is fixed by its first character. That is also why the
+# escape piece is `\\[^\s;&|]`, not `\\[^\n]`: an escaped space/separator would let a word span the
+# next word's start and turn a failing scan quadratic. _blank_escaped_splits() removes those first.
+_WORD_PIECES = r"""[^\s;&|'"\\]|\\[^\s;&|]|'[^'\s;&|"]*'|"[^"\s;&|'\\]*\""""
+_SHELL_WORD = re.compile(r"(?<![^\s;&|])(?:" + _WORD_PIECES + r")+(?![^\s;&|])")
+_WORD_PIECE = re.compile(r"""[^\s;&|'"\\]+|\\[^\s;&|]|'[^'\s;&|"]*'|"[^"\s;&|'\\]*\"""")
+# Escaped characters kept WITH their backslash when a word is folded: emitted bare, a `\"` / `\'`
+# would open a quote strip_quoted() then blanks across real commands, a `\#` at a word start would
+# read as a comment to segments(), and `\\` would start a new escape. The same characters are
+# re-escaped inside an unwrapped quoted run (`'#'`, `'\'`), for the same reasons.
+_ESCAPE_KEEP = frozenset("'\"\\#")
+_REESCAPE = re.compile(r"""([\\'"#])""")
+# An escaped space or separator (`a\ b`, `a\;b`) is part of a word, not a split. It is rewritten to
+# `_` BEFORE folding, so `terraform -chdir=a\ b apply` stays one segment with one `-chdir` word.
+# Escapes are consumed pairwise left to right, so `\\;` (escaped backslash, then a REAL `;`) keeps
+# its separator. `_` is a word character, so it never forms a new `\b` boundary around a verb.
+_ESCAPED_SPLIT = re.compile(r"\\([\s;&|])|\\.", re.DOTALL)
+
+
+def _blank_escaped_splits(command):
+    return _ESCAPED_SPLIT.sub(lambda m: "_" if m.group(1) is not None else m.group(0), command)
+
+
+def _fold_word(word, keep_values=True):
+    """Rebuild one shell word for matching: unquoted characters kept, `\\c` -> `c`, quoted runs
+    unwrapped — EXCEPT (keep_values) a quoted run right after `=` or `:` (or right after such a kept
+    run), which is a VALUE (`--filter="name:delete-me"`, `--format="value(name)"`,
+    `methodName:"delete"`) and is kept quoted so strip_quoted() blanks it as an argument.
+    `--dry-run="client"` is the exception: its value decides the dry-run exemption, so it is unwrapped.
+
+    The output must never create a separator, quote or comment the shell would not see: specials in
+    an unwrapped run are re-escaped, and a `#` that would land at the start of the rebuilt word
+    (`""#x`, which the shell reads as one word, not a comment) is escaped too."""
+    out = []
+    last = ""         # last character emitted so far in this word
+    tail = ""         # the last few characters emitted (bounded: no quadratic re-join)
+    in_value = False  # the previous piece was a kept (still-quoted) value run
+    for piece in _WORD_PIECE.findall(word):
+        head = piece[0]
+        if head == "\\":
+            text = piece if piece[1] in _ESCAPE_KEEP else piece[1]
+            in_value = False
+        elif head in "'\"":
+            if keep_values and (in_value or (last in ("=", ":") and not tail.endswith("--dry-run="))):
+                text, in_value = piece, True
+            else:
+                text, in_value = _REESCAPE.sub(r"\\\1", piece[1:-1]), False
+        else:
+            text, in_value = piece, False
+        if text.startswith("#") and out and not last:
+            text = "\\" + text  # mid-word `#` after an empty run: not a comment in the shell
+        out.append(text)
+        if text:
+            last = text[-1]
+            tail = (tail + text)[-10:]
+    return "".join(out)
+
+
+def unwrap_token_quotes(command, keep_values=True):
+    """Fold shell words whose quoting the shell removes, leaving genuine quoted ARGUMENTS intact for
+    strip_quoted(). Whole-word (`terraform "apply"`), partial (`terraform ap"ply"`, `"--a"pply`) and
+    backslash-escaped (`terraform ap\\ply`) forms all fold to the bare word. Quoted runs holding
+    whitespace, a separator, a nested quote or a backslash are not word pieces, so they stay quoted:
+    `echo "terraform apply"`, `'protoPayload.methodName:"delete"'`. A quoted run directly after `=`
+    or `:` is a value and stays quoted too (see _fold_word) — unless keep_values=False, the form the
+    /purge asks also read so a value-shaped quote cannot hide a purge script path. A word with an
+    unbalanced quote is not folded at all. Escaped spaces/separators are first blanked to `_`
+    (_blank_escaped_splits) so they can neither split a segment nor stop a word from folding."""
+    command = _blank_escaped_splits(command)
+    return _SHELL_WORD.sub(lambda m: _fold_word(m.group(0), keep_values), command)
+
+
+# Quoted runs as the shell reads them: a backslash escape OUTSIDE quotes is consumed first, so `\"`
+# never opens a quote, and a double-quoted run honours `\"` inside it. Each alternative starts with a
+# distinct character -> linear.
+_QUOTED_RUN = re.compile(r"""\\.|'[^']*'|"(?:[^"\\]|\\.)*\"""", re.DOTALL)
+
+
+def _blank_run(m):
+    """A quoted run becomes a space; before a `#` it becomes ` _`, so the blank cannot turn a
+    mid-word `#` (`'a b'#x`, one shell word) into a comment that hides the rest of the line."""
+    run = m.group(0)
+    if run[0] == "\\":
+        return run
+    return " _" if m.string.startswith("#", m.end()) else " "
 
 
 def strip_quoted(command):
@@ -311,9 +594,11 @@ def strip_quoted(command):
     a read-only query) is a false positive; matching the command-token tiers against the stripped
     form removes that class. Observed live: a `gcloud logging read` with "delete" in the filter was
     flagged ask-impact under the Codex adapter. Order matters — unwrap first, blank second: blanking
-    alone treated `terraform "apply"` as a quoted argument and let it through. The SIGNATURE tier is
-    the exception (its match lives inside the quoted commit message) and keeps the raw command."""
-    return re.sub(r"'[^']*'|\"[^\"]*\"", " ", command)
+    alone treated `terraform "apply"` as a quoted argument and let it through. Escapes are honoured:
+    `echo \\" ; terraform apply ; echo \\"` holds no quoted run (the naive `"[^"]*"` blanked the
+    whole middle command). The SIGNATURE tier is the exception (its match lives inside the quoted
+    commit message) and keeps the raw command."""
+    return _QUOTED_RUN.sub(_blank_run, command)
 
 
 def segments(command):
@@ -333,15 +618,19 @@ _SHELL_C_FLAG = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
 
 
 def shell_c_layers(command, depth=3):
-    """[command, inner, …]: the command plus the script each `bash|sh|zsh -c/-lc '<cmd>'` wrapper
+    """Yield command, inner, …: the command plus the script each `bash|sh|zsh -c/-lc '<cmd>'` wrapper
     runs. A Codex argv-style call (`["bash", "-lc", "<cmd>"]`) can reach this hook joined as one
     string; strip_quoted() would blank the whole inner command, so every tier would miss it while
     capture_session.py's detector unwraps it. Accepted shapes: `<shell> [--norc|--noprofile|--login]…
     -<flags with c> '<cmd>' [arg0 args…]` — the inner layer is the word after the -c flag. The outer
     layer (anything chained or trailing included) is always evaluated FIRST, and _evaluate() only
-    ever emits ask/deny, so an extra inner layer can add a decision, never remove one."""
+    ever emits ask/deny, so an extra inner layer can add a decision, never remove one.
+
+    A GENERATOR: the outer command is yielded before any inner layer is parsed, so main() has fully
+    evaluated it before shlex ever runs — a parser fault on an inner layer can no longer demote the
+    outer command from the full tiers to the DANGER_PREFILTER fallback."""
+    yield command
     import shlex
-    layers = [command]
     for _ in range(depth):
         if not _SHELL_C_RE.match(command):
             break
@@ -355,9 +644,12 @@ def shell_c_layers(command, depth=3):
         if not (len(argv) > i + 1 and os.path.basename(argv[0]) in ("bash", "sh", "zsh")
                 and _SHELL_C_FLAG.fullmatch(argv[i])):
             break
-        command = normalize(argv[i + 1])
-        layers.append(command)
-    return layers
+        inner = argv[i + 1]
+        command = normalize(inner)
+        yield command
+        split = unjoin(inner) if _needs_unjoin(inner) else command
+        if split != command:
+            yield split  # each physical line of the inner script too (comment-continuation, see unjoin)
 
 # Self-gating, shadow gate, home resolution, and health logging live in the shared
 # hooks/bw_common.py substrate (one implementation for this hook and capture_session.py).
@@ -424,8 +716,25 @@ CODEX_REMEDY = {
 }
 
 
+# Per-invocation decision state. `decided`: a decision (including Codex's break-glass allow-once)
+# was reached, so no fallback may emit a second one. `budget_armed`: the evaluation timer is live.
+_STATE = {"decided": False, "budget_armed": False}
+
+
+def _settle():
+    """First step of every decision: disarm the evaluation budget BEFORE auditing/emitting (an alarm
+    inside _audit would otherwise abort the ask before it is printed), and record that a decision
+    exists so main()'s fallback never prints a second JSON object."""
+    if _STATE["budget_armed"]:
+        import signal
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        _STATE["budget_armed"] = False
+    _STATE["decided"] = True
+
+
 def _respond(adapter, tier, reason, command, project_dir):
     """Map a tier decision onto the adapter's decision contract (see ADAPTER MAPPING)."""
+    _settle()
     if adapter in ("antigravity", "gemini"):
         prefix = "antigravity:" if adapter == "antigravity" else "gemini:"
         _audit(prefix + AUDIT_EVENT[tier], command, project_dir)
@@ -445,6 +754,7 @@ def _decide_deny(adapter, reason, command, project_dir, event="deny"):
     """Hard deny — the error-path fail-closed deny and the signed-commit shape tier. Break-glass
     downgrades it to ask (claude/antigravity/gemini) or allow-once (codex, which has no ask).
     Audits every outcome; `event` labels the non-break-glass audit line."""
+    _settle()
     bg = os.environ.get("BAILIWICK_BREAK_GLASS") == "1"
     if adapter in ("antigravity", "gemini"):
         prefix = "antigravity:" if adapter == "antigravity" else "gemini:"
@@ -474,9 +784,9 @@ def _evaluate(command, adapter, payload, raw_command, project_dir):
     """Run the tiers on one command layer; True when a decision was emitted. Raises on an engine
     fault (main() applies the fail-closed pre-filter)."""
     # Command-token tiers (impact / go-ahead) match against the quote-stripped form so a verb inside
-    # a quoted argument isn't a false positive — but whole-token quoting is unwrapped first, since
-    # `terraform "apply"` is a command token the shell runs verbatim. The signature tier keeps
-    # `command` (needs the quotes).
+    # a quoted argument isn't a false positive — but shell words are folded first (whole-word,
+    # partial and backslash-escaped quoting), since `terraform "apply"` / `terraform ap"ply"` run as
+    # `terraform apply`. The signature tier keeps `command` (needs the quotes).
     cmd_tokens = strip_quoted(unwrap_token_quotes(command))
 
     # Evaluate tiers in order: /PURGE ASKS → EXEMPT → ASK-IMPACT → SIGNED-COMMIT SHAPE →
@@ -484,15 +794,23 @@ def _evaluate(command, adapter, payload, raw_command, project_dir):
     all_segs = segments(cmd_tokens)
     # /purge asks FIRST, on every segment and on the raw command: an EXEMPT claim can never swallow
     # them, and a command that is ONLY a quoted path blanks to nothing (hence the raw companions).
+    # They also read the form with value-shaped quotes unwrapped (`bash d=x"/…/mark_purge_session.sh"`
+    # would otherwise blank the script path): the script names are distinctive, so this costs no
+    # false positives, unlike the generic verbs.
     for raw_re, what in PURGE_RAW_ASKS:
         if raw_re.search(command):
             _respond(adapter, "impact", "HIGH-IMPACT: " + what
                      + " — blocked from agent initiative; re-confirm this is really the intent.",
                      raw_command, project_dir)
             return True
-    for seg in all_segs:
+    purge_segs = list(all_segs)
+    full_tokens = strip_quoted(unwrap_token_quotes(command, keep_values=False))
+    if full_tokens != cmd_tokens:  # only the segments a value-unwrap changed are re-checked
+        seen = set(all_segs)
+        purge_segs += [seg for seg in segments(full_tokens) if seg not in seen]
+    for seg in purge_segs:
         for pattern, _dry_exempt, what in PURGE_ASK_PATTERNS:
-            if re.search(pattern, seg, re.IGNORECASE):
+            if pattern.search(seg):
                 _respond(adapter, "impact", "HIGH-IMPACT: " + what
                          + " — blocked from agent initiative; re-confirm this is really the intent.",
                          raw_command, project_dir)
@@ -500,7 +818,7 @@ def _evaluate(command, adapter, payload, raw_command, project_dir):
     # Per-segment evaluation (ADR-006 amendment): EXEMPT clears only its own segment, and the
     # dry-run exemption only the segment that matched — neither speaks for a chained command.
     segs = [seg for seg in all_segs
-            if not (any(re.search(p, seg, re.IGNORECASE) for p in EXEMPT_PATTERNS)
+            if not (any(p.search(seg) for p in EXEMPT_PATTERNS)
                     and not EXEMPT_DISQUALIFIERS.search(seg))]
     if not segs:
         return False  # dirty-zone capture plumbing only — never blocked (data-loss prevention)
@@ -509,7 +827,7 @@ def _evaluate(command, adapter, payload, raw_command, project_dir):
         for pattern, dry_exempt, what in ASK_IMPACT_PATTERNS:
             if dry_exempt and seg_dry_run:
                 continue  # validation-only form in THIS segment — no real impact
-            if re.search(pattern, seg, re.IGNORECASE):
+            if pattern.search(seg):
                 _respond(adapter, "impact", "HIGH-IMPACT: " + what
                          + " — blocked from agent initiative; re-confirm this is really the intent.",
                          raw_command, project_dir)
@@ -537,17 +855,97 @@ def _evaluate(command, adapter, payload, raw_command, project_dir):
         return True
     for seg in segs:
         for pattern, reason in ASK_GOAHEAD_PATTERNS:
-            if re.search(pattern, seg, re.IGNORECASE):
+            if pattern.search(seg):
                 _respond(adapter, "goahead", reason, raw_command, project_dir)
                 return True
     return False
 
 
+def _field(obj, key):
+    """obj[key] when obj is a dict, else None — payload sub-objects are never trusted to be dicts."""
+    return obj.get(key) if isinstance(obj, dict) else None
+
+
+def command_text(value, adapter="claude"):
+    """Normalise a hook payload's command value to the one string the tiers read. A str stays; an
+    argv list/tuple of str is shell-joined (`["bash", "-lc", "terraform apply"]` ->
+    `bash -lc 'terraform apply'`, which shell_c_layers() then unwraps). Before this, a list reached
+    `.strip()` outside main()'s try, raised, and __main__'s catch-all exited 0 — a silent fail-open.
+    None/empty -> "" (nothing to evaluate). Any other shape (dict, number, a list holding a non-str)
+    -> None, with a health warning: main() then runs the fail-closed pre-filter over its JSON."""
+    if value is None or isinstance(value, str):
+        return value or ""
+    if isinstance(value, (list, tuple)) and all(isinstance(item, str) for item in value):
+        import shlex
+        return shlex.join(value)
+    _health("warn", "unsupported command value ({}): {} — pre-filter only".format(
+        adapter, type(value).__name__))
+    return None
+
+
+# Wall-clock budget for the tier evaluation. Codex and Antigravity kill a hook at 30 s, and a killed
+# hook FAILS OPEN — so a pathological command that out-ran the matcher would run unconfirmed. On
+# expiry the command is DENIED unconditionally (break-glass semantics as the error path): an overrun
+# says nothing about which tier would have matched, and the pre-filter cannot stand in for the full
+# tiers (a 24 MB `echo …; git push` once overran and was allowed). POSIX only (SIGALRM, main thread);
+# elsewhere a no-op, leaving the linear matchers as the only guard.
+EVAL_BUDGET_SECONDS = 10.0
+
+
+class EvaluationBudgetExceeded(BaseException):
+    """Raised by the SIGALRM handler when the tier evaluation overruns EVAL_BUDGET_SECONDS. A
+    BaseException on purpose: the `except Exception` guards in repo_signs()/file_has_signature()/
+    _audit() must not swallow it (the timer fires once — a swallowed expiry ran the rest unbudgeted)."""
+
+
+def _run_with_budget(fn, seconds):
+    """fn() under a SIGALRM interval timer; the timer and the previous handler are always restored
+    before returning or raising. A decision disarms the timer itself (see _settle)."""
+    import signal
+    import threading
+    if not hasattr(signal, "setitimer") or threading.current_thread() is not threading.main_thread():
+        return fn()
+
+    def _expired(signum, frame):
+        _STATE["budget_armed"] = False
+        raise EvaluationBudgetExceeded("evaluation exceeded {}s".format(seconds))
+
+    previous = signal.signal(signal.SIGALRM, _expired)
+    _STATE["budget_armed"] = True
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        return fn()
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        _STATE["budget_armed"] = False
+        signal.signal(signal.SIGALRM, previous)
+
+
+def _evaluate_layers(raw_command, adapter, payload, project_dir):
+    """Every layer of every form, as-given first: the joined command, the script inside each
+    `bash -c '<cmd>'` wrapper (see shell_c_layers), then the unjoined form's layers (see unjoin).
+    The first layer that draws a decision ends the evaluation; layers already seen are skipped. The
+    generators yield the outer command before parsing any inner layer, so the outer command always
+    gets the full tiers even if inner parsing faults."""
+    seen = set()
+    for form in command_forms(raw_command):
+        for layer in shell_c_layers(form):
+            if layer in seen:
+                continue
+            seen.add(layer)
+            if _evaluate(layer, adapter, payload, raw_command, project_dir):
+                return True
+    return False
+
+
 def main(adapter="claude"):
+    _STATE["decided"] = False
     try:
         payload = json.load(sys.stdin)
     except Exception:
         return 0  # Fail open — never wedge the harness on a malformed payload.
+    if not isinstance(payload, dict):
+        return 0  # Same: nothing to evaluate.
 
     tool_call = payload.get("toolCall")
     if adapter in ("antigravity", "gemini"):
@@ -557,34 +955,63 @@ def main(adapter="claude"):
             tool = tool_call.get("name") or ""
             if tool != "run_command":
                 return 0
-            raw_command = (tool_call.get("args") or {}).get("CommandLine") or ""
+            value = _field(tool_call.get("args"), "CommandLine")
         else:
             tool = payload.get("tool_name") or ""
             if tool not in ("run_shell_command", "run_command"):
                 return 0
-            raw_command = ((payload.get("tool_input") or {}).get("command") or "")
+            value = _field(payload.get("tool_input"), "command")
     else:
         tool = payload.get("tool_name") or ""
         if tool != "Bash":  # claude and codex both use the canonical "Bash" tool name
             return 0
-        raw_command = ((payload.get("tool_input") or {}).get("command") or "")
+        value = _field(payload.get("tool_input"), "command")
 
-    if not raw_command.strip():
+    raw_command = command_text(value, adapter)
+    if raw_command is not None and not raw_command.strip():
         return 0
-    command = normalize(raw_command)
     # Antigravity carries workspacePaths / cwd; Gemini exports CLAUDE_PROJECT_DIR; Codex cwd.
     project_dir = bw_common.resolve_project_dir(payload)
     if not (is_bailiwick_repo(project_dir) or is_shadow_repo(project_dir)):
         return 0  # Inert outside bailiwick-wired repos (seeded or shadow-activated).
+    if _PREFILTER_ERROR is not None:
+        _health("error", "pre-filter failed to compile — fallbacks deny everything: {!r}".format(
+            _PREFILTER_ERROR)[:200])
+
+    if raw_command is None:
+        # A command shape no adapter documents: the tiers cannot read it, but it must not be a plain
+        # fail-open either — the error path's pre-filter decides over its JSON text.
+        try:
+            blob = json.dumps(value, ensure_ascii=False, default=str)
+            if DANGER_PREFILTER.search(blob):
+                _decide_deny(adapter, "unsupported command shape that looks destructive — denied "
+                             "(fail-closed, ADR-005). Set BAILIWICK_BREAK_GLASS=1 to override "
+                             "deliberately.", blob, project_dir, event="deny-unsupported-shape")
+        except Exception:
+            pass
+        return 0
 
     try:
-        # The command as given, then the script inside each `bash -c '<cmd>'` wrapper (see
-        # shell_c_layers): the first layer that draws a decision ends the evaluation.
-        for layer in shell_c_layers(command):
-            if _evaluate(layer, adapter, payload, raw_command, project_dir):
-                return 0
+        if _TABLE_ERROR is not None:
+            raise RuntimeError("tier tables failed to compile: {!r}".format(_TABLE_ERROR))
+        if _run_with_budget(lambda: _evaluate_layers(raw_command, adapter, payload, project_dir),
+                            EVAL_BUDGET_SECONDS):
+            return 0
+    except EvaluationBudgetExceeded as e:
+        _health("error", "evaluation budget exceeded ({}): {}".format(adapter, e)[:200])
+        if not _STATE["decided"]:
+            try:
+                _decide_deny(
+                    adapter,
+                    "guardrail evaluation exceeded its time budget — denied (fail-closed, ADR-005); "
+                    "the command could not be checked. Set BAILIWICK_BREAK_GLASS=1 to override "
+                    "deliberately.", raw_command, project_dir, event="deny-budget")
+            except Exception:
+                pass
     except Exception as e:
         _health("error", "pattern engine failure ({}): {!r}".format(adapter, e)[:200])
+        if _STATE["decided"]:
+            return 0  # a decision is already out — never print a second one
         try:
             # ADR-005: the pre-filter runs on the RAW command. Feeding it the quote-stripped form
             # let the same quoting trick that evades the tiers also blind the fail-closed path.

@@ -39,20 +39,61 @@ Modes:
       Write a git-filter-repo expressions file (`regex:(?i)<pattern>==>[redacted]` per line) for
       `--replace-text` and `--replace-message` (docs/history-purge.md §1).
 
+  check   --tokens <file> <file>...
+      READ-ONLY outbound-text gate (the Advisor brief, commit message, branch/slug, PR title and
+      body files). Writes nothing and has no --apply. Counts token hits over several views of each
+      file, so an encoded or re-separated identifier cannot slip past the plain `grep -ciE` check:
+        raw         the text as-is, with the matching rule above (JSON-escaped forms included);
+        separators  token and text are FOLDED alike (NFKD, so fullwidth and NBSP forms collapse;
+                    combining marks dropped, so `conceicao` hits a token spelled with cedilla and
+                    tilde; o-slash, ae, sharp s, stroke letters, oe, thorn, eth, dotless i spelled
+                    out in Latin; Unicode dashes -> `-`; Unicode spaces and format characters
+                    such as a zero-width space -> a space). Then `-`, `_`, `.`, `/` and whitespace are
+                    equivalent to each other and to nothing: the token's separators are dropped and
+                    `[-_./\\s]*` is allowed between every remaining character, so `acme-drill` also
+                    hits `acme_drill`, `ACME.Drill`, `acme/drill`, `acme drill`, `acmedrill`, an
+                    en-dash or zero-width-space spelling, `acme-\\n  drill`, `ac-me-drill`. The text
+                    is not stripped of separators, so a short token keeps its alphanumeric
+                    boundaries (`adi` hits `a.d.i` standalone, never inside `radius` or `a-dim`);
+        url         percent-decoded (`+` is a space), repeated until stable, at most 3 rounds;
+        html        html.unescape, repeated until stable, at most 3 rounds;
+        base64      every `[A-Za-z0-9+/_-]{8,}={0,2}` run, standard and URL-safe alphabets, decoded
+                    as-is and with its first 1-3 characters dropped (realigns a run glued to a
+                    preceding word: the 4-character groups then line up again);
+        hex         every run of 8+ hex digits, decoded at offsets 0 and 1.
+      Decoded bytes are read as UTF-8; only printable stretches of 4+ characters are searched, so
+      binary noise does not invent hits. Every view except raw/separators is searched only when the
+      decoding changed something, with the raw matcher and with the separators matcher on its fold.
+      The count is therefore a HIT COUNT ACROSS VIEWS, not a number of distinct traces: one plain
+      mention shows as 2 (raw + separators). It is a must-be-zero gate.
+      NOT covered (a human still reads the text): `\\xNN` escapes, quoted-printable, base64 wrapped
+      across lines, UTF-16, homoglyphs NFKD does not fold (Cyrillic `a`, Greek `o`), layered
+      encodings (base64 of URL-encoded text), and base64 of a bare token too short for an 8-character
+      run (a 3-5 character token on its own).
+      Prints only counts (per file, per view, and a total); never a token, an excerpt, or a
+      token-bearing file name. Each file is read up to 5 MB; a larger file is an error, never a
+      silently truncated scan. Exit 0 total 0; 1 any hit; 2 an error (unreadable, missing or empty
+      tokens file, refused short token, missing/oversized/non-regular file); never a false 0.
+
 Tokens shorter than 3 characters are refused (they would redact unrelated text) unless
 --allow-short is given.
 
 Never prints a token, a matched line, or a path that matches a token. Output files are mode 0600.
-Exit: 0 ok (a dry run that finds matches is still 0), 1 a file was not rewritten, 2 usage error or
-a refused target.
+Exit: 0 ok (a dry run that finds matches is still 0), 1 a file was not rewritten (check: a hit), 2
+usage error, an unreadable/empty tokens file, or a refused target.
 """
 import argparse
+import base64
+import binascii
+import html
 import json
 import os
 import re
 import stat
 import sys
 import tempfile
+import unicodedata
+import urllib.parse
 
 REDACTION = "[redacted]"
 SHORT = 4  # tokens this long or shorter match on alphanumeric boundaries only
@@ -262,6 +303,210 @@ def write_private(path, lines):
     print("wrote {} pattern line(s) (mode 0600)".format(len(lines)))
 
 
+# ---- check: read-only, encoding-aware outbound-text gate -----------------------------------------
+
+CHECK_MAX_BYTES = 5 * 1024 * 1024
+_SEP_CHARS = "-_./"  # plus any whitespace; fold() maps Unicode dashes, spaces and format chars here
+# Possessive (3.11+) where available: the class never overlaps a token character, so giving back a
+# separator can never help a match; possessive just skips the futile backtracking.
+_SEP_CLASS = r"[-_./\s]*+" if sys.version_info >= (3, 11) else r"[-_./\s]*"
+_B64_RUN = re.compile(r"[A-Za-z0-9+/_-]{8,}={0,2}")
+_HEX_RUN = re.compile(r"[0-9A-Fa-f]{8,}")
+_B64URL = str.maketrans("-_", "+/")
+_DECODE_ROUNDS = 3
+_MIN_SEGMENT = 4  # printable stretch a decoded blob must contain to be searched
+_NONPRINT = re.compile("[\x00-\x08\x0a-\x1f\x7f-\x9f\ufffd\u2028\u2029]+")
+CHECK_VIEWS = ("raw", "separators", "url", "html", "base64", "hex")
+# Letters NFKD leaves whole (no combining-mark decomposition): o-slash, ae, sharp s (and capital),
+# l/d with stroke, oe, thorn, eth, dotless i, h with stroke. Mapped to their usual Latin spellings.
+_FOLD_LETTERS = {
+    0x00D8: "O", 0x00F8: "o", 0x00C6: "AE", 0x00E6: "ae", 0x00DF: "ss", 0x1E9E: "SS",
+    0x0141: "L", 0x0142: "l", 0x0110: "D", 0x0111: "d", 0x0152: "OE", 0x0153: "oe",
+    0x00DE: "TH", 0x00FE: "th", 0x00D0: "D", 0x00F0: "d", 0x0131: "i", 0x0126: "H", 0x0127: "h",
+}
+
+
+def fold(text):
+    """Compatibility fold for the separators matcher, applied to tokens and text alike: NFKD
+    (fullwidth `\uff21` -> `A`, ligatures, NBSP -> space), combining marks (Mn) dropped
+    (`conceicao` == `conceic\u0327a\u0303o`), Unicode dashes (Pd) -> `-`, and spaces (Zs/Zl/Zp)
+    and format characters (Cf: zero-width space, soft hyphen, bidi controls) -> a space. A Cf is
+    mapped to a separator rather than deleted: separators are equivalent to nothing, so
+    `acme\u200bdrill` still hits, and a zero-width character next to a short token stays a boundary.
+    Letters NFKD leaves whole (o-slash, ae, sharp s, l/d/h with stroke, oe, thorn, eth, dotless i)
+    map to their Latin spellings (_FOLD_LETTERS), so a token `orsted` and a token spelled with
+    o-slash both hit either spelling.
+    ASCII text is returned untouched; the table is built from the text's distinct characters only."""
+    if text.isascii():
+        return text
+    text = unicodedata.normalize("NFKD", text)
+    table = {}
+    for ch in set(text):
+        if ord(ch) < 128:
+            continue
+        if ord(ch) in _FOLD_LETTERS:
+            table[ord(ch)] = _FOLD_LETTERS[ord(ch)]
+            continue
+        cat = unicodedata.category(ch)
+        if cat == "Mn":
+            table[ord(ch)] = None
+        elif cat == "Pd":
+            table[ord(ch)] = "-"
+        elif cat in ("Zs", "Zl", "Zp", "Cf"):
+            table[ord(ch)] = " "
+    return text.translate(table) if table else text
+
+
+def _sep_core(tok):
+    return "".join(c for c in fold(tok) if c not in _SEP_CHARS and not c.isspace())
+
+
+def sep_matcher(tokens):
+    """Separator-tolerant matcher over FOLDED text (search `fold(text)`): the folded token with its
+    separators dropped, `[-_./\\s]*` allowed between every remaining character, the short-token
+    boundary rule kept. Equivalent to normalising both sides, without destroying the boundaries a
+    short token needs. The class never overlaps the token's own characters, so matching stays
+    linear."""
+    alts = []
+    for tok in tokens:
+        core = _sep_core(tok)
+        if not core:
+            continue
+        body = _SEP_CLASS.join(re.escape(c) for c in core)
+        alts.append(r"(?<![a-z0-9])" + body + r"(?![a-z0-9])" if is_short(core) else body)
+    return re.compile("|".join(alts), re.IGNORECASE) if alts else None
+
+
+def _repeat(fn, text):
+    out = text
+    for _ in range(_DECODE_ROUNDS):
+        nxt = fn(out)
+        if nxt == out:
+            break
+        out = nxt
+    return out
+
+
+def _printable(data):
+    """Printable stretches (>= _MIN_SEGMENT chars) of bytes read as UTF-8, newline-joined. Control
+    characters, line breaks and U+FFFD (an invalid byte) split stretches; space and tab do not."""
+    parts = _NONPRINT.split(data.decode("utf-8", errors="replace"))
+    return "\n".join(s for s in parts if len(s) >= _MIN_SEGMENT)
+
+
+def _b64_decode(run):
+    s = run.rstrip("=").translate(_B64URL)
+    if len(s) % 4 == 1:  # one dangling character cannot encode a byte
+        s = s[:-1]
+    try:
+        return base64.b64decode(s + "=" * (-len(s) % 4), validate=True)
+    except (binascii.Error, ValueError):
+        return b""
+
+
+def _b64_view(text):
+    out = []
+    for m in _B64_RUN.finditer(text):
+        run = m.group(0)
+        for drop in range(4):
+            if len(run) - drop >= 8:
+                seg = _printable(_b64_decode(run[drop:]))
+                if seg:
+                    out.append(seg)
+    return "\n".join(out)
+
+
+def _hex_view(text):
+    out = []
+    for m in _HEX_RUN.finditer(text):
+        run = m.group(0)
+        for off in (0, 1):
+            part = run[off:]
+            part = part[:len(part) - len(part) % 2]
+            if len(part) >= 8:
+                seg = _printable(bytes.fromhex(part))
+                if seg:
+                    out.append(seg)
+    return "\n".join(out)
+
+
+def check_views(text):
+    """(view name, text) pairs to search. raw is always searched; a decoded view only when the
+    decoding changed or produced something (otherwise it would only re-count raw)."""
+    url = _repeat(urllib.parse.unquote_plus, text)
+    htm = _repeat(html.unescape, text)
+    return [("raw", text), ("url", url if url != text else ""), ("html", htm if htm != text else ""),
+            ("base64", _b64_view(text)), ("hex", _hex_view(text))]
+
+
+def check_counts(text, rx, srx):
+    """Hits per CHECK_VIEWS name. `separators` is the separator-tolerant matcher over the folded
+    raw text; each decoded view adds the raw matcher's hits on it and the separators matcher's
+    hits on its fold (so `acme&#8209;drill` hits once html-decoded and folded)."""
+    def hits(r, t):
+        return sum(1 for _ in r.finditer(t)) if r is not None and t else 0
+    counts = dict.fromkeys(CHECK_VIEWS, 0)
+    for name, view in check_views(text):
+        if name == "raw":
+            counts["raw"] = hits(rx, view)
+            counts["separators"] = hits(srx, fold(view))
+        else:
+            counts[name] = hits(rx, view) + hits(srx, fold(view))
+    return counts
+
+
+def _check_label(given, k, rx, srx):
+    base = os.path.basename(given)
+    if (rx.search(given) if rx is not None else None) or (srx is not None and srx.search(fold(given))):
+        return "file #{} (name withheld: it matches a token)".format(k)
+    return "file #{} {}".format(k, base)
+
+
+def check(tokens, files):
+    rx, _ = matcher(tokens)
+    srx = sep_matcher(tokens)
+    total, errors = 0, 0
+    for k, given in enumerate(files, 1):
+        label = _check_label(given, k, rx, srx)
+        try:
+            if not os.path.isfile(given):
+                raise ValueError("missing or not a regular file")
+            with open(given, "rb") as fh:
+                data = fh.read(CHECK_MAX_BYTES + 1)
+            if len(data) > CHECK_MAX_BYTES:
+                raise ValueError("larger than {} bytes: split it; a truncated scan is refused"
+                                 .format(CHECK_MAX_BYTES))
+        except (OSError, ValueError) as exc:
+            # Never echo an OSError's own text: it carries the path, which may bear a token.
+            why = exc if isinstance(exc, ValueError) else "unreadable ({})".format(type(exc).__name__)
+            print("{}: error: {}".format(label, why), file=sys.stderr)
+            errors += 1
+            continue
+        counts = check_counts(data.decode("utf-8", errors="replace"), rx, srx)
+        n = sum(counts.values())
+        total += n
+        print("{}: {} ({})".format(label, n, ", ".join("{} {}".format(v, counts[v]) for v in CHECK_VIEWS)))
+    print("total: {} hit(s) across views{}".format(total, "; {} file error(s)".format(errors) if errors else ""))
+    if errors:
+        return 2
+    return 1 if total else 0
+
+
+def load_tokens(path, allow_short):
+    """read_tokens for main(): an unreadable, empty or refused tokens file is a usage error (exit 2),
+    never a traceback and never a false clean. The messages never echo a token."""
+    try:
+        return read_tokens(path, allow_short=allow_short), 0
+    except SystemExit as exc:
+        if not isinstance(exc.code, str):
+            raise
+        print(exc.code, file=sys.stderr)
+    except (OSError, UnicodeDecodeError) as exc:
+        print("purge_scrub: cannot read the tokens file ({}); refusing".format(type(exc).__name__),
+              file=sys.stderr)
+    return None, 2
+
+
 def main(argv=None):
     # allow_abbrev=False on EVERY parser: argparse would otherwise accept `--ap`/`--app`/`--appl` for
     # `--apply`, which the guardrail's `--apply` ask never sees (an unconfirmed in-place rewrite).
@@ -282,11 +527,19 @@ def main(argv=None):
         p = sub.add_parser(name, allow_abbrev=False)
         p.add_argument("--tokens", required=True)
         p.add_argument("--out", required=True)
-    for p in (s, h) + tuple(sub.choices[n] for n in ("ere", "exprs")):
+    c = sub.add_parser("check", allow_abbrev=False,
+                       help="read-only: count token hits, encoded variants included (no --apply)")
+    c.add_argument("--tokens", required=True)
+    c.add_argument("files", nargs="+")
+    for p in (s, h, c) + tuple(sub.choices[n] for n in ("ere", "exprs")):
         p.add_argument("--allow-short", action="store_true",
                        help="accept tokens shorter than {} characters".format(MIN_LEN))
     a = ap.parse_args(argv)
-    tokens = read_tokens(a.tokens, allow_short=a.allow_short)
+    tokens, rc = load_tokens(a.tokens, a.allow_short)
+    if rc:
+        return rc
+    if a.mode == "check":
+        return check(tokens, a.files)
     if a.mode == "scrub":
         return check_targets("scrub", tokens, a.files) or scrub(tokens, a.files, write=a.apply)
     if a.mode == "history":

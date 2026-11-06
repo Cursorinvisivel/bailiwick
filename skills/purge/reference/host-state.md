@@ -68,10 +68,13 @@ assume it:
    written only when something was removed, or at SessionEnd. So 0 mid-session is fine when (3) is
    clean. It reads `capture skipped: purge session (earlier capture files removed: N; backup
    retraction requested: yes|no; backup retractions pending: M)`.
-2. With backup enabled, the pending-retraction ledger `$BAILIWICK_HOME/backup-retract.pending` is
-   absent or empty (`wc -l`). Each completed retraction logs a `purge ok (<hash12>)` health line. A
-   remaining ledger line means a retraction has not completed (for example, the mirror was busy or
-   the push failed).
+2. With backup enabled, the pending-retraction ledger `$BAILIWICK_HOME/backup-retract.pending` and
+   any spool file next to it (`backup-retract.pending.spool-*`, written when the ledger lock was
+   busy) are absent or empty: `find "${BAILIWICK_HOME:-$HOME/.bailiwick}/" -maxdepth 1 -type f -name
+   'backup-retract.pending*' -exec cat {} + 2>/dev/null | wc -l` prints `0` (the trailing `/`
+   follows a symlinked home; `-type f` skips the `.lock` directory; no glob, so zsh prints no
+   "no matches found"). Each completed retraction logs a `purge ok (<hash12>)` health line. A remaining line in the ledger or a spool
+   means a retraction has not completed (for example, the mirror was busy or the push failed).
 3. No `<sid>.jsonl` or `<sid>.md` remains in `<repo>/.bailiwick-outputs/raw/` or
    `$BAILIWICK_HOME/captures/<repo-key>/raw/` (`ls`).
 

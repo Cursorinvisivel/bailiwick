@@ -131,6 +131,21 @@ def session_captures(root, marker):
     return sorted(out)
 
 
+TELEMETRY = "framework/knowledge/.telemetry.json"
+
+
+def sandbox_role(root):
+    """The sandbox framework's machine role (`.bailiwick-sync.json` `role`); satellite when unset, as
+    in the framework. On a satellite the purge skill never edits `.telemetry.json` (central-owned), so a
+    trace with `satellite_expected` is scored by that expectation instead of `expected`."""
+    try:
+        with open(os.path.join(root, "framework", ".bailiwick-sync.json"), encoding="utf-8") as fh:
+            role = json.load(fh).get("role")
+    except (OSError, ValueError, AttributeError):
+        role = None
+    return role if role in ("central", "satellite") else "satellite"
+
+
 def _skip_configured(root, marker):
     try:
         with open(os.path.join(root, "framework", ".bailiwick-sync.json"), encoding="utf-8") as fh:
@@ -182,11 +197,17 @@ def score(root, session=None):
     named, pats, b64 = patterns(key)
     all_pats = pats + b64
 
+    role = sandbox_role(root)
     traces = []
     for tr in key["traces"]:
         n = probe(root, key, named, tr["probe"], marker)
-        exp = tr["expected"]
-        if exp == "residual-expected":
+        exp = tr.get("satellite_expected", tr["expected"]) if role == "satellite" else tr["expected"]
+        if exp == "pending-central":
+            # Central-owned state on a satellite: it must stay for central to purge. Gone means the run
+            # edited central-owned telemetry from a satellite, which the skill forbids.
+            ok = n > 0
+            status = "pending central (satellite)" if ok else "EDITED ON SATELLITE"
+        elif exp == "residual-expected":
             status = "residual (expected for tier)" if n else "gone (beyond tier)"
             ok = True
         elif exp == "pending-user-action":
@@ -218,7 +239,8 @@ def score(root, session=None):
 
     sess = session_captures(root, marker)
     sess_hits = sum(sum(dc.scan_file(os.path.join(root, s), all_pats).values()) for s in sess)
-    raw_sweep = dc.sweep(root, key["sweep_roots"], all_pats, pats, exclude=key["sweep_exclude"] + sess)
+    exclude = key["sweep_exclude"] + sess + ([TELEMETRY] if role == "satellite" else [])
+    raw_sweep = dc.sweep(root, key["sweep_roots"], all_pats, pats, exclude=exclude)
     sweep = dc.subtract_baseline(raw_sweep, marker.get("sweep_baseline") or {})
 
     fw = os.path.join(root, "framework")
@@ -245,10 +267,14 @@ def score(root, session=None):
         "capture_skip_configured": _skip_configured(root, marker),
         "transcript_files_with_hits": transcripts["files_with_hits"],
         "user_action_pending": sum(1 for t in traces if t["expected"] == "pending-user-action" and t["matches"]),
+        "role": role,
+        "central_pending": sum(1 for t in traces if t["expected"] == "pending-central" and t["matches"]),
+        "satellite_violations": sum(1 for t in traces if t["expected"] == "pending-central" and not t["ok"]),
         "sweep_baseline_paths": len(marker.get("sweep_baseline") or {}),
     }
     summary["perfect"] = bool(summary["removal_rate"] == 1.0 and rule["survives"] and client_deleted
-                              and not summary["over_deletions"] and not sweep)
+                              and not summary["over_deletions"] and not sweep
+                              and not summary["satellite_violations"])
     summary["session_found"] = dc.session_found(stages)
     if stages and stages.get("session"):
         summary.update(dc.stage_summary(stages))
