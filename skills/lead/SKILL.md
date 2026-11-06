@@ -237,7 +237,7 @@ where `/curate` gathers, using the same seeded/shadow split as `/learn` (seeded 
 
 - **seeded** → the project's `.bailiwick-outputs/`. Verify the path is git-ignored first; if it
   is not, keep the report in the conversation and disclose why it was not persisted.
-- **shadow** → `~/.bailiwick/captures/<repo-key>/` (`$BAILIWICK_HOME/captures/` if set), with
+- **shadow** → `$BAILIWICK_HOME/captures/<repo-key>/` (`$BAILIWICK_HOME`, default `~/.bailiwick`), with
   `<repo-key>` computed by `capture_session.repo_key` as `/learn` does. Nothing is written into
   the repository.
 

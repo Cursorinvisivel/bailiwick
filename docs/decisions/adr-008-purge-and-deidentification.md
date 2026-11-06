@@ -117,3 +117,45 @@ is now **measured, gated, and documented** instead of merely named.
   erases them all at once), and the host-side residuals a force-push does not remove (SHA-fetchable
   objects until server GC; `refs/pull/*` pinned permanently; support request for guaranteed
   removal).
+
+## Amendment 2 (2026-11-03) — the purge session itself, host state, and per-surface verification
+
+The purge session holds the identifiers verbatim (plan diffs, briefs, reviewer reports), so it must
+not become the next residual.
+
+- **Hook-level exclusion.** `hooks/capture_session.py` never captures or backs up a session whose
+  user typed `/purge` (or `$bailiwick-purge`, or a name in `capture.skip_skills`), or whose main
+  transcript ran the sentinel `hooks/mark_purge_session.sh` (Step 1) **successfully**: the sentinel
+  call counts only once its paired result (same `tool_use_id` / `call_id`) is not an error, exits 0,
+  and carries the script's fixed success line, so a declined guardrail ask or a Codex deny leaves the
+  session captured. For these trusted triggers it deletes earlier captures of that session and queues
+  backup retraction through a hash-only ledger (`$BAILIWICK_HOME/backup-retract.pending`, drained by
+  `capture_backup.sh retract`). If detection errors, the capture is held local
+  (`purge_detection: error`). Because the sentinel disables capture and deletes captures, it is a
+  high-impact action: the guardrail asks the user to confirm it (Codex: deny; `/purge` there is
+  detected from the typed `$bailiwick-purge`), and a sentinel in a subagent transcript is ignored.
+  **Agent-originated triggers are unconfirmed**: a model `Skill(skill="purge")` call, a Codex injected
+  `<skill>` body on its own, a code-mode `exec` sentinel, and any detector in a subagent transcript
+  only hold the capture local through the same `purge_detection: error` line. Nothing is deleted or
+  retracted, and the health line names the detector with an ` (unconfirmed)` suffix. When both tiers
+  occur, the trusted one wins. Residual: an agent-originated trigger (including a prompt-injected
+  subagent) can keep one session's capture off the backup. It stays held local, is never deleted, and
+  shows in the health line as `unconfirmed`, so it is detectable, not silent. The skip's health line
+  names only the detector (skill / slash command / sentinel / config).
+- **Log scrubbing is confined.** `scripts/purge_scrub.py scrub` is a dry run unless `--apply`
+  (guardrail-asked), rewrites only `$BAILIWICK_HOME/guardrail-audit.log` and `$BAILIWICK_HOME/health/**`
+  (`history` only `${CLAUDE_CONFIG_DIR:-~/.claude}/history.jsonl`), refuses symlinks, and refuses
+  tokens under 3 characters unless `--allow-short`: the audit log is the guardrail's own record, so
+  the redaction tool must not double as an unconfirmed general rewriter.
+- **Telemetry is scrubbed on the central only.** `.telemetry.json` is central-owned; on a satellite
+  `/purge` skips the telemetry step and reports it "pending central purge".
+- **Host agent state is a user-run residual.** Claude Code's own state under
+  `${CLAUDE_CONFIG_DIR:-~/.claude}` (`projects/<session>`, `file-history/<session>`, `history.jsonl`
+  lines, ...) is outside the hook's reach. `/purge` lists the commands; the user runs them.
+- **Per-surface verification record.** Each Step 2 surface is recorded `tool`, `manual`, or
+  `not checked`, with its residual count, and is reviewed independently (opus/medium).
+- **Commit messages never name identifiers.** Purge commits and all backup-repo commit messages and
+  health lines use hashes (`capture: <machine>/<repo12> <ts>`, `purge: <rel12> (curated)`). Blob paths
+  still carry the repo name (residual).
+- **History rewrite covers messages and paths.** `--history` output uses `--replace-text` and
+  `--replace-message`, plus token-path removal and post-rewrite checks (verified 2026-11-03, git 2.53).

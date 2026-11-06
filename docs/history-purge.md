@@ -25,10 +25,29 @@ lists every machine seen in the health shards — their *local-only* staging is 
 so before proceeding, each listed machine must confirm its own SessionStart nag / `doctor` is
 clean. Freeze new work fleet-wide (no sessions in wired repos) until you finish.
 
+Run everything on this page from a **plain shell whose history is not saved** (`bash --norc`, then
+`unset HISTFILE`). The commands carry the tokens, and an agent session or a saved shell history
+would record them again. `bash --norc` skips your profile, so set `BAILIWICK=<path to the clone>`.
+
+Write the tokens **once**, to a private temp file that every command below reads. No token is
+regex-escaped by hand. `scripts/purge_scrub.py` (the matcher `/purge` uses everywhere) derives the
+grep patterns and the filter-repo expressions from it. A token of 4 characters or fewer matches
+only on alphanumeric boundaries, so `adi` never rewrites "loading"; longer tokens match as
+case-insensitive substrings:
+
+```bash
+T=$(mktemp) && chmod 600 "$T"
+printf '%s\n' '<id>' '<org-token>' '<org name>' > "$T"     # plus every variant /purge Step 3a found
+python3 -I "$BAILIWICK/scripts/purge_scrub.py" ere   --tokens "$T" --out "$T.ere"    # for grep -iE -f
+python3 -I "$BAILIWICK/scripts/purge_scrub.py" exprs --tokens "$T" --out "$T.expr"   # for filter-repo
+```
+
+Remove all three (`rm -f -- "$T" "$T.ere" "$T.expr"`) once §4 verifies.
+
 Then measure the starting state, so "after" means something:
 
 ```bash
-bash scripts/purge_verify.sh residual <id> "<org token>" "<org name>" \
+bash scripts/purge_verify.sh residual --tokens-file "$T" \
   --backup-path <machine>/<repo-key>/        # repeat per matched subtree from /purge Step 2
 ```
 
@@ -39,15 +58,48 @@ when the procedure is verified — it is itself a copy of everything you are rem
 
 ### Path A — surgical rewrite (keep history, remove the identifiers)
 
-Use when the history is worth keeping and only the client must vanish:
+Use when the history is worth keeping and only the client must vanish. Run it in a **fresh
+clone**: filter-repo refuses to run elsewhere, so don't reach for `--force` in your working clone.
+
+It runs as **two passes, in this order, in the same fresh clone**:
 
 ```bash
-git filter-repo --replace-text <(printf '%s==>[redacted]\n' '<id>' '<org-token>' '<org name>') \
-                --path knowledge/clients/<id>/ --path definitions/clients/<id>/ --invert-paths
+# Pass 1: file contents, and commit and tag messages (one expressions file feeds both flags)
+git filter-repo --replace-text "$T.expr" --replace-message "$T.expr"
+# Pass 2: token-named paths
+git filter-repo --path knowledge/clients/<id>/ --path definitions/clients/<id>/ \
+  --path-glob '*<id>*' --path-glob '*<org-token>*' --invert-paths
 ```
 
-Every commit hash after the earliest touched commit changes. Commit *messages* containing the
-tokens are also rewritten by `--replace-text` (message and diff both).
+Three surfaces, three mechanisms. None of them covers another's:
+
+- **File contents** (pass 1): `--replace-text`. It rewrites blob contents only, **not** commit
+  messages and **not** file names.
+- **Commit and tag messages** (pass 1): `--replace-message`, fed the same expressions file. Use a
+  real file: a `<(…)` process substitution can be read only once, so it cannot feed both flags.
+- **File and directory names** (pass 2): path filtering. `--path-glob '*<tok>*' --invert-paths`
+  drops every path containing a token. Globs are case-sensitive, so add one per case variant found
+  by `/purge` Step 2. Use `--path-rename OLD:NEW` for a path whose history you keep. Preview first:
+  `git log --all --name-only --format= | sort -u | grep -ciE -f "$T.ere"` (drop `-c` to see the
+  paths). A glob is a plain substring, so a short token can match unrelated paths. Use
+  `--path-rename` for those.
+
+Branch and tag *names* carrying a token are renamed by hand. Every commit hash after the earliest
+touched commit changes. Flag names follow the git-filter-repo manual. Verified 2026-11-03 (git 2.53)
+as the two invocations above: pass 1 (`--replace-text` plus `--replace-message`) rewrites contents
+and messages, then pass 2 (`--path …`/`--path-glob …` with `--invert-paths`) removes token-named
+paths. It can run without installing: `uvx --from git-filter-repo git-filter-repo`. **Caveat:** it
+aborts with `ValueError: dictionary update sequence element … has length 1` when any git config value
+spans multiple lines (e.g. a shell-function alias in `~/.gitconfig`). Prefix each pass with
+`GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1` (it needs no user config).
+
+**Post-rewrite checks.** Each must print `0`:
+
+```bash
+git log --all --format=%B                          | grep -ciE -f "$T.ere"  # messages
+git log --all --name-only --format=                | grep -ciE -f "$T.ere"  # paths
+git for-each-ref --format='%(refname) %(contents)' | grep -ciE -f "$T.ere"  # ref names, tag messages
+```
 
 ### Path B — orphan squash (remove ALL older commits)
 
@@ -101,8 +153,15 @@ key is gone:
 3. Verify every retained blob decrypts with the NEW key alone.
 4. **Destroy the old private key** — `gpg --delete-secret-keys <old-fpr>` on the curating machine,
    plus every backup of that key (paper, password manager, disk images). This is the erasure.
-5. Optionally still rewrite the holding-repo history (step above) for hygiene — after key
-   destruction it removes only undecryptable bytes.
+5. Rewrite the holding-repo history (step above) when the client's **repo key** is itself a token.
+   Otherwise this step is optional hygiene. Key destruction erases contents only. Blob **paths**
+   (`<machine>/<repo-key>/<file>.gpg`) and the backup repo's **commit messages**
+   (hashed: `capture: <machine>/<repo12> <ts>`, `purge: <rel12> (curated)`, `purge: <h12> …
+   (purge-session)`, written by `hooks/capture_backup.sh`) are plaintext. The paths name the repo;
+   the messages no longer do. In that case run the same two passes as §1 on the backup repo:
+   pass 1 `--replace-message "$T.expr"` (the blobs are ciphertext, so `--replace-text` has nothing
+   to find), then pass 2 `--path <machine>/<repo-key>/ --invert-paths` per matched subtree. Then run
+   the §1 post-rewrite checks against the backup repo.
 
 ## 3. Host-side residuals (GitHub)
 
@@ -120,11 +179,15 @@ purge for the repository, referencing the rewritten refs). Until confirmed, the 
 ## 4. Verify, then claim the tier
 
 ```bash
-bash scripts/purge_verify.sh residual <id> "<org token>" "<org name>" \
-  --backup-path <machine>/<repo-key>/
+bash scripts/purge_verify.sh residual --tokens-file "$T" \
+  --backup-path <machine>/<repo-key>/        # every token and variant in "$T"
 ```
 
-All-clean output is what lets `/purge --attest` claim **Fully erased** (ADR-008 erasure tiers:
-derive the tier from *verifiable state*, never from an operator assertion). Anything less stays
-**De-identified**. Delete the pre-purge mirror backups from step 1 last — after verification,
-they are the only remaining copy.
+The residual does not read commit messages, file names, or ref names. Run the §1 post-rewrite
+checks on every rewritten repo as well. All-clean output from both is what lets `/purge --attest`
+claim **Fully erased** (ADR-008 erasure tiers: derive the tier from *verifiable state*, never from
+an operator assertion). Two further conditions hold the claim at **De-identified**: any `/purge`
+Step 5b host-state item (session transcripts, `file-history/`, `history.jsonl` lines) still in
+place, or any surface left `not checked`. Anything less stays **De-identified**. Delete the
+pre-purge mirror backups from step 1 last — after verification, they are the only remaining copy —
+and then the token files from §0.

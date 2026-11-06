@@ -96,6 +96,7 @@ ASK_IMPACT_COMMANDS = [
     "aws ec2 terminate-instances --instance-ids i-123",
     "aws s3 rm s3://bucket/key",
     "rm -rf /tmp/scratch",
+    'bash "$BAILIWICK/scripts/purge_delete.sh" --list l --from-file f --sha abc --apply',
     "rm -fr build",
     "rm --recursive node_modules",
     "git merge feature",
@@ -115,6 +116,7 @@ def test_ask_impact_asks(cmd):
 # ----------------------------------------------------------------------------- validation-only pass
 
 PASS_COMMANDS = [
+    'bash "$BAILIWICK/scripts/purge_delete.sh" --list l --from-file f --sha abc',
     "terraform plan",
     "terraform validate",
     "terraform fmt",
@@ -277,6 +279,8 @@ def test_shape_deny_across_adapters(signing_repo, adapter):
 @pytest.mark.parametrize("cmd", [
     "bash /home/me/toolkit/hooks/capture_backup.sh push",
     "/home/me/toolkit/hooks/capture_backup.sh",
+    'bash "$BAILIWICK/hooks/capture_backup.sh" push',
+    "bash /home/me/toolkit/hooks/capture_backup.sh retract",
     "git -C /home/me/.cache/bailiwick/capture-mirror push",
     "git -C /home/me/.cache/bailiwick/capture-mirror commit -m snapshot",
 ])
@@ -431,6 +435,160 @@ def test_codex_break_glass_allows_once():
     rc, parsed = run_guard("terraform apply", adapter="codex", break_glass=True)
     assert rc == 0
     assert parsed is None, "codex break-glass is allow-once: no decision emitted"
+
+
+# ----------------------------------------------------------------------------- /purge tooling
+
+MARK = '"$BAILIWICK/hooks/mark_purge_session.sh"'
+SENTINEL_ASKS = [
+    "bash " + MARK,
+    "sh ${BAILIWICK}/hooks/mark_purge_session.sh",
+    MARK,
+    "  bash /opt/bailiwick/hooks/mark_purge_session.sh \n",
+    "bash '/a b/bw/hooks/mark_purge_session.sh'",       # quoted path with a space (raw-command check)
+    '"/a b/bw/hooks/mark_purge_session.sh"',
+    "BAILIWICK_BREAK_GLASS=1 bash " + MARK,
+    "ls && bash " + MARK,                               # chained: still an invocation
+    "cd /tmp; '/a b/hooks/mark_purge_session.sh'",
+    # A path THROUGH capture_backup.sh must not ride its exemption (bare, or behind `bash `).
+    "/r/hooks/capture_backup.sh/../../hooks/mark_purge_session.sh",
+    "bash /r/hooks/capture_backup.sh/../../hooks/mark_purge_session.sh",
+    'bash "$BAILIWICK/hooks/capture_backup.sh/../../hooks/mark_purge_session.sh"',
+    # An argv-style call joined as `bash -lc '<cmd>'` (Codex `shell`): the inner command is checked.
+    "bash -lc 'bash \"$BAILIWICK/hooks/mark_purge_session.sh\"'",
+    "/bin/bash -c " + "'" + "bash " + MARK + "'",
+    "sh -c 'bash -lc \"bash $BAILIWICK/hooks/mark_purge_session.sh\"'",
+]
+SENTINEL_QUIET = [
+    "cat " + MARK,
+    "grep -n purge hooks/mark_purge_session.sh",
+    "bash -n " + MARK,                                  # syntax check, not a run
+    'echo "bash $BAILIWICK/hooks/mark_purge_session.sh"',
+    "sed -n 1,20p hooks/mark_purge_session.sh",
+    "bash -lc 'cat \"$BAILIWICK/hooks/mark_purge_session.sh\"'",   # unwrapped, still a mention
+]
+
+
+@pytest.mark.parametrize("cmd", SENTINEL_ASKS)
+def test_purge_sentinel_asks(cmd):
+    rc, parsed = run_guard(cmd)
+    assert decision_of(parsed) == "ask", f"{cmd!r} should ASK, got {parsed!r}"
+    reason = parsed["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "marks this session as /purge" in reason and "deletes this session's captures" in reason
+
+
+@pytest.mark.parametrize("cmd", SENTINEL_QUIET)
+def test_purge_sentinel_mentions_pass(cmd):
+    rc, parsed = run_guard(cmd)
+    assert parsed is None, f"{cmd!r} is a mention, not an invocation; got {parsed!r}"
+
+
+def test_purge_sentinel_under_codex_denies_with_reason_and_break_glass_allows():
+    rc, parsed = run_guard("bash " + MARK, adapter="codex")
+    assert decision_of(parsed, "codex") == "deny"
+    reason = parsed["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "mark_purge_session.sh" in reason and "BAILIWICK_BREAK_GLASS" in reason
+    rc, parsed = run_guard("bash " + MARK, adapter="codex", break_glass=True)
+    assert parsed is None
+
+
+@pytest.mark.parametrize("adapter", ["gemini", "antigravity"])
+def test_purge_sentinel_asks_on_other_adapters(adapter):
+    rc, parsed = run_guard("bash " + MARK, adapter=adapter)
+    assert decision_of(parsed, adapter) in ("ask", "force_ask")
+
+
+SCRUB = 'python3 -I "$BAILIWICK/scripts/purge_scrub.py"'
+
+
+@pytest.mark.parametrize("cmd", [
+    SCRUB + ' scrub --tokens "$H/purge-work/tokens" --apply "$H/guardrail-audit.log"',
+    SCRUB + ' scrub --apply --tokens t "$H"/health/*.jsonl',
+    SCRUB + ' history --tokens "$T" --apply "$CC/history.jsonl"',
+    "python3 scripts/purge_scrub.py scrub --tokens t --apply x",
+    # `-m` (no .py), and abbreviations argparse used to accept (now refused there too).
+    "python3 -m purge_scrub scrub --tokens t --apply x",
+    "cd scripts && python3 -m purge_scrub history --tokens t --apply h.jsonl",
+    "python3 scripts/purge_scrub.py scrub --tokens t --ap x",
+    "python3 scripts/purge_scrub.py scrub --tokens t --appl x",
+    # Quoted script path holding a space: blanked by strip_quoted -> raw-command companion.
+    'python3 -I "/a b/scripts/purge_scrub.py" scrub --tokens t --apply x',
+    "python3 '/a b/scripts/purge_scrub.py' history --tokens t --apply h.jsonl",
+    # Through the capture_backup.sh exemption, and inside a `bash -lc` wrapper.
+    "/r/hooks/capture_backup.sh/../../scripts/purge_scrub.py scrub --tokens t --apply x",
+    "bash -lc 'python3 \"$BAILIWICK/scripts/purge_scrub.py\" scrub --tokens t --apply x'",
+])
+def test_purge_scrub_apply_asks(cmd):
+    rc, parsed = run_guard(cmd)
+    assert decision_of(parsed) == "ask", f"{cmd!r} should ASK, got {parsed!r}"
+    assert "purge_scrub.py --apply" in parsed["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("cmd", [
+    'bash "/a b/scripts/purge_delete.sh" --list l --from-file f --sha abc --apply',
+    "bash '/a b/scripts/purge_delete.sh' --apply --list l --from-file f --sha abc",
+    "bash /r/hooks/capture_backup.sh/../../scripts/purge_delete.sh --list l --apply",
+    "bash -lc 'bash \"$BAILIWICK/scripts/purge_delete.sh\" --list l --from-file f --sha abc --apply'",
+])
+def test_purge_delete_apply_asks_in_every_shape(cmd):
+    rc, parsed = run_guard(cmd)
+    assert decision_of(parsed) == "ask", f"{cmd!r} should ASK, got {parsed!r}"
+    assert "purge_delete.sh --apply" in parsed["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("cmd", [
+    "bash '/a b/scripts/purge_delete.sh' --list l --from-file f --sha abc",
+    "grep -n apply '/a b/scripts/purge_delete.sh'",
+])
+def test_purge_delete_dry_run_shapes_pass(cmd):
+    rc, parsed = run_guard(cmd)
+    assert parsed is None, f"{cmd!r} is a dry run / mention; got {parsed!r}"
+
+
+@pytest.mark.parametrize("cmd", [
+    "bash -lc 'terraform apply'",
+    "sh -c 'kubectl delete ns prod'",
+    # `-c '<cmd>' arg0 args…` (argv[2] is the script) and leading long options before -c.
+    "bash -c 'terraform apply' arg0 x y",
+    "bash --norc -c 'terraform apply'",
+    "bash --noprofile --norc -lc 'kubectl delete ns prod' sh",
+    "bash --norc -c 'bash " + MARK + "' arg0",
+])
+def test_shell_c_wrapper_inner_command_is_checked(cmd):
+    rc, parsed = run_guard(cmd)
+    assert decision_of(parsed) == "ask", f"{cmd!r} should ASK, got {parsed!r}"
+
+
+@pytest.mark.parametrize("cmd", [
+    "bash -lc 'terraform plan'",
+    "bash -lc 'echo hi' extra",                       # inner `echo hi` (arg0 = extra): nothing to ask
+    "bash --norc -c 'terraform plan' arg0",
+    "bash --norc",                                    # no -c: nothing to unwrap
+    "bash -c \"$BAILIWICK/hooks/capture_backup.sh push\"",
+])
+def test_shell_c_wrapper_harmless_inner_passes(cmd):
+    rc, parsed = run_guard(cmd)
+    assert parsed is None, f"{cmd!r}: got {parsed!r}"
+
+
+def test_codex_argv_joined_sentinel_denies_with_reason():
+    """A Codex `shell` argv call reaching the hook as `bash -lc '<cmd>'`: denied (non-empty reason)."""
+    rc, parsed = run_guard("bash -lc 'bash " + MARK + "'", adapter="codex")
+    assert decision_of(parsed, "codex") == "deny"
+    reason = parsed["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "mark_purge_session.sh" in reason and "BAILIWICK_BREAK_GLASS" in reason
+
+
+@pytest.mark.parametrize("cmd", [
+    SCRUB + ' scrub --tokens "$H/purge-work/tokens" "$H/guardrail-audit.log"',
+    SCRUB + ' scrub --tokens t --dry-run "$H/guardrail-audit.log"',
+    SCRUB + ' history --tokens "$T" "$CC/history.jsonl"',
+    SCRUB + ' ere --tokens "$T" --out "$T.ere"',
+    SCRUB + ' exprs --tokens "$T" --out "$T.expr"',
+])
+def test_purge_scrub_dry_runs_and_pattern_modes_pass(cmd):
+    rc, parsed = run_guard(cmd)
+    assert parsed is None, f"{cmd!r} is read-only; got {parsed!r}"
 
 
 # ----------------------------------------------------------------------------- white-box: helpers

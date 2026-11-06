@@ -46,7 +46,7 @@ zone** for the library. Neither touches `knowledge/`.
      ⇒ **shadow**. If neither, tell the user to run `bootstrap.sh <repo>` first and stop.
    - Resolve the staging dir — the same split `capture_session.py` uses (seeded wins if both):
      - **seeded** → `<repo>/.bailiwick-outputs/`
-     - **shadow** → `~/.bailiwick/captures/<repo-key>/` (`$BAILIWICK_HOME` if set). Compute
+     - **shadow** → `$BAILIWICK_HOME/captures/<repo-key>/` (`$BAILIWICK_HOME`, default `~/.bailiwick`). Compute
        `<repo-key>` from the single source of truth, exactly like `session_start.sh` does:
        `PYTHONPATH="$BAILIWICK/hooks" python3 -c 'import sys, capture_session; sys.stdout.write(capture_session.repo_key(sys.argv[1]))' <repo>`
    - **Check for a prior learn capture** (`learn-*.md` in the staging dir, its `.curated/`, or the
@@ -122,7 +122,7 @@ zone** for the library. Neither touches `knowledge/`.
 5. **Write the capture.** One markdown file, `learn-<UTC yyyymmdd-HHMMSS>.md`, in the Step 1
    staging dir — authored from the Step 3/4 working notes when the scan was batched (then discard
    the notes file; the capture supersedes it) — the **manual session-output channel** `/curate` Step 1 already gathers
-   (`.bailiwick-outputs/*.md`, or `~/.bailiwick/captures/<repo-key>/*.md` in shadow mode). No new
+   (`.bailiwick-outputs/*.md`, or `$BAILIWICK_HOME/captures/<repo-key>/*.md` in shadow mode). No new
    pipeline, no gate needed for this write (it is enforced dirty-zone staging). Format — header
    mirrors the auto-capture headers; the `## Candidates for Promotion` heading is load-bearing
    (it is what memory.md Step 1 extracts):

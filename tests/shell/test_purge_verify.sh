@@ -36,6 +36,40 @@ out="$(pv residual never-was-here)"; rc=$?
 assert_exit "unknown token -> exit 0" 0 "$rc"
 assert_contains "clean verdict" "clean for the checked surfaces" "$out"
 
+echo "== residual: a multi-word token is ONE phrase, not one hit per word"
+out="$(pv residual "wombatclient zebrafoo")"; rc=$?
+assert_exit "absent phrase is clean although one of its words is in history -> exit 0" 0 "$rc"
+assert_contains "phrase reported whole" "'wombatclient zebrafoo': git history clean" "$out"
+
+echo "== residual: a token with a regex metacharacter is a literal (no git error read as clean)"
+echo "ticket acme[x] open" > "$INST/meta.md"
+git -C "$INST" add meta.md && git -C "$INST" -c user.name=t -c user.email=t@l commit -qm "add meta"
+out="$(pv residual "acme[x]")"; rc=$?
+assert_exit "'[' token found in the working tree -> exit 1" 1 "$rc"
+assert_contains "literal working-tree hit" "'acme[x]': 1 working-tree file(s) still match" "$out"
+
+echo "== residual: --tokens-file reads one token per line (no token on the command line)"
+printf 'acme[x]\n\nnever-was-here\r\n' > "$T_SANDBOX/tokens"
+out="$(pv residual --tokens-file "$T_SANDBOX/tokens")"; rc=$?
+assert_exit "tokens-file hit -> exit 1" 1 "$rc"
+assert_contains "first token checked, by index" "token #1: 1 working-tree file(s)" "$out"
+assert_contains "CRLF stripped, second token checked" "token #2: working tree clean" "$out"
+assert_not_contains "file-sourced tokens never printed" "acme[x]" "$out"
+git -C "$INST" rm -q meta.md && git -C "$INST" -c user.name=t -c user.email=t@l commit -qm "drop meta"
+
+echo "== residual: a short token matches on alphanumeric boundaries only (never inside a word)"
+echo "loading the radius module" > "$INST/words.md"
+git -C "$INST" add words.md && git -C "$INST" -c user.name=t -c user.email=t@l commit -qm "add words"
+out="$(pv residual adi)"; rc=$?
+assert_exit "'adi' inside words is not a residual -> exit 0" 0 "$rc"
+echo "the ADI rollout (adi-prod)" > "$INST/abbr.md"
+git -C "$INST" add abbr.md && git -C "$INST" -c user.name=t -c user.email=t@l commit -qm "add abbr"
+out="$(pv residual adi)"; rc=$?
+assert_exit "standalone short token is a residual -> exit 1" 1 "$rc"
+assert_contains "boundary rule named" "boundary match" "$out"
+assert_contains "short-token history hit via -G" "git HISTORY" "$out"
+git -C "$INST" rm -q words.md abbr.md && git -C "$INST" -c user.name=t -c user.email=t@l commit -qm "drop words"
+
 echo "== residual: backup-path finds ciphertext in current trees AND history"
 work="$T_SANDBOX/holdwork"
 git clone -q "file://$T_SANDBOX/holding.git" "$work" 2>/dev/null || { mkdir -p "$work"; git -C "$work" init -q; git -C "$work" remote add origin "file://$T_SANDBOX/holding.git"; }
@@ -67,6 +101,17 @@ out="$(pv preflight)"; rc=$?
 assert_exit "inbox pending -> exit 1" 1 "$rc"
 assert_contains "inbox named" "bailiwick-inbox" "$out"
 rm -rf "$INST/.bailiwick-inbox"
+
+echo "== preflight: a leftover purge-work/ (tokens of an unfinished /purge) blocks, without naming its files"
+mkdir -p "$BAILIWICK_HOME/purge-work/deleted"
+printf 'wombatclient\n' > "$BAILIWICK_HOME/purge-work/tokens"
+touch "$BAILIWICK_HOME/purge-work/deleted/wombatclient-notes.md"
+out="$(pv preflight)"; rc=$?
+assert_exit "leftover purge-work -> exit 1" 1 "$rc"
+assert_contains "leftover named with its file count" "leftover purge-work/ under" "$out"
+assert_contains "file count reported" "(2 file(s)" "$out"
+assert_not_contains "no token-bearing file name printed" "wombatclient" "$out"
+rm -rf "$BAILIWICK_HOME/purge-work"
 
 echo "== preflight: drained fleet passes, with the per-machine confirm notes"
 mkdir -p "$BAILIWICK_HOME/health"

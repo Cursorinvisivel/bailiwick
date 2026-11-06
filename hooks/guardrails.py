@@ -32,6 +32,8 @@ instead of mere instructions:
           the /sign route in the reason; break-glass downgrades the deny like the error path.
   - EXEMPT: dirty-zone capture plumbing (capture_backup.sh, the capture-mirror repo)
           always passes — capture exists to guarantee no data loss and is never blocked.
+          The /purge asks (sentinel, purge_delete.sh / purge_scrub.py --apply) are evaluated
+          on every segment BEFORE the exemption, so an exemption claim cannot swallow them.
 
 Validation-only commands (terraform plan/validate/fmt, kubectl get/describe or --dry-run,
 read-only gcloud/aws/az, git status/diff/log, ...) match no pattern and run untouched.
@@ -39,6 +41,8 @@ Shell line-continuations (backslash-newline) are folded before matching, so spli
 verb across continued lines does not evade the patterns; whole-token quoting is unwrapped, so
 `terraform "apply"` does not either. Tiers are evaluated PER SEGMENT (`;` `&&` `||` `|`, comments
 dropped), so a --dry-run flag or an EXEMPT match in one segment never speaks for a chained one.
+A command that is exactly `bash|sh|zsh -c/-lc '<cmd>'` (how a Codex argv call can arrive) is
+evaluated as given AND as the inner `<cmd>` it runs.
 
 Self-gating: the hook is installed once at user level and fires in every project, so it
 stays inert unless the repo is bailiwick-wired (a framework complement file carries the
@@ -92,8 +96,10 @@ import sys
 # a chained `echo capture_backup.sh`) disarmed every tier. Exemption is also evaluated per segment
 # (see segments()), so `capture_backup.sh push && terraform destroy` cannot ride it.
 EXEMPT_PATTERNS = [
-    # the backup script invoked as a command word, optionally through an interpreter
-    r"(?:^|[;&|]\s*)(?:(?:bash|sh|zsh)\s+)?\S*capture_backup\.sh\b",
+    # the backup script invoked as a command word, optionally through an interpreter. The script
+    # name must END the path token: `…/capture_backup.sh/../../hooks/mark_purge_session.sh` is a
+    # path THROUGH it (the kernel resolves it to the other script), never the backup script.
+    r"(?:^|[;&|]\s*)(?:(?:bash|sh|zsh)\s+)?\S*capture_backup\.sh(?=\s|$|[;&|])",
     # git against the CANONICAL mirror only (capture_backup.sh: $XDG_CACHE_HOME|~/.cache/bailiwick/
     # capture-mirror), with -C immediately after `git` and the path ending the token. Matching any
     # path merely containing "capture-mirror" turned the exemption into an unconfirmed push channel:
@@ -116,6 +122,42 @@ SEG = r"[^;&|\n]*"
 # (and a trailing `# --dry-run` comment) suppress the live mutation.
 DRY_RUN_RE = re.compile(r"(?:^|\s)--dry-run(?:=\S+)?(?=\s|$)")
 
+# The /purge sentinel (hooks/mark_purge_session.sh): capture_session.py reads its invocation as
+# "this is a /purge session", stops capturing it, deletes its earlier captures and tombstones their
+# backup blobs — so it must never run on agent (or prompt-injected) initiative.
+MARK_PURGE_WHAT = ("mark_purge_session.sh marks this session as /purge: disables capture and deletes "
+                   "this session's captures (and requests their backup retraction)")
+# Raw-command companion for quoted paths that strip_quoted() blanks (`bash '/a b/hooks/mark…sh'`):
+# the same command position, the script inside a quoted token.
+MARK_PURGE_RAW_RE = re.compile(
+    r"(?:^|[;&|\n(])\s*(?:\w+=\S*\s+)*(?:(?:bash|sh|zsh|source|\.|exec|command|env)\s+)*"
+    r"(?:\"[^\"\n]*|'[^'\n]*)mark_purge_session\.sh[\"']")
+PURGE_DELETE_WHAT = "purge_delete.sh --apply deletes client files irreversibly"
+PURGE_SCRUB_WHAT = ("purge_scrub.py --apply rewrites the guardrail audit log / health shards / host "
+                    "history in place")
+# purge_scrub.py `--apply`: argparse is built with allow_abbrev=False, but match any `--ap…` too
+# (belt and braces against a parser that would accept `--ap`/`--app`), and `purge_scrub` without
+# `.py` so `python3 -m purge_scrub` is caught.
+_SCRUB_APPLY = r"\b(scrub|history)\b" + r"[^;&|\n]*" + r"--ap\w*"
+# Raw-command companions for the two --apply asks (same reason as MARK_PURGE_RAW_RE): a quoted
+# script path holding a space is blanked by strip_quoted(), taking the script name with it.
+PURGE_DELETE_RAW_RE = re.compile(r"(?:\"[^\"\n]*|'[^'\n]*)purge_delete\.sh[\"'][^;&|\n]*--apply\b")
+PURGE_SCRUB_RAW_RE = re.compile(r"(?:\"[^\"\n]*|'[^'\n]*)purge_scrub(?:\.py)?[\"'][^;&|\n]*?" + _SCRUB_APPLY)
+PURGE_RAW_ASKS = [(MARK_PURGE_RAW_RE, MARK_PURGE_WHAT), (PURGE_DELETE_RAW_RE, PURGE_DELETE_WHAT),
+                  (PURGE_SCRUB_RAW_RE, PURGE_SCRUB_WHAT)]
+
+# The /purge asks run on EVERY segment BEFORE the EXEMPT filter (see main): an exemption claim
+# must never be able to swallow them (`…/capture_backup.sh/../../hooks/mark_purge_session.sh`).
+PURGE_ASK_PATTERNS = [
+    (r"\bpurge_delete\.sh\b" + SEG + r"--apply\b", False, PURGE_DELETE_WHAT),
+    (r"\bpurge_scrub(?:\.py)?\b" + SEG + _SCRUB_APPLY, False, PURGE_SCRUB_WHAT),
+    # The /purge sentinel, in command position (optionally behind env assignments or a shell).
+    # Read/grep/cat of it stay quiet. A quoted path holding a space is blanked by strip_quoted(),
+    # so MARK_PURGE_RAW_RE above covers that form on the raw command.
+    (r"^\s*(?:\w+=\S*\s+)*(?:(?:bash|sh|zsh|source|\.|exec|command|env)\s+)*\S*"
+     r"mark_purge_session\.sh(?=\s|$)", False, MARK_PURGE_WHAT),
+]
+
 # ASK-IMPACT: real-world impact — forced reconfirmation even when the user instructed the action.
 # Tuples: (pattern, dry_run_exempt, what). dry_run_exempt=True lets a --dry-run form pass as
 # validation-only (kubectl/helm support it; terraform's validation path is `plan`, which the
@@ -135,6 +177,8 @@ ASK_IMPACT_PATTERNS = [
      "mutating AWS CLI verb (delete-/terminate-/remove-/update-) changes real resources"),
     (r"\baws\s+s3\b" + SEG + r"\b(rm|rb|mv)\b", False,
      "aws s3 rm/rb/mv changes real storage"),
+    # /purge tooling (also evaluated ahead of EXEMPT — see PURGE_ASK_PATTERNS).
+    *PURGE_ASK_PATTERNS,
     (r"(^|[;&|]\s*|\s)rm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\b|--recursive\b|--force\b)", False,
      "recursive/forced rm is irreversible"),
     (r"\bgit\b" + SEG + r"\bmerge\b", False,
@@ -281,6 +325,40 @@ def segments(command):
     no_comments = re.sub(r"(?:^|\s)#[^\n]*", " ", command)
     return [seg for seg in re.split(r"[;&|\n]+", no_comments) if seg.strip()]
 
+
+_SHELL_LONG_OPTS = ("--norc", "--noprofile", "--login")
+_SHELL_C_RE = re.compile(r"^\s*(?:\S*/)?(?:bash|sh|zsh)\s+(?:(?:--norc|--noprofile|--login)\s+)*"
+                         r"-[A-Za-z]*c[A-Za-z]*\s")
+_SHELL_C_FLAG = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
+
+
+def shell_c_layers(command, depth=3):
+    """[command, inner, …]: the command plus the script each `bash|sh|zsh -c/-lc '<cmd>'` wrapper
+    runs. A Codex argv-style call (`["bash", "-lc", "<cmd>"]`) can reach this hook joined as one
+    string; strip_quoted() would blank the whole inner command, so every tier would miss it while
+    capture_session.py's detector unwraps it. Accepted shapes: `<shell> [--norc|--noprofile|--login]…
+    -<flags with c> '<cmd>' [arg0 args…]` — the inner layer is the word after the -c flag. The outer
+    layer (anything chained or trailing included) is always evaluated FIRST, and _evaluate() only
+    ever emits ask/deny, so an extra inner layer can add a decision, never remove one."""
+    import shlex
+    layers = [command]
+    for _ in range(depth):
+        if not _SHELL_C_RE.match(command):
+            break
+        try:
+            argv = shlex.split(command)
+        except ValueError:
+            break
+        i = 1
+        while i < len(argv) and argv[i] in _SHELL_LONG_OPTS:
+            i += 1
+        if not (len(argv) > i + 1 and os.path.basename(argv[0]) in ("bash", "sh", "zsh")
+                and _SHELL_C_FLAG.fullmatch(argv[i])):
+            break
+        command = normalize(argv[i + 1])
+        layers.append(command)
+    return layers
+
 # Self-gating, shadow gate, home resolution, and health logging live in the shared
 # hooks/bw_common.py substrate (one implementation for this hook and capture_session.py).
 from bw_common import is_bailiwick_repo, is_shadow_repo  # noqa: F401
@@ -392,6 +470,79 @@ def _decide_deny(adapter, reason, command, project_dir, event="deny"):
             emit("deny", reason)
 
 
+def _evaluate(command, adapter, payload, raw_command, project_dir):
+    """Run the tiers on one command layer; True when a decision was emitted. Raises on an engine
+    fault (main() applies the fail-closed pre-filter)."""
+    # Command-token tiers (impact / go-ahead) match against the quote-stripped form so a verb inside
+    # a quoted argument isn't a false positive — but whole-token quoting is unwrapped first, since
+    # `terraform "apply"` is a command token the shell runs verbatim. The signature tier keeps
+    # `command` (needs the quotes).
+    cmd_tokens = strip_quoted(unwrap_token_quotes(command))
+
+    # Evaluate tiers in order: /PURGE ASKS → EXEMPT → ASK-IMPACT → SIGNED-COMMIT SHAPE →
+    # ASK-SIGNATURE → ASK-GO-AHEAD.
+    all_segs = segments(cmd_tokens)
+    # /purge asks FIRST, on every segment and on the raw command: an EXEMPT claim can never swallow
+    # them, and a command that is ONLY a quoted path blanks to nothing (hence the raw companions).
+    for raw_re, what in PURGE_RAW_ASKS:
+        if raw_re.search(command):
+            _respond(adapter, "impact", "HIGH-IMPACT: " + what
+                     + " — blocked from agent initiative; re-confirm this is really the intent.",
+                     raw_command, project_dir)
+            return True
+    for seg in all_segs:
+        for pattern, _dry_exempt, what in PURGE_ASK_PATTERNS:
+            if re.search(pattern, seg, re.IGNORECASE):
+                _respond(adapter, "impact", "HIGH-IMPACT: " + what
+                         + " — blocked from agent initiative; re-confirm this is really the intent.",
+                         raw_command, project_dir)
+                return True
+    # Per-segment evaluation (ADR-006 amendment): EXEMPT clears only its own segment, and the
+    # dry-run exemption only the segment that matched — neither speaks for a chained command.
+    segs = [seg for seg in all_segs
+            if not (any(re.search(p, seg, re.IGNORECASE) for p in EXEMPT_PATTERNS)
+                    and not EXEMPT_DISQUALIFIERS.search(seg))]
+    if not segs:
+        return False  # dirty-zone capture plumbing only — never blocked (data-loss prevention)
+    for seg in segs:
+        seg_dry_run = DRY_RUN_RE.search(seg) is not None
+        for pattern, dry_exempt, what in ASK_IMPACT_PATTERNS:
+            if dry_exempt and seg_dry_run:
+                continue  # validation-only form in THIS segment — no real impact
+            if re.search(pattern, seg, re.IGNORECASE):
+                _respond(adapter, "impact", "HIGH-IMPACT: " + what
+                         + " — blocked from agent initiative; re-confirm this is really the intent.",
+                         raw_command, project_dir)
+                return True
+    # SIGNED-COMMIT SHAPE: deny a commit that skipped /sign in a repo that signs; for a
+    # /sign-shaped commit, scan the -F message file, which the command text never shows.
+    commit_segs = [seg for seg in segs if is_git_commit(seg)]
+    file_signature = False
+    if commit_segs:
+        shell_cwd = (payload.get("cwd") if isinstance(payload, dict) else None) or project_dir
+        if repo_signs(shell_cwd):
+            for seg in commit_segs:
+                msg_file = commit_msg_file(seg)
+                if msg_file is None:
+                    _decide_deny(adapter, UNSIGNED_SHAPE_REASON, raw_command, project_dir,
+                                 event="deny-unsigned-shape")
+                    return True
+                file_signature = file_signature or file_has_signature(msg_file, shell_cwd)
+    if file_signature or (GIT_MESSAGE_RE.search(command) and SIGNATURE_RE.search(command)):
+        _respond(adapter, "signature",
+                 "the commit/PR message carries an AI attribution signature "
+                 "(Co-Authored-By / 'Generated with' / robot emoji) — confirm it is wanted, "
+                 "or strip it before proceeding.",
+                 raw_command, project_dir)
+        return True
+    for seg in segs:
+        for pattern, reason in ASK_GOAHEAD_PATTERNS:
+            if re.search(pattern, seg, re.IGNORECASE):
+                _respond(adapter, "goahead", reason, raw_command, project_dir)
+                return True
+    return False
+
+
 def main(adapter="claude"):
     try:
         payload = json.load(sys.stdin)
@@ -421,64 +572,17 @@ def main(adapter="claude"):
     if not raw_command.strip():
         return 0
     command = normalize(raw_command)
-    # Command-token tiers (impact / go-ahead) match against the quote-stripped form so a verb inside
-    # a quoted argument isn't a false positive — but whole-token quoting is unwrapped first, since
-    # `terraform "apply"` is a command token the shell runs verbatim. The signature tier keeps
-    # `command` (needs the quotes).
-    cmd_tokens = strip_quoted(unwrap_token_quotes(command))
-
     # Antigravity carries workspacePaths / cwd; Gemini exports CLAUDE_PROJECT_DIR; Codex cwd.
     project_dir = bw_common.resolve_project_dir(payload)
     if not (is_bailiwick_repo(project_dir) or is_shadow_repo(project_dir)):
         return 0  # Inert outside bailiwick-wired repos (seeded or shadow-activated).
 
-    # Evaluate tiers in order: EXEMPT → ASK-IMPACT → SIGNED-COMMIT SHAPE → ASK-SIGNATURE →
-    # ASK-GO-AHEAD. On ANY engine failure, fail CLOSED if the command trips the destructive pre-filter, else fail open — never
-    # wedge the harness on a harmless command (ADR-005).
     try:
-        # Per-segment evaluation (ADR-006 amendment): EXEMPT clears only its own segment, and the
-        # dry-run exemption only the segment that matched — neither speaks for a chained command.
-        segs = [seg for seg in segments(cmd_tokens)
-                if not (any(re.search(p, seg, re.IGNORECASE) for p in EXEMPT_PATTERNS)
-                        and not EXEMPT_DISQUALIFIERS.search(seg))]
-        if not segs:
-            return 0  # dirty-zone capture plumbing only — never blocked (data-loss prevention)
-        for seg in segs:
-            seg_dry_run = DRY_RUN_RE.search(seg) is not None
-            for pattern, dry_exempt, what in ASK_IMPACT_PATTERNS:
-                if dry_exempt and seg_dry_run:
-                    continue  # validation-only form in THIS segment — no real impact
-                if re.search(pattern, seg, re.IGNORECASE):
-                    _respond(adapter, "impact", "HIGH-IMPACT: " + what
-                             + " — blocked from agent initiative; re-confirm this is really the intent.",
-                             raw_command, project_dir)
-                    return 0
-        # SIGNED-COMMIT SHAPE: deny a commit that skipped /sign in a repo that signs; for a
-        # /sign-shaped commit, scan the -F message file, which the command text never shows.
-        commit_segs = [seg for seg in segs if is_git_commit(seg)]
-        file_signature = False
-        if commit_segs:
-            shell_cwd = (payload.get("cwd") if isinstance(payload, dict) else None) or project_dir
-            if repo_signs(shell_cwd):
-                for seg in commit_segs:
-                    msg_file = commit_msg_file(seg)
-                    if msg_file is None:
-                        _decide_deny(adapter, UNSIGNED_SHAPE_REASON, raw_command, project_dir,
-                                     event="deny-unsigned-shape")
-                        return 0
-                    file_signature = file_signature or file_has_signature(msg_file, shell_cwd)
-        if file_signature or (GIT_MESSAGE_RE.search(command) and SIGNATURE_RE.search(command)):
-            _respond(adapter, "signature",
-                     "the commit/PR message carries an AI attribution signature "
-                     "(Co-Authored-By / 'Generated with' / robot emoji) — confirm it is wanted, "
-                     "or strip it before proceeding.",
-                     raw_command, project_dir)
-            return 0
-        for seg in segs:
-            for pattern, reason in ASK_GOAHEAD_PATTERNS:
-                if re.search(pattern, seg, re.IGNORECASE):
-                    _respond(adapter, "goahead", reason, raw_command, project_dir)
-                    return 0
+        # The command as given, then the script inside each `bash -c '<cmd>'` wrapper (see
+        # shell_c_layers): the first layer that draws a decision ends the evaluation.
+        for layer in shell_c_layers(command):
+            if _evaluate(layer, adapter, payload, raw_command, project_dir):
+                return 0
     except Exception as e:
         _health("error", "pattern engine failure ({}): {!r}".format(adapter, e)[:200])
         try:

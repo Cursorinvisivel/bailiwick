@@ -14,6 +14,12 @@
 #                    (post-curate cleanup) and tombstone it in that branch's root .purged
 #                    manifest so push never re-encrypts it while the source capture is still
 #                    un-retired somewhere.
+#   retract          drain the purge-session ledger ($BAILIWICK_HOME/backup-retract.pending, hashed
+#                    relpaths only) on this machine's branch. Run detached by capture_session.py;
+#                    every push retries what is left. Entries leave the ledger once origin has them.
+#
+# BW_DRILL_SANDBOX applies (its .drill-sandbox marker exists and the project is inside it) and this
+# clone is not "$BW_DRILL_SANDBOX/framework" => push is a silent no-op, every other mode exits 3.
 #
 # Config: $BAILIWICK_ROOT/.bailiwick-sync.json -> "capture_backup": { enabled, repo, gpg_recipients[],
 #         branch, throttle_minutes, confidentiality_ack }. Disabled/absent => no-op.
@@ -25,6 +31,35 @@ MODE="${1:-push}"
 # Framework-health logging (best-effort; no-op fallback if the helper is missing).
 . "$BAILIWICK_ROOT/hooks/health_common.sh" 2>/dev/null || true
 command -v bw_health >/dev/null 2>&1 || bw_health() { :; }
+
+# Drill self-defence: a drill declares its sandbox (BW_DRILL_SANDBOX, set in the drill project's
+# settings `env`), and only the sandbox's own framework copy may act inside it. The real clone's
+# global hook fires there too — it must not push, pull, or purge against the real backup repo.
+# The variable counts only when "$BW_DRILL_SANDBOX/.drill-sandbox" exists AND the project
+# (CLAUDE_PROJECT_DIR > BW_HOOK_CWD > cwd) resolves inside the sandbox: a stale or leaked export
+# would otherwise turn every backup into a silent no-op. Ignored with a content-free warn.
+# When it does apply: push (the hook) exits 0 quietly; every other mode says so on stderr and exits 3,
+# so a manual run never "succeeds" having done nothing.
+if [ -n "${BW_DRILL_SANDBOX:-}" ]; then
+  sbx_root="$(cd "$BW_DRILL_SANDBOX" 2>/dev/null && pwd -P || true)"
+  sbx_proj="$(cd "${CLAUDE_PROJECT_DIR:-${BW_HOOK_CWD:-$PWD}}" 2>/dev/null && pwd -P || true)"
+  sbx_applies=0
+  if [ -n "$sbx_root" ] && [ -f "$sbx_root/.drill-sandbox" ] && [ -n "$sbx_proj" ]; then
+    case "$sbx_proj/" in "${sbx_root%/}"/*) sbx_applies=1;; esac
+  fi
+  if [ "$sbx_applies" = 1 ]; then
+    own_root="$(cd "$BAILIWICK_ROOT" 2>/dev/null && pwd -P)"
+    drill_root="$(cd "$sbx_root/framework" 2>/dev/null && pwd -P || true)"
+    if [ -z "$drill_root" ] || [ "$own_root" != "$drill_root" ]; then
+      bw_health capture_backup info "drill sandbox active and this is not its framework copy — $MODE skipped"
+      [ "$MODE" = "push" ] && exit 0
+      echo "[backup] drill sandbox active (BW_DRILL_SANDBOX) and this is not its framework copy — $MODE NOT run" >&2
+      exit 3
+    fi
+  else
+    bw_health capture_backup warn "BW_DRILL_SANDBOX set but no drill sandbox applies (no .drill-sandbox marker, or the project is outside it) — variable ignored"
+  fi
+fi
 
 command -v python3 >/dev/null 2>&1 || exit 0
 [ -f "$CFG" ] || exit 0
@@ -144,6 +179,13 @@ ensure_mirror() {
   fi
 }
 
+# Identifier-free label for commit messages and health lines: sha256(<text>)[:12]. Repo keys open with
+# the repo's (often client-named) basename and relpaths add the session id; the backup repo's commit
+# messages are plaintext that crypto-erasure cannot reach, and the health shard is aggregated
+# fleet-wide. Blob PATHS keep the readable layout (changing it would orphan every existing blob).
+# Terminal echoes keep the readable name: local and interactive only.
+id12() { printf '%s' "$1" | sha256sum | cut -c1-12; }
+
 # Machine-generated ciphertext commits: never sign. Inheriting a user's global commit.gpgsign=true
 # makes every Stop/SessionEnd hook fire a pinentry prompt (or hang/fail headless).
 git_id() { git -C "$MIRROR" -c user.name=bailiwick -c user.email=backup@local -c commit.gpgsign=false "$@"; }
@@ -160,6 +202,15 @@ rebase_resolve() {
     guard=$((guard + 1)); [ "$guard" -le 50 ] || break
     while IFS= read -r line; do
       st="${line:0:2}"; p="${line:3}"
+      # The tombstone manifest is append-only on every side: keep the UNION. Taking one side would
+      # drop the other machine's (or a purge-session retraction's) tombstones, and a dropped
+      # tombstone lets a later push resurrect purged ciphertext.
+      if [ "$p" = ".purged" ] && { [ "$st" = "UU" ] || [ "$st" = "AA" ]; }; then
+        { git -C "$MIRROR" show ":2:.purged" 2>/dev/null || true; git -C "$MIRROR" show ":3:.purged" 2>/dev/null || true; } \
+          | grep -E '^[0-9a-f]{64}$' | sort -u > "$MIRROR/.purged" || true
+        git_id add -- .purged >/dev/null 2>&1 || true
+        continue
+      fi
       case "$st" in
         DU|UD|DD) git_id rm -q -f --ignore-unmatch -- "$p" >/dev/null 2>&1 || true;;
         *) git -C "$MIRROR" checkout -q --theirs -- "$p" >/dev/null 2>&1 || true
@@ -174,6 +225,98 @@ rebase_resolve() {
     bw_health capture_backup warn "mirror rebase could not be auto-resolved — aborted (ciphertext safe locally)"
     return 1
   fi
+  return 0
+}
+
+# Push our branch. 0 = pushed, 2 = nothing ahead of origin, 1 = failed (commits stay in the mirror).
+# Push whenever the mirror is AHEAD of origin, not only when this run committed something: a push
+# killed after commit (SessionEnd timeout, crash, offline) otherwise strands its ciphertext.
+push_branch() {
+  local ahead
+  if git -C "$MIRROR" rev-parse -q --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
+    ahead="$(git -C "$MIRROR" rev-list --count "origin/$BRANCH..$BRANCH" 2>/dev/null || echo 0)"
+  else
+    ahead="$(git -C "$MIRROR" rev-list --count "$BRANCH" 2>/dev/null || echo 0)"
+  fi
+  [ "${ahead:-0}" -gt 0 ] || return 2
+  if ! git_id push -q origin "$BRANCH" 2>/dev/null; then
+    if git -C "$MIRROR" fetch -q origin "$BRANCH" 2>/dev/null; then
+      git_id rebase -q "origin/$BRANCH" >/dev/null 2>&1 || rebase_resolve || true
+    fi
+    git_id push -q origin "$BRANCH" 2>/dev/null || return 1
+  fi
+  return 0
+}
+
+# ---- purge-session retraction ledger ---------------------------------------------------------------
+# capture_session.py appends sha256(<blob relpath>) — the hash only — when a /purge session's earlier
+# capture must leave the backup. No plaintext relpath is stored: drain_pending finds the blob by
+# hashing this mirror's own tree, and the `.purged` tombstone is the hash itself. Entries leave the
+# ledger only once origin holds the tombstone; until then every push (and `retract`) retries them.
+# Appends (python) and the rewrite below share the `$PENDING.lock` mkdir lock.
+PENDING="$BW_HOME/backup-retract.pending"
+PLOCK="$PENDING.lock"
+DRAINED=""
+pending_hashes() { { grep -E '^[0-9a-f]{64}$' "$PENDING" 2>/dev/null || true; } | sort -u; }
+pending_count() { pending_hashes | grep -c . || true; }
+pending_lock() {
+  local waited=0
+  while ! mkdir "$PLOCK" 2>/dev/null; do
+    if [ -n "$(find "$PLOCK" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then rm -rf "$PLOCK"; continue; fi
+    [ "$waited" -lt 50 ] || return 1
+    sleep 0.1; waited=$((waited + 1))
+  done
+}
+# Stage + commit the retraction of every pending hash on OUR branch (a purge session's blobs were
+# pushed by this machine): tombstone it, `git rm` whichever blob relpath hashes to it. Sets DRAINED.
+# The commit message carries <hash12> only — never the relpath (it holds the repo key and session).
+drain_pending() {
+  local h ph p map
+  DRAINED="$(pending_hashes)"
+  [ -n "$DRAINED" ] || return 0
+  map="$(git -C "$MIRROR" ls-files 2>/dev/null | grep '\.gpg$' | while IFS= read -r p; do
+           printf '%s %s\n' "$(printf '%s' "$p" | sha256sum | awk '{print $1}')" "$p"; done || true)"
+  while IFS= read -r h; do
+    [ -n "$h" ] || continue
+    grep -qx "$h" "$MIRROR/.purged" 2>/dev/null || { printf '%s\n' "$h" >> "$MIRROR/.purged"; git_id add .purged; }
+    while IFS=' ' read -r ph p; do
+      [ "$ph" = "$h" ] || continue
+      git_id rm -q -f --ignore-unmatch -- "$p" "$p.sha256" >/dev/null 2>&1 || true
+    done <<EOF
+$map
+EOF
+  done <<EOF
+$DRAINED
+EOF
+  if ! git -C "$MIRROR" diff --cached --quiet 2>/dev/null; then
+    git_id commit -q -m "purge: $(printf '%s\n' "$DRAINED" | cut -c1-12 | paste -sd' ' -) (purge-session)" >/dev/null 2>&1 || true
+  fi
+}
+# After origin has our branch: drop every DRAINED hash the committed tombstone manifest confirms.
+pending_done() {
+  local h done_list="" committed
+  [ -n "$DRAINED" ] || return 0
+  committed="$(git -C "$MIRROR" show "HEAD:.purged" 2>/dev/null || true)"
+  while IFS= read -r h; do
+    [ -n "$h" ] || continue
+    printf '%s\n' "$committed" | grep -qx "$h" && done_list="$done_list$h
+"
+  done <<EOF
+$DRAINED
+EOF
+  DRAINED=""
+  [ -n "$done_list" ] || return 0
+  pending_lock || { bw_health capture_backup warn "purge-session ledger busy — $(pending_count) retraction(s) stay pending (next push retries)"; return 0; }
+  if [ -f "$PENDING" ]; then
+    ( umask 077; { grep -vxF -f <(printf '%s' "$done_list") "$PENDING" || true; } > "$PENDING.tmp.$$" )
+    if [ -s "$PENDING.tmp.$$" ]; then mv -f "$PENDING.tmp.$$" "$PENDING"; else rm -f "$PENDING.tmp.$$" "$PENDING"; fi
+  fi
+  rmdir "$PLOCK" 2>/dev/null || true
+  while IFS= read -r h; do
+    [ -n "$h" ] && bw_health capture_backup info "purge ok (${h:0:12})"
+  done <<EOF
+$done_list
+EOF
   return 0
 }
 
@@ -234,6 +377,9 @@ case "$MODE" in
     [ -n "$repo_name" ] || repo_name="$(PYTHONPATH="$BAILIWICK_ROOT/hooks" python3 -c 'import sys, capture_session; sys.stdout.write(capture_session.repo_key(sys.argv[1]))' "$PROJECT_DIR" 2>/dev/null || true)"
     [ -n "$repo_name" ] || repo_name="$(basename "$PROJECT_DIR")"
     destdir="$MIRROR/$mtoken/$repo_name"
+    # Purge-session retractions still pending (the detached `retract` was busy/offline/rejected):
+    # retry them FIRST, so their tombstones are in the manifest the sweep and loop below read.
+    drain_pending
     # Tombstoned relpaths — union of the worktree manifest and origin's: a purge issued from
     # ANOTHER machine lands on origin first, and this worktree only syncs at the next
     # push-reject→rebase. Reading both closes that window.
@@ -257,9 +403,15 @@ case "$MODE" in
     # After the sweep, not before: `git rm` of a directory's last blob removes the directory too.
     mkdir -p "$destdir"
     shopt -s nullglob
+    held=0
     for f in "$RAW"/*.jsonl "$RAW"/*.md; do
       [ -f "$f" ] || continue
       base="$(basename "$f")"
+      # Purge detection failed on this session (capture_session.py wrote the header line): it may be
+      # a /purge session, so both files stay LOCAL until a human reviews and removes the line.
+      if grep -qx -- '- purge_detection: error' "$RAW/${base%.*}.md" 2>/dev/null; then
+        held=$((held + 1)); continue
+      fi
       # Purged blobs must stay purged: a purge removes the sha sidecar, so without this check the
       # next push re-encrypts and resurrects the blob for as long as the source capture is
       # un-retired (curated from another repo/machine than the origin). Skip by relpath, not sha —
@@ -278,7 +430,7 @@ case "$MODE" in
       if ! gpg --batch --yes --no-tty --trust-model always "${enc_args[@]}" --encrypt \
            --output "$destdir/$base.gpg" "$f" 2>/dev/null; then
         rm -f "$destdir/$base.gpg"
-        bw_health capture_backup error "encrypt FAILED for $base (recipient key unusable/missing?) — capture stays local-only until fixed"
+        bw_health capture_backup error "encrypt FAILED for $(id12 "$base") (recipient key unusable/missing?) — capture stays local-only until fixed"
         echo "[backup] encrypt FAILED for $base — source capture kept; fix the recipient key (scripts/doctor.sh checks it)" >&2
         continue
       fi
@@ -286,6 +438,9 @@ case "$MODE" in
       changed=1
     done
     shopt -u nullglob
+    if [ "$held" -gt 0 ]; then
+      bw_health capture_backup warn "$held capture file(s) held local-only: purge detection error — review, then remove the 'purge_detection: error' header line"
+    fi
     # Health-shard transport: upload this machine's health shard (encrypted, like captures) so the
     # central machine can aggregate a fleet view in /metrics. Sha-sidecar skips unchanged shards.
     hshard="$BW_HOME/health/$mtoken.jsonl"
@@ -304,28 +459,18 @@ case "$MODE" in
     date +%s > "$STAMP"
     if [ "$changed" = "1" ]; then
       git_id add -A
-      git_id commit -q -m "capture: $mtoken/$repo_name $(date -u +%Y-%m-%dT%H:%M:%SZ)" || true
+      git_id commit -q -m "capture: $mtoken/$(id12 "$repo_name") $(date -u +%Y-%m-%dT%H:%M:%SZ)" || true
     fi
-    # Push whenever the mirror is AHEAD of origin, not only when this run encrypted something:
-    # a push killed after commit (SessionEnd timeout, crash, offline) otherwise strands its
-    # ciphertext until some unrelated future capture changes.
-    if git -C "$MIRROR" rev-parse -q --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
-      ahead="$(git -C "$MIRROR" rev-list --count "origin/$BRANCH..$BRANCH" 2>/dev/null || echo 0)"
-    else
-      ahead="$(git -C "$MIRROR" rev-list --count "$BRANCH" 2>/dev/null || echo 0)"
+    prc=0; push_branch || prc=$?
+    if [ "$prc" = 2 ]; then pending_done; exit 0; fi   # nothing ahead: origin already has it all
+    if [ "$prc" = 1 ]; then
+      unp="$(git -C "$MIRROR" rev-list --count "origin/$BRANCH..$BRANCH" 2>/dev/null || echo '?')"
+      bw_health capture_backup error "push failed ($BRANCH; $unp unpushed commit(s); ciphertext safe in local mirror)"
+      [ -z "$DRAINED" ] || bw_health capture_backup warn "purge-session retraction not pushed — $(pending_count) pending (next push retries)"
+      echo "[backup] push failed (ciphertext safe in local mirror $MIRROR)" >&2; exit 0
     fi
-    [ "${ahead:-0}" -gt 0 ] || exit 0
-    if ! git_id push -q origin "$BRANCH" 2>/dev/null; then
-      if git -C "$MIRROR" fetch -q origin "$BRANCH" 2>/dev/null; then
-        git_id rebase -q "origin/$BRANCH" >/dev/null 2>&1 || rebase_resolve || true
-      fi
-      git_id push -q origin "$BRANCH" 2>/dev/null || {
-        unp="$(git -C "$MIRROR" rev-list --count "origin/$BRANCH..$BRANCH" 2>/dev/null || echo '?')"
-        bw_health capture_backup error "push failed ($BRANCH; $unp unpushed commit(s); ciphertext safe in local mirror)"
-        echo "[backup] push failed (ciphertext safe in local mirror $MIRROR)" >&2; exit 0
-      }
-    fi
-    bw_health capture_backup info "push ok ($repo_name -> $BRANCH)"
+    pending_done
+    bw_health capture_backup info "push ok ($(id12 "$repo_name") -> $BRANCH)"
     # stderr, not stdout: Codex parses a Stop/SessionEnd hook's stdout as JSON, so a plain line
     # there marks the hook Failed. Same channel its failure sibling above already uses.
     echo "[backup] pushed '$repo_name' captures to $BRANCH" >&2
@@ -342,14 +487,16 @@ case "$MODE" in
     # Decrypt needs to UNLOCK the (passphrase-protected) private key, which means gpg-agent must be
     # able to prompt via pinentry. Tell gpg-agent which terminal to use, if we have one (harmless if
     # not — a GUI pinentry uses $DISPLAY instead). This makes the manual `… pull` path work in a plain
-    # terminal without the caller having to remember `export GPG_TTY=$(tty)`.
-    export GPG_TTY="${GPG_TTY:-$(tty 2>/dev/null || true)}"
+    # terminal without the caller having to remember `export GPG_TTY=$(tty)`. Exported ONLY when tty
+    # succeeds: without a terminal `tty` prints "not a tty", which must not become GPG_TTY (it made
+    # the no-TTY preflight below dead code). An `if`, so a failing tty is safe under `set -e`.
+    if [ -z "${GPG_TTY:-}" ] && _tty=$(tty 2>/dev/null); then export GPG_TTY="$_tty"; fi
     # Preflight: pinentry can only prompt if there is a TTY (curses pinentry), a GUI display (graphical
     # pinentry), or the key is already unlocked in gpg-agent. If none hold, decryption cannot possibly
     # succeed — say so ONCE, with the fix, instead of emitting a failure line per blob.
     key_cached() { gpg-connect-agent 'keyinfo --list' /bye 2>/dev/null \
         | awk '$1=="S"&&$2=="KEYINFO"&&$7=="1"{f=1} END{exit f?0:1}'; }
-    if [ -z "$GPG_TTY" ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ] && ! key_cached; then
+    if [ -z "${GPG_TTY:-}" ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ] && ! key_cached; then
       echo "[backup] cannot decrypt here: no TTY and no GUI display for a passphrase prompt, and the" >&2
       echo "         key is not unlocked in gpg-agent. Fix (any one):" >&2
       echo "           • run from a terminal:   export GPG_TTY=\$(tty); bash \"$0\" pull" >&2
@@ -420,8 +567,15 @@ case "$MODE" in
     # A bare session name matches neither blob (two per session: .jsonl.gpg + .md.gpg) and
     # exits 0 as "nothing to purge" — warn before it fails quiet.
     case "$rel" in *.gpg) ;; *) echo "[backup] warning: relpath should end in .jsonl.gpg or .md.gpg — a bare session name never matches (two blobs per session)" >&2;; esac
-    mirror_lock 120 || { echo "[backup] capture mirror busy — retry shortly" >&2; exit 1; }
+    # Logged: capture_session.py also runs this detached (purge-session retraction), where stderr
+    # goes nowhere — a busy mirror must not drop that request silently.
+    mirror_lock 120 || { bw_health capture_backup warn "purge: mirror busy >120 s — not applied, re-run it"; echo "[backup] capture mirror busy — retry shortly" >&2; exit 1; }
     ensure_mirror
+    # Health lines and commit messages name the blob by <sha256(relpath)[:12]>, never the relpath:
+    # it carries the repo key (a client-identifying basename) and the session id, and both the
+    # fleet-aggregated health shard and the backup repo's history outlive the purge. Terminal echoes
+    # keep the relpath (local, interactive). Same reason the `.purged` tombstone is hashed.
+    ph="$(printf '%s' "$rel" | sha256sum | awk '{print $1}')"; h12="$(id12 "$rel")"
     # Another machine's blob lives on ITS branch (capture/<machine>), which our worktree never
     # checks out. Purge it there via a throwaway detached worktree — the main worktree must stay
     # on OUR branch, or the next push's `git add -A` would commit one machine's tree to another's.
@@ -441,19 +595,18 @@ case "$MODE" in
       wt="$(mktemp -d "${TMPDIR:-/tmp}/bw-purge-wt.XXXXXX")"
       if ! git -C "$MIRROR" worktree add -q --detach "$wt/w" "origin/$tbr" 2>/dev/null; then
         rm -rf "$wt"
-        bw_health capture_backup warn "purge: cannot stage worktree for $tbr ($rel)"
+        bw_health capture_backup warn "purge: cannot stage worktree for $tbr ($h12)"
         echo "[backup] cannot stage a worktree for $tbr — purge not applied" >&2; exit 0
       fi
       wid() { git -C "$wt/w" -c user.name=bailiwick -c user.email=backup@local -c commit.gpgsign=false "$@"; }
       wid rm -q --ignore-unmatch "$rel" "$rel.sha256" 2>/dev/null || true
-      ph="$(printf '%s' "$rel" | sha256sum | awk '{print $1}')"
       grep -qx "$ph" "$wt/w/.purged" 2>/dev/null || { printf '%s\n' "$ph" >> "$wt/w/.purged"; wid add .purged; }
-      if wid commit -q -m "purge: $rel (curated)" 2>/dev/null; then
+      if wid commit -q -m "purge: $h12 (curated)" 2>/dev/null; then
         # No local branch to drain from later (the worktree is gone after this run) — a failed
         # push here is retried by simply re-running the same purge command.
         wid push -q origin "HEAD:refs/heads/$tbr" 2>/dev/null \
           && echo "[backup] purged $rel (branch $tbr)" \
-          || { bw_health capture_backup warn "purge push failed ($rel on $tbr) — re-run to retry"; echo "[backup] purge push failed for $tbr — re-run to retry" >&2; }
+          || { bw_health capture_backup warn "purge push failed ($h12 on $tbr) — re-run to retry"; echo "[backup] purge push failed for $tbr — re-run to retry" >&2; }
       else
         echo "[backup] nothing new to purge: $rel"
       fi
@@ -462,23 +615,45 @@ case "$MODE" in
       rm -rf "$wt"
       exit 0
     fi
+    # Pending purge-session retractions ride along (own branch only — that is where they live).
+    drain_pending
     git_id rm -q --ignore-unmatch "$rel" "$rel.sha256" 2>/dev/null || true
     # Tombstone in the branch-root manifest so push never re-encrypts this blob (see push loop).
     # Entries are sha256 of the blob relpath, NOT the path itself: a path-named marker would keep
     # the client-identifying repo-key in the current tree — exactly what purge_verify.sh residual
     # --backup-path greps for — while a hashed line matches no prefix and names no client.
-    ph="$(printf '%s' "$rel" | sha256sum | awk '{print $1}')"
     grep -qx "$ph" "$MIRROR/.purged" 2>/dev/null || { printf '%s\n' "$ph" >> "$MIRROR/.purged"; git_id add .purged; }
-    git_id commit -q -m "purge: $rel (curated)" 2>/dev/null || echo "[backup] nothing new to purge: $rel"
+    git_id commit -q -m "purge: $h12 (curated)" 2>/dev/null || echo "[backup] nothing new to purge: $rel"
+    # A manual purge of a blob the ledger still lists settles that entry too.
+    if pending_hashes | grep -qx "$ph"; then DRAINED="$(printf '%s\n%s' "$DRAINED" "$ph" | grep . | sort -u || true)"; fi
     # Always drain: a prior purge's push may have failed silently, leaving the mirror ahead —
     # "commit succeeded" and "push attempted" must stay decoupled or stranded commits never flush.
     git_id fetch -q origin "$BRANCH" 2>/dev/null || true
     if [ -n "$(git_id rev-list "origin/$BRANCH..$BRANCH" -n1 2>/dev/null)" ]; then
-      bw_health capture_backup info "purge: draining unpushed mirror commit(s) ($rel)"
-      git_id push -q origin "$BRANCH" 2>/dev/null \
-        && echo "[backup] purged $rel" \
-        || { bw_health capture_backup warn "purge push failed ($rel)"; echo "[backup] purge committed in mirror; push failed" >&2; }
+      bw_health capture_backup info "purge: draining unpushed mirror commit(s) ($h12)"
+      if git_id push -q origin "$BRANCH" 2>/dev/null; then
+        echo "[backup] purged $rel"; pending_done
+      else
+        bw_health capture_backup warn "purge push failed ($h12)"; echo "[backup] purge committed in mirror; push failed" >&2
+      fi
+    elif git -C "$MIRROR" rev-parse -q --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
+      pending_done   # not ahead of a KNOWN origin branch: origin already holds the tombstones
     fi
     ;;
-  *) echo "usage: capture_backup.sh [push | pull [dest] | purge <relpath>]" >&2; exit 2;;
+  retract)
+    # Purge-session retraction: drain the ledger (run detached by capture_session.py, no argument —
+    # the ledger holds hashes, so no identifier reaches argv or `ps`). Gated like push.
+    [ -n "$(pending_hashes)" ] || exit 0
+    [ "$ACK" = "1" ] || { bw_health capture_backup warn "retract: confidentiality_ack is false — $(pending_count) retraction(s) stay pending"; exit 0; }
+    mirror_lock 120 || { bw_health capture_backup warn "retract: mirror busy >120 s — $(pending_count) retraction(s) pending (next push retries)"; exit 0; }
+    ensure_mirror
+    drain_pending
+    rrc=0; push_branch || rrc=$?
+    if [ "$rrc" = 1 ]; then
+      bw_health capture_backup warn "retract: push failed — $(pending_count) retraction(s) pending (next push retries)"
+      exit 0
+    fi
+    pending_done
+    ;;
+  *) echo "usage: capture_backup.sh [push | pull [dest] | purge <relpath> | retract]" >&2; exit 2;;
 esac

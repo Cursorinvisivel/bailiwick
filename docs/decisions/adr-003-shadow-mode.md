@@ -33,7 +33,7 @@ clone** — writing **zero files** into it. Two facts make this feasible:
 
 The only genuinely repo-local artifact was **outputs/captures** (`.bailiwick-outputs/`). The ADR-002
 dirty-zone backup pipeline **already stores captures centrally, keyed by origin repo** (its
-`capture/<machine>` branch records `capture: <origin>/<repo> <ts>`). That is exactly the "central,
+`capture/<machine>` branch records `capture: <machine>/<repo12> <ts>`, a hashed repo token; blob paths still carry the repo name). That is exactly the "central,
 per-repo-keyed captures" primitive shadow mode needs — it already exists as a proven pipeline
 (`capture_backup.sh` → dirty repo → `/curate` pull/decrypt/promote/purge).
 

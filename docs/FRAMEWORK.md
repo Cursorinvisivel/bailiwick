@@ -101,7 +101,7 @@ canonical files — Gemini `~/.gemini/agents/*.md`, Codex `~/.codex/agents/*.tom
 `~/.copilot/agents/*.agent.md` — so all four tools can dispatch the stages natively (ADR-010
 Amendment 1; trigger model per tool in §10). A stage's **final report** is its only channel back
 and the only part the capture hooks record, so outputs and knowledge signals go in it. See
-ADR-010. 15 files in three tiers.
+ADR-010. 16 files in three tiers.
 
 ### Tiers
 - **Orchestrator (1):** `lead.md` — entry point for substantial/multi-step work; drives the Quality
@@ -113,8 +113,10 @@ ADR-010. 15 files in three tiers.
   `security-review.md` (security + CIS mapping), `docs.md` (ADR/HLD/runbook/workshop),
   `memory.md` (library query + collect), `cloud-research.md` (authoritative external research),
   `federation.md` (external-brain consult + gated ingest), `advisor.md` (read-only second opinion
-  on Edge plans/diffs and hard decisions; Fable, ADR-010 Amendment 4). Plus one restricted variant,
-  `cloud-research-freshness.md` (fetch-only, dispatched only by `/curate` periodic mode).
+  on Edge plans/diffs and hard decisions; Fable, ADR-010 Amendment 4). Plus two restricted variants:
+  `cloud-research-freshness.md` (fetch-only, dispatched only by `/curate` periodic mode) and
+  `security-review-local.md` (Read/Grep/Glob only: no network, no shell; dispatched by `/purge` and
+  `/curate` for sensitive inputs).
 
 ### Flow
 1. A task arrives. **Proportional routing:** trivial edits / direct questions are answered inline
@@ -309,7 +311,7 @@ apply exactly as they would in a seeded repo. Capture/session hooks are **Claude
 | `guardrails.py` | **PreToolUse** (`Bash`) | **Runtime guardrail (ADR-006).** Four tiers, each resolving to an in-the-moment gate — a **forced confirmation** under Claude Code and Gemini CLI, a **hard deny with break-glass** under Codex (no confirm dialog; §10) — so nothing dangerous runs silently or on agent initiative: **EXEMPT** (dirty-zone capture plumbing always passes — data-loss prevention); **ASK-IMPACT** (real-world impact re-confirms *even when user-instructed*: terraform/terragrunt `apply`/`destroy`, kubectl/helm mutations, gcloud/gsutil/az/aws mutating verbs incl. `update`/`patch`/`rm`, recursive/forced `rm`, `git merge`, `gh repo delete`); **ASK-GO-AHEAD** (`git commit`/`push`, `gh pr create`/`merge`/`close` need a clear user go-ahead; AI attribution signatures in the message get their own confirmation); **SIGNED-COMMIT SHAPE** (in a repo that signs, a commit that is not `/sign`-shaped — `git commit -S -F .git/COMMIT_MSG_<slug>` — is denied; the message file is scanned for signatures). Validation-only commands (plan/validate/fmt, `--dry-run`, read-only CLI) pass untouched; line-continuations folded before matching. Self-gated. **Tiered failure mode (ADR-005):** on evaluation error it fails **closed** (deny) for commands that trip a destructive pre-filter, else fails **open**; `BAILIWICK_BREAK_GLASS=1` downgrades that error-path deny to ask. **Direct-command patterns only — not a complete security boundary** (misses `make apply`, wrapper scripts, aliases, Terraform-MCP actions). Every decision is logged to `~/.bailiwick/guardrail-audit.log`. |
 | `fetch_guard.py` | **PreToolUse** (`WebFetch`) | Fetch-time allowlist for the `/curate` freshness agent only, in two layers — the agent's own frontmatter hook (via a launcher `install_hooks.py` writes; fails closed when missing) and the global hook (payload `agent_type`): denies URLs outside the GCP source registry using the same `check_source.py` policy as the orchestrator's post-hoc check. Claude Code only. See hooks/README.md for its fail-closed/fail-open edges. |
 | `session_start.sh` | SessionStart | Assert framework defaults; **inject `INDEX.md`**; **inbound ff-pull** of the Bailiwick clone (throttled, clean-`main`-only, non-fatal); nag on pending captures; nag on framework-health **errors in the last ~24h** (this machine's shard); warn loudly if `python3` is missing (guardrail+capture inactive); nag if INDEX > ~20 KB (shard). |
-| `capture_session.py` | Stop, SessionEnd | Copy the transcript to `<project>/.bailiwick-outputs/raw/<id>.jsonl` when the session did substantive work (mutations or ≥3 tool calls, subagents included). Under Claude Code it also scans the session's subagent transcripts (`<session_id>/subagents/`) for knowledge reads (`loaded_via_subagents`, `capture_schema: 2`) and appends their records to the same capture, tagged `isSidechain`/`agentId` (`capture.include_subagents`, default on). No intelligence, no promotion. |
+| `capture_session.py` | Stop, SessionEnd | Copy the transcript to `<project>/.bailiwick-outputs/raw/<id>.jsonl` when the session did substantive work (mutations or ≥3 tool calls, subagents included). Under Claude Code it also scans the session's subagent transcripts (`<session_id>/subagents/`) for knowledge reads (`loaded_via_subagents`, `capture_schema: 2`) and appends their records to the same capture, tagged `isSidechain`/`agentId` (`capture.include_subagents`, default on). Never captures a session whose user typed a skip skill (`purge` always, plus `capture.skip_skills`) or whose main transcript ran the `hooks/mark_purge_session.sh` sentinel successfully; it deletes earlier captures of such a session and queues backup retraction (`$BAILIWICK_HOME/backup-retract.pending`, drained by `capture_backup.sh retract`). An agent-originated trigger (a model `Skill` call, an injected skill body, anything in a subagent) only holds the capture local (`purge_detection: error`) and deletes nothing. No intelligence, no promotion. |
 | `capture_backup.sh` | Stop, SessionEnd (push); `/curate` (pull/purge) | **Optional** durable backup: gpg-encrypts new captures and pushes **ciphertext** to a per-machine branch of a dedicated private repo (`capture_backup` in `.bailiwick-sync.json`; off + `confidentiality_ack: false` by default). `pull` decrypts to `.bailiwick-inbox/raw/` for curate (runnable from any wired repo); `purge` drops a blob from the **current tree** (not history — ciphertext persists in git history until rewritten/key-destroyed). Blobs are keyed by the collision-resistant `repo_key` (origin-based), so same-basename repos never commingle. Private key never leaves the curating machine. **Best-effort / fail-open**, local-mirror-first — a failed push lags the remote copy but never loses the capture; push success/failure (with unpushed-commit count) is logged to the framework-health shard, surfaced by `/metrics` and the SessionStart error nag. Also transports each machine's **health shard** (encrypted) on `push` and refreshes the fleet's shards into `~/.bailiwick/health/remote/` on `pull`. |
 
 Helpers (not hook events): `sync_knowledge.sh` (outbound knowledge sync — §8), `install_hooks.py`
@@ -687,7 +689,7 @@ bailiwick/
   scripts/        bootstrap.sh  bootstrap.ps1
   knowledge/      INDEX.md  .telemetry.json  topics/ patterns/ context/ clients/ templates/ …
   definitions/    README.md — per-client document build specs (clients/<id>/), outside knowledge/ (ADR-011)
-  agents/         lead + 5 domain + 8 execution + 1 restricted variant (15 files)
+  agents/         lead + 5 domain + 8 execution + 2 restricted variants (16 files)
   hooks/          session_start.sh  capture_session.py  capture_backup.sh  sync_knowledge.sh
                   guardrails.py  install_hooks.py  settings.template.json  health_common.sh
                   install_global_layer.sh  install_adapter_hooks.py  install_desktop_mcp.py

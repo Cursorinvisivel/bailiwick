@@ -3,7 +3,7 @@
 #
 # Companion to /purge and docs/history-purge.md. Two modes:
 #
-#   purge_verify.sh residual <token> [<token>...] [--backup-path <prefix>]...
+#   purge_verify.sh residual <token>... [--tokens-file <file>] [--backup-path <prefix>]...
 #       Measure what still EXISTS for the given identifier(s), honestly:
 #         - working-tree hits (git grep) in this repo
 #         - git-HISTORY hits (commits whose diff ever contained the token) — the recovery surface
@@ -12,12 +12,16 @@
 #         - with --backup-path: ciphertext blobs under that prefix in the backup repo's CURRENT
 #           trees and its HISTORY (ciphertext cannot be grepped for tokens — measured by path)
 #       Exit 0 = nothing found anywhere; exit 1 = residuals exist (each one printed).
+#       A token of 4 characters or fewer matches on alphanumeric boundaries only (git grep -E,
+#       git log -G), longer tokens as case-insensitive substrings — scripts/purge_scrub.py's rule.
 #
 #   purge_verify.sh preflight
 #       Gate for the DEEP-REMOVAL procedure (history rewrite / squash / crypto-erasure): find
 #       pending, un-curated captures across the fleet BEFORE history or keys are destroyed:
 #         - this machine's local staging (.bailiwick-inbox/raw, ~/.bailiwick/captures/*/raw,
 #           and every allowlisted shadow repo's .bailiwick-outputs/raw)
+#         - a leftover ~/.bailiwick/purge-work/ (tokens and deleted-file copies of an unfinished
+#           /purge run)
 #         - every capture/* branch of the configured backup repo (blobs present = captures some
 #           machine pushed that were never post-curation purged)
 #         - health-shard freshness per machine (a recently active machine may hold local-only
@@ -47,6 +51,10 @@ except Exception: d={}
 print((d.get("capture_backup") or {}).get("repo") or "")' "$CFG" 2>/dev/null || true
 }
 
+short_ere() {  # <token> -> POSIX ERE matching it on alphanumeric boundaries (same rule as purge_scrub.py)
+  printf '(^|[^A-Za-z0-9])%s([^A-Za-z0-9]|$)' "$(printf '%s' "$1" | sed 's/[][\.*^$+?(){}|]/\\&/g')"
+}
+
 clone_backup() {  # read-only inspection clone; prints its path or nothing
   _pv_repo="$(backup_repo)"
   [ -n "$_pv_repo" ] || return 0
@@ -64,26 +72,55 @@ case "$MODE" in
 
 residual)
   shift
-  tokens=""
-  bpaths=""
+  # Arrays, not a space-joined string: an "<org name>" token keeps its spaces (one phrase, not
+  # one hit per word).
+  tokens=()
+  labels=()   # what the output calls each token: itself, or `token #N` when read from a file
+  bpaths=()
   while [ $# -gt 0 ]; do
     case "$1" in
-      --backup-path) bpaths="$bpaths $2"; shift 2 ;;
-      *) tokens="$tokens $1"; shift ;;
+      --backup-path) bpaths+=("$2"); shift 2 ;;
+      # One token per line (/purge's $W/tokens, every 3a variant included): the command line then
+      # carries no token at all, and the output names these tokens by index only.
+      --tokens-file)
+        [ -f "${2:-}" ] || { echo "purge_verify: --tokens-file '${2:-}' not readable" >&2; exit 2; }
+        while IFS= read -r tl || [ -n "$tl" ]; do
+          tl="${tl%$'\r'}"
+          if [ -n "$tl" ]; then tokens+=("$tl"); labels+=("token #${#tokens[@]}"); fi
+        done < "$2"
+        shift 2 ;;
+      *) tokens+=("$1"); labels+=("'$1'"); shift ;;
     esac
   done
-  [ -n "$tokens" ] || { echo "usage: purge_verify.sh residual <token>... [--backup-path <prefix>]..." >&2; exit 2; }
+  [ "${#tokens[@]}" -gt 0 ] || { echo "usage: purge_verify.sh residual <token>... [--tokens-file <file>] [--backup-path <prefix>]..." >&2; exit 2; }
 
   echo "purge residual check — $BAILIWICK_ROOT"
-  for t in $tokens; do
-    n="$(git grep -Ili -- "$t" 2>/dev/null | wc -l | tr -d ' ')"
-    if [ "${n:-0}" -gt 0 ]; then hit "'$t': $n working-tree file(s) still match (git grep -li -- '$t')"; else ok "'$t': working tree clean"; fi
-    # -S finds every commit whose diff added/removed the token — the honest history surface.
-    h="$(git log --all -S"$t" -i --oneline 2>/dev/null | wc -l | tr -d ' ')"
-    if [ "${h:-0}" -gt 0 ]; then
-      hit "'$t': $h commit(s) in git HISTORY still carry it — recoverable via 'git log -S' until the history is rewritten/squashed (docs/history-purge.md)"
+  k=0
+  for t in "${tokens[@]}"; do
+    lab="${labels[$k]}"; k=$((k + 1))
+    if [ "${#t}" -le 4 ]; then
+      # Short token: alphanumeric boundaries only, the rule scripts/purge_scrub.py uses everywhere —
+      # a substring match would hit `adi` in "loading" and never read clean.
+      re="$(short_ere "$t")"
+      n="$(git grep -IliE -- "$re" 2>/dev/null | wc -l | tr -d ' ')"; grc=$?
+      how="git grep -liE, boundary match for a token of 4 chars or fewer"
+      h="$(git log --all -G"$re" -i --oneline 2>/dev/null | wc -l | tr -d ' ')"
     else
-      ok "'$t': git history clean"
+      # -F: a token is a literal string. Without it a `[` makes git grep error out, which reads as
+      # "no matches" — a false clean.
+      n="$(git grep -IliF -- "$t" 2>/dev/null | wc -l | tr -d ' ')"; grc=$?
+      how="git grep -liF"
+      # -S finds every commit whose diff added/removed the token — the honest history surface.
+      h="$(git log --all -S"$t" -i --oneline 2>/dev/null | wc -l | tr -d ' ')"
+    fi
+    # git grep: 0 = matches, 1 = none, anything else = it failed (never report that as clean).
+    if [ "$grc" -gt 1 ]; then hit "$lab: git grep failed (exit $grc) — working tree NOT checked"
+    elif [ "${n:-0}" -gt 0 ]; then hit "$lab: $n working-tree file(s) still match ($how)"
+    else ok "$lab: working tree clean"; fi
+    if [ "${h:-0}" -gt 0 ]; then
+      hit "$lab: $h commit(s) in git HISTORY still carry it — recoverable via 'git log -S' until the history is rewritten/squashed (docs/history-purge.md)"
+    else
+      ok "$lab: git history clean"
     fi
   done
   # refs/pull pins: a force-push rewrites branches, never these — old objects stay fetchable.
@@ -91,10 +128,10 @@ residual)
   if [ "${prn:-0}" -gt 0 ]; then
     note "origin holds $prn refs/pull/* head(s) — merged/closed PRs pin pre-rewrite objects even after a force-push; full removal needs the host's support (docs/history-purge.md §GitHub residuals)"
   fi
-  if [ -n "$bpaths" ]; then
+  if [ "${#bpaths[@]}" -gt 0 ]; then
     bdir="$(clone_backup)"
     if [ -n "$bdir" ]; then
-      for p in $bpaths; do
+      for p in "${bpaths[@]}"; do
         cur=0; hist=0
         for br in $(git -C "$bdir" branch -r --format='%(refname:short)' | grep -v HEAD); do
           c="$(git -C "$bdir" ls-tree -r --name-only "$br" 2>/dev/null | grep -c "^$p" || true)"
@@ -127,6 +164,14 @@ preflight)
       n="$(find "$line/.bailiwick-outputs/raw" -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' ')"
       [ "${n:-0}" -gt 0 ] && hit "allowlisted repo $line: $n capture(s) pending"
     done < "$BW_HOME/allowlist"
+  fi
+  # A leftover /purge work dir holds the tokens (and copies of deleted files): an aborted run whose
+  # Step 5.7 never ran. Its file names are never printed — they can carry nothing but the count.
+  if [ -d "$BW_HOME/purge-work" ]; then
+    n="$(find "$BW_HOME/purge-work" -type f 2>/dev/null | wc -l | tr -d ' ')"
+    hit "this machine: leftover purge-work/ under $BW_HOME ($n file(s): tokens / deleted-file copies of an unfinished /purge) — finish that purge's Step 5.7 or remove it: rm -r -- \"\${BAILIWICK_HOME:-\$HOME/.bailiwick}/purge-work\""
+  else
+    ok "this machine: no leftover purge-work/"
   fi
   note "seeded repos are not centrally enumerable — each machine's SessionStart nag / doctor must read clean there"
   # 2. The holding repo: blobs on any capture/* branch = pushed but never post-curation purged.

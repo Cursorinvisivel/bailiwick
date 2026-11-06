@@ -126,6 +126,13 @@ bash "$INST/hooks/capture_backup.sh" pull "$T_SANDBOX/inbox" >/dev/null 2>&1
 rec="$(find "$T_SANDBOX/inbox" -name 's1.jsonl' | head -1)"
 assert_eq "round-trip recovery: decrypted content equals original" "SECRET-PAYLOAD-ALPHA" "$(cat "${rec:-/dev/null}" 2>/dev/null)"
 
+echo "== no TTY: GPG_TTY is never set to tty's 'not a tty' text, so the pull preflight still fires"
+# stdin </dev/null: `tty` fails. The old `${GPG_TTY:-$(tty || true)}` stored "not a tty" and made
+# the `[ -z GPG_TTY ]` preflight dead code. Test keys carry no passphrase, so none is cached.
+out="$(env -u DISPLAY -u WAYLAND_DISPLAY -u GPG_TTY bash "$INST/hooks/capture_backup.sh" pull "$T_SANDBOX/inbox-notty" </dev/null 2>&1)"
+assert_contains "no-TTY preflight names the fix" "cannot decrypt here" "$out"
+assert_not_contains "no 'not a tty' leaks into the run" "not a tty" "$out"
+
 echo "== purge is surgical: named blob only, source untouched"
 rel="$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat | grep 's1\.jsonl\.gpg$' | head -1)"
 bash "$INST/hooks/capture_backup.sh" purge "$rel" >/dev/null 2>&1
@@ -309,5 +316,161 @@ assert_contains "stale lock takeover pushes the waiting capture" "s13.jsonl.gpg"
   "$(git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat)"
 assert_contains "stale lock takeover logs a health warning" "stale mirror lock" "$HEALTH"
 assert_no_dir "lock released after the run" "$MIRROR.lock"
+
+echo "== /purge session: earlier backup blobs retracted, tombstoned, never re-pushed"
+# A session that invokes /purge holds the identifiers being removed. An earlier Stop may already have
+# captured AND pushed it; the Stop that sees the invocation must retract both. This also pins that
+# capture_session.py derives the SAME blob relpath (<machine>/<repo_key>/<file>.gpg) push wrote.
+write_cfg true "$FPR"
+PPROJ="$T_SANDBOX/pproj"; mkdir -p "$PPROJ"; echo '$BAILIWICK' > "$PPROJ/CLAUDE.local.md"
+PT="$T_SANDBOX/purge-session.jsonl"
+work='{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Write","input":{"file_path":"a.tf"}}]}}'
+# A USER-typed /purge (trusted): skip + retract + tombstone. An agent Skill(purge) call is only held.
+purge_rec='{"type":"user","message":{"role":"user","content":"<command-message>purge</command-message>\n<command-name>/purge</command-name>\n<command-args>acme</command-args>"}}'
+skill_rec='{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"purge","args":"acme"}}]}}'
+capture() {  # <session-id> [env...] : the Stop hook exactly as the harness runs it
+  local sid="$1"; shift
+  printf '{"hook_event_name":"Stop","session_id":"%s","transcript_path":"%s","cwd":"%s"}' "$sid" "$PT" "$PPROJ" \
+    | env "$@" CLAUDE_PROJECT_DIR="$PPROJ" python3 "$INST/hooks/capture_session.py"
+}
+ppush() { echo '{"hook_event_name":"SessionEnd"}' | CLAUDE_PROJECT_DIR="$PPROJ" bash "$INST/hooks/capture_backup.sh" push; }
+ptree() { git -C "$T_SANDBOX/holding.git" ls-tree -r --name-only capture/testsat; }
+printf '%s\n' "$work" > "$PT"
+capture psess
+ppush >/dev/null 2>&1
+assert_contains "precondition: the pre-purge capture was backed up" "psess.jsonl.gpg" "$(ptree)"
+printf '%s\n%s\n' "$work" "$skill_rec" > "$PT"
+capture psess   # unconfirmed trigger: held local, nothing deleted, nothing retracted
+assert_file "agent Skill(purge): local capture kept" "$PPROJ/.bailiwick-outputs/raw/psess.jsonl"
+assert_contains "agent Skill(purge): held by the hold line" "purge_detection: error" "$PPROJ/.bailiwick-outputs/raw/psess.md"
+assert_contains "agent Skill(purge): backup blob not retracted" "psess.jsonl.gpg" "$(ptree)"
+printf '%s\n%s\n' "$work" "$purge_rec" > "$PT"
+capture psess   # BW_BACKUP_SYNC=1 (exported above): the retraction runs in the foreground
+assert_no_file "local capture retracted" "$PPROJ/.bailiwick-outputs/raw/psess.jsonl"
+assert_no_file "local header retracted" "$PPROJ/.bailiwick-outputs/raw/psess.md"
+after="$(ptree)"
+assert_not_contains "backup blob of the purge session removed" "psess.jsonl.gpg" "$after"
+assert_not_contains "backup header blob of the purge session removed" "psess.md.gpg" "$after"
+PKEY="$(PYTHONPATH="$INST/hooks" python3 -c 'import sys, capture_session; sys.stdout.write(capture_session.repo_key(sys.argv[1]))' "$PPROJ")"
+sha() { printf '%s' "$1" | sha256sum | awk '{print $1}'; }
+ph="$(sha "testsat/$PKEY/psess.jsonl.gpg")"; phm="$(sha "testsat/$PKEY/psess.md.gpg")"
+assert_contains "purge-session blob tombstoned in .purged" "$ph" \
+  "$(git -C "$T_SANDBOX/holding.git" show capture/testsat:.purged 2>/dev/null)"
+assert_contains "purge-session header blob tombstoned in .purged" "$phm" \
+  "$(git -C "$T_SANDBOX/holding.git" show capture/testsat:.purged 2>/dev/null)"
+msgs="$(git -C "$T_SANDBOX/holding.git" log --format=%s capture/testsat)"
+plabel="$(printf '%s\n%s\n' "$ph" "$phm" | sort | cut -c1-12 | paste -sd' ' -)"   # ledger order: sorted
+assert_contains "purge-session commit is labelled and hash-only" "purge: $plabel (purge-session)" "$msgs"
+assert_not_contains "no commit message names the session" "psess" "$msgs"
+assert_not_contains "no commit message names the repo key" "$PKEY" "$msgs"
+assert_no_file "ledger emptied once origin holds the tombstones" "$BAILIWICK_HOME/backup-retract.pending"
+assert_contains "health logs the settled retraction by hash" "purge ok (${ph:0:12})" "$HEALTH"
+ppush >/dev/null 2>&1
+assert_not_contains "a later push never re-encrypts the purge session" "psess" "$(ptree)"
+assert_contains "health records the skip, content-free" "capture skipped: purge session" "$HEALTH"
+assert_not_contains "health names no purge-session blob" "psess" "$(cat "$HEALTH")"
+assert_not_contains "health names no repo key" "$PKEY" "$(cat "$HEALTH")"
+
+echo "== /purge session retraction that cannot reach origin stays pending; the next push settles it"
+printf '%s\n' "$work" > "$PT"
+capture psess3
+ppush >/dev/null 2>&1
+assert_contains "precondition: psess3 backed up" "psess3.jsonl.gpg" "$(ptree)"
+mv "$T_SANDBOX/holding.git" "$T_SANDBOX/holding.off"   # origin unreachable
+printf '%s\n%s\n' "$work" "$purge_rec" > "$PT"
+capture psess3
+assert_no_file "local capture retracted even offline" "$PPROJ/.bailiwick-outputs/raw/psess3.jsonl"
+assert_eq "both blob hashes pending" "2" "$(grep -c . "$BAILIWICK_HOME/backup-retract.pending" 2>/dev/null)"
+assert_not_contains "ledger holds hashes only" "psess3" "$(cat "$BAILIWICK_HOME/backup-retract.pending" 2>/dev/null)"
+assert_contains "health reports the pending retraction" "retract: push failed — 2 retraction(s) pending" "$HEALTH"
+assert_contains "skip line reports the pending count" "backup retractions pending: 2" "$HEALTH"
+mv "$T_SANDBOX/holding.off" "$T_SANDBOX/holding.git"
+ppush >/dev/null 2>&1   # any later push retries the ledger first
+assert_not_contains "the next push removed the purge session's blobs" "psess3." "$(ptree)"
+assert_no_file "ledger settled by the push" "$BAILIWICK_HOME/backup-retract.pending"
+
+echo "== purge_detection: error header keeps a capture local-only until a human clears it"
+HRAW="$PPROJ/.bailiwick-outputs/raw"
+echo '{"x":1}' > "$HRAW/held.jsonl"
+printf '# Raw capture — held\n\n- purge_detection: error\n- captured: x\n' > "$HRAW/held.md"
+ppush >/dev/null 2>&1
+assert_not_contains "held capture not pushed" "held.jsonl.gpg" "$(ptree)"
+assert_not_contains "held header not pushed" "held.md.gpg" "$(ptree)"
+assert_contains "health warns about the held capture" "held local-only: purge detection error" "$HEALTH"
+printf '# Raw capture — held\n\n- captured: x\n' > "$HRAW/held.md"
+ppush >/dev/null 2>&1
+assert_contains "cleared capture pushed" "held.jsonl.gpg" "$(ptree)"
+
+echo "== commit messages and health lines carry no repo key or relpath"
+msgs="$(git -C "$T_SANDBOX/holding.git" log --all --format=%s)"
+assert_not_contains "no commit message embeds a repo key (pproj)" "$PKEY" "$msgs"
+assert_not_contains "no commit message embeds a relpath" ".gpg" "$msgs"
+assert_contains "capture commit uses the hashed repo label" "capture: testsat/$(sha "$PKEY" | cut -c1-12)" "$msgs"
+assert_not_contains "push ok line carries no repo key" "push ok ($PKEY" "$(cat "$HEALTH")"
+
+echo "== a .purged conflict in the push rebase keeps BOTH sides' tombstones"
+# Local purge committed while origin is unreachable; meanwhile machine 2 tombstones another blob on
+# this branch. The reject -> rebase conflicts on .purged (both appended): a one-sided pick would drop
+# a tombstone and let a later push resurrect that blob.
+relA="testsat/$PKEY/held.md.gpg"; relB="testsat/$PKEY/held.jsonl.gpg"
+mv "$T_SANDBOX/holding.git" "$T_SANDBOX/holding.off"
+bash "$INST/hooks/capture_backup.sh" purge "$relA" >/dev/null 2>&1
+mv "$T_SANDBOX/holding.off" "$T_SANDBOX/holding.git"
+purge_from_m2 "$relB"
+ppush >/dev/null 2>&1
+man="$(git -C "$T_SANDBOX/holding.git" show capture/testsat:.purged 2>/dev/null)"
+assert_contains "local tombstone survives the rebase" "$(sha "$relA")" "$man"
+assert_contains "machine 2's tombstone survives the rebase" "$(sha "$relB")" "$man"
+assert_not_contains "neither purged blob resurrected" "held.md.gpg" "$(ptree)"
+assert_not_contains "neither purged blob resurrected (m2)" "held.jsonl.gpg" "$(ptree)"
+
+echo "== drill self-defence: a stale BW_DRILL_SANDBOX (no marker / project outside) is ignored, with a warn"
+dpush() { echo '{"hook_event_name":"SessionEnd"}' | BW_DRILL_SANDBOX="$1" CLAUDE_PROJECT_DIR="$PPROJ" \
+  bash "$INST/hooks/capture_backup.sh" push >/dev/null 2>&1; }
+echo '{"x":3}' > "$HRAW/stale.jsonl"
+dpush "$T_SANDBOX"                                   # no .drill-sandbox marker anywhere
+assert_contains "stale var without a marker still pushes" "stale.jsonl.gpg" "$(ptree)"
+assert_contains "stale var is reported" "BW_DRILL_SANDBOX set but no drill sandbox applies" "$HEALTH"
+mkdir -p "$T_SANDBOX/elsewhere"; echo '{}' > "$T_SANDBOX/elsewhere/.drill-sandbox"
+echo '{"x":4}' > "$HRAW/outside.jsonl"
+dpush "$T_SANDBOX/elsewhere"                         # marker present, project outside it
+assert_contains "marker present but project outside still pushes" "outside.jsonl.gpg" "$(ptree)"
+
+echo "== drill self-defence: a foreign clone does nothing inside an applying drill sandbox"
+echo '{}' > "$T_SANDBOX/.drill-sandbox"              # PPROJ lives under $T_SANDBOX
+echo '{"x":2}' > "$HRAW/drill.jsonl"
+for m in push pull purge retract; do
+  before="$(git -C "$T_SANDBOX/holding.git" rev-parse capture/testsat)"
+  arg=""; [ "$m" = purge ] && arg="testsat/$PKEY/held.jsonl.gpg"
+  err="$(echo '{"hook_event_name":"SessionEnd"}' | BW_DRILL_SANDBOX="$T_SANDBOX" CLAUDE_PROJECT_DIR="$PPROJ" \
+    bash "$INST/hooks/capture_backup.sh" $m $arg 2>&1 >/dev/null)"; rc=$?
+  if [ "$m" = push ]; then
+    assert_exit "drill-foreign push exits 0 (hook stays quiet)" 0 "$rc"
+  else
+    assert_exit "drill-foreign $m exits 3 (a manual run must not look successful)" 3 "$rc"
+    assert_contains "drill-foreign $m says it did not run" "$m NOT run" "$err"
+  fi
+  assert_eq "drill-foreign $m leaves the backup branch untouched" "$before" "$(git -C "$T_SANDBOX/holding.git" rev-parse capture/testsat)"
+done
+assert_not_contains "drill-foreign push did not upload" "drill.jsonl.gpg" "$(ptree)"
+assert_contains "health records the drill skip" "drill sandbox active and this is not its framework copy" "$HEALTH"
+ln -s "$INST" "$T_SANDBOX/framework"
+dpush "$T_SANDBOX"
+assert_contains "the sandbox's own framework copy still pushes" "drill.jsonl.gpg" "$(ptree)"
+rm -f "$T_SANDBOX/.drill-sandbox" "$T_SANDBOX/framework"
+
+echo "== /purge session retraction is detached: the hook returns fast, the blob still goes"
+printf '%s\n' "$work" > "$PT"
+capture psess2
+ppush >/dev/null 2>&1
+assert_contains "precondition: psess2 backed up" "psess2.jsonl.gpg" "$(ptree)"
+printf '%s\n%s\n' "$work" "$purge_rec" > "$PT"
+t0=$(now_ms)
+capture psess2 -u BW_BACKUP_SYNC >/dev/null 2>&1
+ms=$(( $(now_ms) - t0 ))
+if [ "$ms" -lt 1000 ]; then t_ok "purge-session Stop returns in < 1000 ms (${ms} ms)"; else t_fail "purge-session Stop took ${ms} ms (budget 1500 ms)"; fi
+i=0; while ptree | grep -q 'psess2\.' && [ "$i" -lt 60 ]; do sleep 0.5; i=$((i + 1)); done
+assert_not_contains "detached child removed the purge session's blobs" "psess2." "$(ptree)"
+i=0; while [ -d "$MIRROR.lock" ] && [ "$i" -lt 60 ]; do sleep 0.5; i=$((i + 1)); done
 
 t_summary

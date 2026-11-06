@@ -29,7 +29,7 @@ Bailiwick's `skills/learn/SKILL.md`.
      each batch's distilled findings to a working notes file outside the repo before reading the
      next. Author the final capture from the notes, never from recall of a long scan.
    - Write the capture to the same staging the canonical skill resolves (seeded:
-     `.bailiwick-outputs/`; shadow: `~/.bailiwick/captures/<repo-key>/`) — it is a manual
+     `.bailiwick-outputs/`; shadow: `$BAILIWICK_HOME/captures/<repo-key>/`, default `~/.bailiwick`) — it is a manual
      session output, the channel Codex already uses.
 4. Do NOT promote anything: the capture is the only output. Promotion happens later via
    `/curate` (or `$bailiwick-curate`), under the human gate.

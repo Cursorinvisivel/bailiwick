@@ -133,3 +133,10 @@ def test_fixed_host_effort():
 
 def test_shared_reach_defined_once_in_skill():
     assert "**Shared reach**" in text(SKILL)
+
+
+def test_security_review_local_is_restricted_opus():
+    fm = frontmatter("security-review-local.md")
+    tools = {t.strip() for t in fm["tools"].split(",")}
+    assert tools <= {"Read", "Grep", "Glob"}, f"security-review-local tools {tools} exceed Read/Grep/Glob"
+    assert fm.get("model") == "opus"

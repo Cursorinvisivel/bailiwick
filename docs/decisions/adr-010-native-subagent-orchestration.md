@@ -284,3 +284,17 @@ signal. Fable is the most expensive tier, so the Advisor is gated to Edge or exp
 The advisor tier is Claude-Code-only: `model:` is still not translated, so on other hosts the
 Advisor runs on the session model. On Copilot, reviewers run at `fixed_host_effort` (high), costing
 more than Claude Code Standard reviews. The Lead model is a recommendation the user may ignore.
+
+## Amendment 5 (2026-11-03) — skills dispatch stages; restricted local reviewer; inbox plaintext rule
+
+1. **Skills dispatch stages outside `/lead`.** `/curate` (Step 2a Collect, Step 5a review) and
+   `/purge` (3a, 3b, 5a) dispatch native stage subagents themselves, sized per the
+   `skills/lead/SKILL.md` tiers. Delegated stages never write or gate; the skill keeps the human gate.
+   Unavailable delegation is an inline fallback, disclosed.
+2. **Restricted `security-review-local`.** New `agents/security-review-local.md`
+   (`bailiwick-security-review-local`, Read/Grep/Glob only: no shell, no web). A variant of Security
+   Review, not a stage; used when the input is sensitive (purge plans, security-tagged curate
+   candidates). Agent files: 16 (8 stages, 5 domain, lead, 2 restricted variants).
+3. **Inbox plaintext rule.** While the `/curate` inbox holds decrypted plaintext, no web- or
+   shell-capable stage receives decrypted content. Decrypted copies are deleted after extraction,
+   before any reviewer runs.

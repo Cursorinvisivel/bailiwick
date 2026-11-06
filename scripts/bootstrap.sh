@@ -1459,7 +1459,7 @@ else
 fi
 
 # Quality Workflow stages as NATIVE Claude Code subagents (ADR-010) — GLOBAL, like the skills:
-# every agents/*.md carrying `name:` frontmatter (every stage + the freshness variant) is symlinked into
+# every agents/*.md carrying `name:` frontmatter (every stage + the restricted variants) is symlinked into
 # ~/.claude/agents/<name>.md. lead.md (the orchestrator = the main session) and the 5 domain
 # context files have no frontmatter and are deliberately NOT installed. Never seeded per-repo —
 # shadow mode stays zero-footprint; activation is this user-scope install.
