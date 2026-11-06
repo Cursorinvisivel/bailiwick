@@ -117,8 +117,10 @@ def _deidentify(text):
     return text
 
 
-def _perfect_purge(root):
-    """Apply every expected outcome: delete the client-specific, abstract the reusable, scrub the logs."""
+def _perfect_purge(root, telemetry=False):
+    """Apply every expected outcome: delete the client-specific, abstract the reusable, scrub the logs.
+    `telemetry` also purges `.telemetry.json`, which only a central machine may do (the sandbox is a
+    satellite unless its `.bailiwick-sync.json` role says otherwise)."""
     fw, home, proj = (os.path.join(root, d) for d in ("framework", "home-bailiwick", "project"))
     kb = os.path.join(fw, "knowledge")
     tokens = re.compile(r"(?i)acme[-_ ]?drill|(?<![a-z0-9])acdr(?![a-z0-9])|(?-i:(?<![A-Za-z0-9])ADI(?![A-Za-z0-9]))")
@@ -140,14 +142,15 @@ def _perfect_purge(root):
         p = os.path.join(kb, rel)
         text = open(p, encoding="utf-8").read()
         open(p, "w", encoding="utf-8").write(_deidentify(text))
-    tel_p = os.path.join(kb, ".telemetry.json")
-    tel = json.load(open(tel_p, encoding="utf-8"))
-    ent = tel["entries"]
-    ent["vpc-sc-dry-run-rollout"] = ent.pop("acme-drill-vpc-sc-rollout")
-    ent.pop("acme-drill-project-map")
-    for v in ent.values():
-        v["distinct_projects_used"] = [p for p in v.get("distinct_projects_used") or [] if not tokens.search(p)]
-    json.dump(tel, open(tel_p, "w", encoding="utf-8"), indent=2)
+    if telemetry:
+        tel_p = os.path.join(kb, ".telemetry.json")
+        tel = json.load(open(tel_p, encoding="utf-8"))
+        ent = tel["entries"]
+        ent["vpc-sc-dry-run-rollout"] = ent.pop("acme-drill-vpc-sc-rollout")
+        ent.pop("acme-drill-project-map")
+        for v in ent.values():
+            v["distinct_projects_used"] = [p for p in v.get("distinct_projects_used") or [] if not tokens.search(p)]
+        json.dump(tel, open(tel_p, "w", encoding="utf-8"), indent=2)
     sandbox.git(["add", "-A"], fw)
     sandbox.git(["commit", "-q", "-m", "knowledge: de-identify a client"], fw, hooks_dir=os.path.join(root, "git-hooks"))
     for stem in (os.path.join(proj, ".bailiwick-outputs", "raw", "drill0001-acme"),
@@ -168,8 +171,11 @@ def test_purge_untouched_then_perfect(purge_root, monkeypatch):
     s = res["summary"]
     scored = [t for t in res["traces"] if t["expected"] in ("removed", "abstracted")]
     assert all(t["matches"] > 0 for t in res["traces"]), [t["id"] for t in res["traces"] if not t["matches"]]
-    assert s["removal_rate"] == 0.0 and s["traces_remaining"] == len(scored) == 25
+    assert s["role"] == "satellite"
+    assert s["removal_rate"] == 0.0 and s["traces_remaining"] == len(scored) == 23
     assert s["residual_expected_present"] == 2 and s["user_action_pending"] == 2
+    # T13/T14: central-owned telemetry stays on a satellite for central to purge (not scored as removal).
+    assert s["central_pending"] == 2 and s["satellite_violations"] == 0
     assert next(t for t in res["traces"] if t["id"] == "T19")["note"].startswith("gap probe")
     assert s["keep_ok"] == "10/10" and not s["rule_survives_deidentified"] and not s["client_file_deleted"]
     assert s["unexpected_residual_paths"] > 0 and not s["perfect"]
@@ -182,7 +188,39 @@ def test_purge_untouched_then_perfect(purge_root, monkeypatch):
     assert s["keep_ok"] == "10/10" and s["unexpected_residual_paths"] == 0, res["sweep"]
     assert s["residual_expected_present"] == 2  # de-identified tier: history still holds it
     assert s["user_action_pending"] == 2  # Claude Code state: listed for the user, never auto-removed
+    assert s["central_pending"] == 2 and s["satellite_violations"] == 0
     assert s["perfect"]
+
+
+def _set_role(root, role):
+    p = os.path.join(root, "framework", ".bailiwick-sync.json")
+    cfg = json.load(open(p, encoding="utf-8"))
+    cfg["role"] = role
+    json.dump(cfg, open(p, "w", encoding="utf-8"), indent=2)
+
+
+@pytest.mark.parametrize("role,telemetry,perfect,violations,remaining", [
+    ("satellite", True, False, 2, 0),   # a satellite edited central-owned telemetry: a violation
+    ("central", False, False, 0, 2),    # central must purge telemetry: T13/T14 are scored removals
+    ("central", True, True, 0, 0),      # central purged everything
+])
+def test_purge_telemetry_scored_by_role(tmp_path, monkeypatch, role, telemetry, perfect, violations, remaining):
+    root = _seed("purge", tmp_path)
+    monkeypatch.setenv("BAILIWICK", os.path.join(root, "framework"))
+    _set_role(root, role)
+    _perfect_purge(root, telemetry=telemetry)
+    res = purge_score.score(root)
+    s = res["summary"]
+    assert s["role"] == role
+    assert s["satellite_violations"] == violations
+    assert s["traces_remaining"] == remaining, [t for t in res["traces"] if not t["ok"]]
+    assert s["perfect"] is perfect
+    tel = [t for t in res["traces"] if t["id"] in ("T13", "T14")]
+    if role == "central":
+        assert all(t["expected"] == "removed" for t in tel)
+        assert s["central_pending"] == 0
+    else:
+        assert all(t["status"] == "EDITED ON SATELLITE" for t in tel)
 
 
 # --------------------------------------------------------------------------------------- curate drill

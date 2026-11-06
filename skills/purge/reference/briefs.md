@@ -54,8 +54,17 @@ paths and the "before" side of diffs. It contains:
 - the erasure tier the run will claim.
 
 **Mechanical redaction check, before dispatch.** Write the brief to `$W/advisor-brief.md` with the
-Write tool, then run `grep -ciE -f "$W/tokens.ere" "$W/advisor-brief.md"` with `$W` spelled out. It
-must print `0`. Otherwise fix the brief and re-check. Dispatch exactly that text.
+Write tool, then run, with `$W` spelled out, both
+`grep -ciE -f "$W/tokens.ere" "$W/advisor-brief.md"` (must print `0`) and
+`python3 -I "$BAILIWICK/scripts/purge_scrub.py" check --tokens "$W/tokens" "$W/advisor-brief.md"`
+(must exit 0 with `total: 0`). `check` is read-only and prints counts only, never a token or an
+excerpt; it also catches what the grep cannot: separator and Unicode variants (`acme_drill`,
+`acme/drill`, `acmedrill`, an en dash, a zero-width space, fullwidth letters, accents dropped, a name
+wrapped across lines) and URL-, HTML-entity-, base64- and hex-encoded forms. Its number is a hit
+count across those views, not a count of distinct traces. It does not decode `\xNN` escapes,
+quoted-printable, base64 wrapped across lines, UTF-16, layered encodings, or base64 of a bare token
+shorter than 8 encoded characters, and does not fold homoglyphs NFKD leaves alone (Cyrillic `a`), so
+still read the brief for those. Otherwise fix the brief and re-check. Dispatch exactly that text.
 
 Question: "Is this plan safe and complete to execute, and what would you change?"
 

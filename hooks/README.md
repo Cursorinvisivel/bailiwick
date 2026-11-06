@@ -68,7 +68,11 @@ in shadow mode (FRAMEWORK.md §7.1) captures stage centrally and the repo needs 
     `${BAILIWICK}`, or an absolute path) marks the session. This covers what name detection can only
     hold, such as a skill the model invoked on its own in Claude Code (an agent `Skill` call is
     unconfirmed until the sentinel it then runs is confirmed). On Codex the guardrail denies the
-    sentinel, so it never runs successfully there; only a typed `$bailiwick-purge` is trusted. An absolute path counts only when its `realpath` is
+    sentinel, so it never runs successfully there; only a typed `$bailiwick-purge` is trusted. A
+    Codex shell wrapper is unwrapped only from a bare `bash|sh|zsh` or `/bin/`/`/usr/bin/` one (an
+    exec `shell` argument likewise), and duplicate argument keys void the call: a sentinel run
+    through, say, Homebrew's bash is not credited, so the session is captured (fail-safe), and an
+    agent-built fake shell cannot print the success line for it. An absolute path counts only when its `realpath` is
     this hook's own sibling `mark_purge_session.sh`; any other path ending in
     `/hooks/mark_purge_session.sh` (nonexistent, or another copy) is a mention, so naming a file cannot
     opt a session out of capture. The `$BAILIWICK`/`${BAILIWICK}` forms match as written: the
@@ -125,11 +129,18 @@ in shadow mode (FRAMEWORK.md §7.1) captures stage centrally and the repo needs 
   `confidentiality_ack` true, the hook appends sha256 of both blob relpaths
   (`<machine>/<repo-key>/<session>.{jsonl,md}.gpg`) to `$BAILIWICK_HOME/backup-retract.pending`
   (mode 0600, hashes only, never synced) and runs `capture_backup.sh retract` detached, with no
-  argument. `retract` finds the blobs by hashing its own mirror tree, tombstones the hashes in
-  `.purged`, commits `purge: <hash12>… (purge-session)`, pushes, and removes an entry only once origin
+  argument. The ledger is only written under its `.lock`; when that stays busy, the hashes go to a
+  spool file `backup-retract.pending.spool-<time_ns>-<pid>-<n>` (same rules, renamed into place
+  whole) instead of an unlocked append that a concurrent rewrite could lose. Ledger plus spools is
+  the pending set, and the next locked writer folds the spools in. `retract` finds the blobs by
+  hashing its own mirror tree, tombstones the hashes in `.purged`, commits `purge: <hash12>… (purge-session)`, pushes, and removes an entry only once origin
   holds its tombstone (health `purge ok (<hash12>)`). Anything left (mirror busy, offline, rejected) is
   retried first by every later `push`. No plaintext relpath is stored, because the tombstone is the
-  hash itself.
+  hash itself. *Accepted residual:* anything that can write `$BAILIWICK_HOME` (an agent included) can
+  list a hash there, and the guardrail-exempt `push` then retracts that blob with no sentinel ask.
+  The impact is limited to the backup: the blob leaves this machine's branch tip (its ciphertext stays
+  in git history) and is tombstoned, so that capture is never backed up again. The local source
+  capture is untouched, but it loses off-machine durability and cross-machine `pull`.
 - **A detection error keeps the capture local.** If detection fails on a record, the session is
   still captured (a wrong skip loses data), but its header gets `- purge_detection: error`, written
   before the transcript copy. Both that early header and the final one are written to `<id>.md.tmp`

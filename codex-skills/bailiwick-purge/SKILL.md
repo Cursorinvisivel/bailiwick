@@ -65,7 +65,10 @@ canonical procedure and guardrails live in Bailiwick's `skills/purge/SKILL.md`.
      only; the main session runs the git and list commands and passes their output):
      - Step 3a (opus, high): the scan, classification, and draft plan.
      - Step 3b: an Advisor consult on a **redacted** plan. Before dispatch, `grep -ciE -f` the
-       `tokens.ere` patterns file over the brief; it must print 0.
+       `tokens.ere` patterns file over the brief; it must print 0. Then
+       `python3 -I "$BAILIWICK/scripts/purge_scrub.py" check --tokens <tokens-file> <brief>` must exit 0
+       (`total: 0`): read-only, counts only, it also catches separator and URL/HTML/base64/hex-encoded
+       variants.
      - Step 5a (opus, medium): the `purge_verify.sh residual` output after execution, with each
        surface recorded as `tool`, `manual`, or `not checked`. No tier is derived while any surface is
        `not checked`.
@@ -91,14 +94,16 @@ canonical procedure and guardrails live in Bailiwick's `skills/purge/SKILL.md`.
      - `purge_verify.sh residual --tokens-file` reads every token and 3a variant from the tokens file.
      - Commit messages and `/sign` slugs never name the client. Mandatory check before the commit:
        `grep -ciE -f "${BAILIWICK_HOME:-$HOME/.bailiwick}/purge-work/tokens.ere" <msg-file>` on the commit
-       message file (`.git/COMMIT_MSG_<slug>` under `$bailiwick-sign`; the `-F <file>` otherwise) prints `0`; the
+       message file (`.git/COMMIT_MSG_<slug>` under `$bailiwick-sign`; the `-F <file>` otherwise) prints `0`, and
+       `python3 -I "$BAILIWICK/scripts/purge_scrub.py" check --tokens "${BAILIWICK_HOME:-$HOME/.bailiwick}/purge-work/tokens" <msg-file>`
+       exits 0; the
        same for the branch name, the slug, and any PR title and body (each written to a file in `$W`
-       first). Any non-zero count: reword, never commit, push, or open the PR.
+       first). Any non-zero count or exit: reword, never commit, push, or open the PR.
      - The machine-local logs (audit log, health shards) are redacted in place, last (Step 5.7), with
        `purge_scrub.py scrub --apply` after a dry run; Codex denies the `--apply` (no ask), so the user
        runs that one command out-of-band, then the re-scan continues here.
    - Verify the hook dropped the session's capture and backup blob, and that the pending-retraction
-     ledger is empty.
+     ledger and its spool files (`backup-retract.pending*`) are empty.
    - **User-run block, every run:** print canonical `reference/host-state.md` §5 as the last output,
      always including `bash "$BAILIWICK/hooks/capture_backup.sh" retract` and the per-blob
      `purge <machine>/<repo-key>/<sid>.{jsonl,md}.gpg` (both idempotent), plus the host-state deletion.

@@ -22,9 +22,9 @@ registry) first. This file holds the gates. The mechanics are in `$BAILIWICK/ski
 | 2 Scan | every surface counted, host state and any leftover `purge-work/` included | scan, host-state §2–3 |
 | 3 Classify | ABSTRACT by default; DELETE only the clearly specific; SURFACE the rest | |
 | 3a Review | `bailiwick-security-review-local` opus/high, or a labelled inline fallback | briefs §3a |
-| 3b Advisor | redaction check printed `0`; `bailiwick-advisor` fable/high, or recorded skipped | briefs §3b |
+| 3b Advisor | redaction checks printed `0` (grep and `purge_scrub.py check`); `bailiwick-advisor` fable/high, or recorded skipped | briefs §3b |
 | 4 PLAN / APPROVE | the user explicitly approves the full plan, target-list counts and sha256 included | execute |
-| 5.1–5.6 Execute | in order; hashes re-checked; `purge_delete.sh` exit 3 = STOP; commit message, slug, branch, PR text each count `0` against `tokens.ere`; knowledge committed before any capture purge | execute |
+| 5.1–5.6 Execute | in order; hashes re-checked; `purge_delete.sh` exit 3 = STOP; commit message, slug, branch, PR text each count `0` against `tokens.ere` and `purge_scrub.py check`; knowledge committed before any capture purge | execute |
 | 5a Verify | residual + per-surface record; reviewer opus/medium or recorded skip; unexpected hit: STOP | scan, briefs §5a |
 | 5b Own footprint | hook checks (1)–(3) recorded | host-state §4 |
 | 5.7 Scrub | the last in-session action: logs redacted, re-scans print `0`, `$W` removed | execute |
@@ -70,7 +70,9 @@ so later `/curate` sessions (which read decrypted client captures) would be capt
 - **One matching rule.** A token of 4 characters or fewer matches only on alphanumeric boundaries,
   case-insensitively (`adi` never hits "loading"); longer tokens match as case-insensitive substrings.
   `scripts/purge_scrub.py` implements it; every grep and count uses `grep -iE -f "$W/tokens.ere"`,
-  never `grep -F -f tokens`; `purge_verify.sh residual` applies the same rule.
+  never `grep -F -f tokens`; `purge_verify.sh residual` applies the same rule. Outbound text (the
+  Advisor brief, commit message, branch, slug, PR text) also passes `purge_scrub.py check`, the same
+  rule over separator and encoded variants.
 - **`$W` hygiene.** `$W` holds every token-bearing work file (tokens, `from`, target lists, the Advisor
   brief, the 5a copies). Create it 0700 (`umask 077`); Step 5.7 removes it. **Whenever the run ends
   early** (STOP, abort, declined plan), remove it with
@@ -174,10 +176,11 @@ so later `/curate` sessions (which read decrypted client captures) would be capt
 
 3b. **Advisor on the plan, before approval.** Dispatch `bailiwick-advisor` (**fable, high**; read-only,
    never executes) with the **redacted** brief (`briefs.md` §3b). **Gate:** the brief is written to
-   `$W/advisor-brief.md` and `grep -ciE -f "$W/tokens.ere"` over it prints `0`; dispatch exactly that
-   text. Revise the plan once for its answer. If the revision is material (a new surface, or a
-   DELETE/ABSTRACT flip), re-run 3a over the changed items only. Show unresolved disagreement to the
-   human rather than iterating.
+   `$W/advisor-brief.md`, `grep -ciE -f "$W/tokens.ere"` over it prints `0`, and
+   `python3 -I "$BAILIWICK/scripts/purge_scrub.py" check --tokens "$W/tokens"` over it exits 0
+   (`total: 0`; separator and encoded variants included); dispatch exactly that text. Revise the plan once for its answer. If the
+   revision is material (a new surface, or a DELETE/ABSTRACT flip), re-run 3a over the changed items
+   only. Show unresolved disagreement to the human rather than iterating.
 
 4. **Present the plan (single approval batch).** Every ABSTRACT rewrite as a diff; every DELETE; the
    telemetry scrub **and any resulting `confidence:` downgrades** (5.3); the registry-row removal;
@@ -212,10 +215,12 @@ so later `/curate` sessions (which read decrypted client captures) would be capt
       slug (e.g. `purge`). **Mandatory identifier check before the commit runs:**
       `grep -ciE -f "${BAILIWICK_HOME:-$HOME/.bailiwick}/purge-work/tokens.ere" <msg-file>` on the
       commit message file (`.git/COMMIT_MSG_<slug>` under `/sign`; the `-F <file>` otherwise) must
-      print `0`. Check the branch name, the slug, and any PR title and body the same way before
-      use (write each to a file in `$W` with the Write tool and grep it; `printf … | grep` would put
-      a candidate identifier on the command line). Any non-zero count: reword and re-check; never
-      commit, push, or open a PR on a non-zero count.
+      print `0`, and `python3 -I "$BAILIWICK/scripts/purge_scrub.py" check --tokens
+      "${BAILIWICK_HOME:-$HOME/.bailiwick}/purge-work/tokens" <msg-file>` must exit 0 (`total: 0`).
+      Check the branch name, the slug, and any PR title and body the same way before use (write
+      each to a file in `$W` with the Write tool, then grep and `check` it; `printf … | grep` would
+      put a candidate identifier on the command line). Any non-zero count or exit: reword and
+      re-check; never commit, push, or open a PR on a non-zero count.
    6. **Committed-knowledge safety check, then purge captures.** Verify the commit exists and
       `git status` is clean for the touched files. If not, STOP and report: never purge the source
       first. Then delete `$W/targets-captures` the same way (its own approved sha256), and purge every

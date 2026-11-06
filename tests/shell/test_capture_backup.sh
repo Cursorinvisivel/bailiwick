@@ -389,6 +389,47 @@ ppush >/dev/null 2>&1   # any later push retries the ledger first
 assert_not_contains "the next push removed the purge session's blobs" "psess3." "$(ptree)"
 assert_no_file "ledger settled by the push" "$BAILIWICK_HOME/backup-retract.pending"
 
+echo "== a spooled retraction (ledger lock was busy) is pending too, and is retracted + removed"
+# capture_session.py never appends to the ledger unlocked: a busy lock spools the hashes to
+# backup-retract.pending.spool-<ns>-<pid>. Every reader counts ledger ∪ spools.
+printf '%s\n' "$work" > "$PT"
+capture psess4
+ppush >/dev/null 2>&1
+assert_contains "precondition: psess4 backed up" "psess4.jsonl.gpg" "$(ptree)"
+s4="$(sha "testsat/$PKEY/psess4.jsonl.gpg")"; s4m="$(sha "testsat/$PKEY/psess4.md.gpg")"
+SPOOL="$BAILIWICK_HOME/backup-retract.pending.spool-1-1-0"
+( umask 077; printf '%s\n%s\n' "$s4" "$s4m" > "$SPOOL" )
+bash "$INST/hooks/capture_backup.sh" retract >/dev/null 2>&1
+assert_not_contains "spooled hashes retracted from the backup" "psess4." "$(ptree)"
+assert_contains "spooled hash tombstoned" "$s4" "$(git -C "$T_SANDBOX/holding.git" show capture/testsat:.purged 2>/dev/null)"
+assert_no_file "spool removed once origin holds the tombstones" "$SPOOL"
+assert_no_file "no ledger left behind" "$BAILIWICK_HOME/backup-retract.pending"
+assert_contains "health logs the settled spooled retraction" "purge ok (${s4:0:12})" "$HEALTH"
+
+echo "== a spool written during the retract (after drain, before pending_done) is never lost"
+# The holding repo's pre-receive hook runs mid-push — after drain_pending, before pending_done's
+# locked rewrite — and drops a spool with a hash this run never drained. It must survive the rewrite.
+late="$(sha late)"
+printf '%s\n' "$work" > "$PT"
+capture psess5
+ppush >/dev/null 2>&1
+s5="$(sha "testsat/$PKEY/psess5.jsonl.gpg")"
+( umask 077; printf '%s\n' "$s5" > "$BAILIWICK_HOME/backup-retract.pending.spool-2-2-0" )
+PRE="$T_SANDBOX/holding.git/hooks/pre-receive"
+printf '#!/bin/sh\ncat >/dev/null\numask 077\nprintf "%%s\\n" "%s" > "%s"\nexit 0\n' \
+  "$late" "$BAILIWICK_HOME/backup-retract.pending.spool-3-3-0" > "$PRE"
+chmod +x "$PRE"
+bash "$INST/hooks/capture_backup.sh" retract >/dev/null 2>&1
+rm -f "$PRE"
+assert_not_contains "the drained spool's blob is retracted" "psess5.jsonl.gpg" "$(ptree)"
+assert_no_file "the drained spool is gone" "$BAILIWICK_HOME/backup-retract.pending.spool-2-2-0"
+late_left="$(cat "$BAILIWICK_HOME"/backup-retract.pending "$BAILIWICK_HOME"/backup-retract.pending.spool-* 2>/dev/null || true)"
+assert_contains "the late spool's hash is still pending" "$late" "$late_left"
+assert_not_contains "settled hash dropped from the pending set" "$s5" "$late_left"
+ppush >/dev/null 2>&1   # the next push drains the late hash too
+assert_no_file "late hash settled by the next push" "$BAILIWICK_HOME/backup-retract.pending"
+assert_eq "no spool left" "" "$(ls "$BAILIWICK_HOME" | grep 'backup-retract.pending.spool-' || true)"
+
 echo "== purge_detection: error header keeps a capture local-only until a human clears it"
 HRAW="$PPROJ/.bailiwick-outputs/raw"
 echo '{"x":1}' > "$HRAW/held.jsonl"

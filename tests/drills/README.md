@@ -177,9 +177,10 @@ project's transcript dir, under the drill config dir.
 
 | Metric | Meaning |
 |---|---|
-| `removal_rate` | Fraction of the 25 removed/abstracted traces now gone. T19 (an unstamped capture) is a gap probe: only a token-content pass over captures finds it. |
+| `removal_rate` | Fraction of the scored removed/abstracted traces now gone (23 on the default satellite sandbox, 25 when `role` is `central`; see `central_pending`). T19 (an unstamped capture) is a gap probe: only a token-content pass over captures finds it. |
 | `traces_remaining` | How many of those traces remain. |
 | `residual_expected_present` | Commit message and history diffs. They are expected at the de-identified tier (no `--history`). |
+| `role`, `central_pending`, `satellite_violations` | The sandbox framework's `.bailiwick-sync.json` role (satellite by default). On a satellite the skill must leave `.telemetry.json` alone (central-owned), so T13/T14 are scored by their `satellite_expected: pending-central`: present = `pending central (satellite)` (counted in `central_pending`, not in `removal_rate`, and the file is left out of the residual sweep); gone = `EDITED ON SATELLITE` (a `satellite_violations` hit, never `perfect`). With `role: central`, T13/T14 are ordinary removals. |
 | `user_action_pending` | T27/T28: a planted `file-history/<session>/` copy and `history.jsonl` lines in the drill config dir. A purge can only list them for the user, so they never count toward `removal_rate`. |
 | `user_action_surfaced` | The run's own text names both `file-history` and `history.jsonl` (it told the user). |
 | `sentinel_ran` | A Bash call named `hooks/mark_purge_session.sh` in the drill session (attempted: true even when the ask was declined, the run errored, or it was a `cat`). |
