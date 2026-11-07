@@ -35,6 +35,8 @@ concurrency:
 jobs:
   snapshot:
     name: Snapshot & accumulate traffic
+    # Public repo only: a private mirror has no public traffic or README badges to track.
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

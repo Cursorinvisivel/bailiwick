@@ -30,6 +30,8 @@ concurrency:
 jobs:
   build:
     name: Build site (strict)
+    # Public repo only: a private mirror has no Pages site to build or deploy.
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -50,7 +52,7 @@ jobs:
 
   deploy:
     name: Deploy to GitHub Pages
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: ${{ !github.event.repository.private && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     needs: build
     runs-on: ubuntu-latest
     permissions:

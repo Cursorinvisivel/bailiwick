@@ -17,9 +17,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The heavy suites (Python tests, shell + E2E, Windows) run only where the repository is public.
+# Private mirrors that pull this file keep the cheap syntax and shellcheck jobs and skip the rest;
+# on the public repo the condition is always true, so it changes nothing here.
 jobs:
   guardrail-tests:
     name: Python contract tests
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -106,6 +110,7 @@ jobs:
 
   shell-contract-tests:
     name: Shell contracts + E2E (${{ matrix.os }})
+    if: ${{ !github.event.repository.private }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -140,6 +145,7 @@ jobs:
 
   windows-checks:
     name: Windows (bootstrap.ps1 + python)
+    if: ${{ !github.event.repository.private }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
