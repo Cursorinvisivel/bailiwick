@@ -187,7 +187,7 @@ purge is hygiene — not a history rewrite you have to trust.
 Delivery is **best-effort / fail-open** with local-first durability: the raw transcript is always on
 local disk, ciphertext is committed to a local mirror before the network push, and an unpushed
 commit rides along on the next successful push — a failed push lags only the *remote* copy, it never
-loses the capture. `/metrics` surfaces per-machine push drift (including unpushed-commit count) and
+loses the capture. `/metrics` surfaces per-machine push drift (including the unpushed-commit count as of the last failure) and
 SessionStart nags on recent errors.
 
 Enable it in `.bailiwick-sync.json`:
@@ -217,6 +217,39 @@ Enable it in `.bailiwick-sync.json`:
 Rationale, delivery semantics, and the confidentiality assumptions are covered in the
 [threat model](threat-model.md); operational detail lives in
 `$BAILIWICK/hooks/README.md → Encrypted dirty-zone backup`.
+
+### When backup pushes fail
+
+Act on `⚠ last push FAILED` in `/metrics` (see [metrics.md](metrics.md#framework-health--per-source)).
+If only `capture_backup` errors show, with no ⚠, a later push succeeded. Local data is safe
+throughout; only the remote copy lags. Run on the affected machine (on central, other machines' rows
+lag by one push, so confirm there before triaging):
+
+1. `$BAILIWICK/scripts/doctor.sh` (read-only). It fails on: a capture mirror wedged mid-rebase/merge
+   (`${XDG_CACHE_HOME:-~/.cache}/bailiwick/capture-mirror`); more than 3 mirror commits ahead of the
+   last-fetched origin ref (warns at 1-3; no network); a gpg recipient public key that is missing,
+   expired, revoked, or without an encryption subkey. Its `gh` check covers the framework repo
+   (`BW_GH_REPO`), not the backup repo's transport.
+2. Wedged mirror: the next push self-heals, or run `git -C <mirror> rebase --abort`.
+3. Show the real network/auth error with a read-only command:
+   `git -C "${XDG_CACHE_HOME:-$HOME/.cache}/bailiwick/capture-mirror" fetch origin` (or
+   `ls-remote origin`). Do not use a manual `capture_backup.sh push` for diagnosis: it discards git's
+   stderr, prints only `[backup] push failed`, reads stdin, is throttled by `throttle_minutes`, backs
+   up the current directory's captures, and exits silently if the mirror is locked. SessionEnd pushes
+   run detached, so their outcome only reaches the health log.
+4. Read the detail in `${BAILIWICK_HOME:-~/.bailiwick}/health/<machine>.jsonl` (JSON lines: `ts`,
+   `machine`, `component`, `event`, `detail`). Common strings:
+
+| Detail | Level | Meaning |
+|---|---|---|
+| `push failed (<branch>; N unpushed commit(s); ciphertext safe in local mirror)` | error | step 3 for the cause; the count is as of the failure |
+| `encrypt FAILED for … (recipient key unusable/missing?)` | error | fix the recipient key (step 1) |
+| `enabled but no repo configured` / `enabled but no gpg_recipients configured` / `gpg not installed` | error | fix `capture_backup` config or install gpg |
+| `mirror busy >120 s — SessionEnd push skipped` | warn | another push held the mirror; the next Stop push retries |
+| `stale mirror lock (>10 min) — taken over` | warn | a crashed push left a lock; self-cleared |
+| `mirror rebase could not be auto-resolved — aborted (ciphertext safe locally)` | warn | the rebase is already aborted: origin diverged, and a `push failed` error follows |
+
+Internals: `$BAILIWICK/hooks/README.md → Encrypted dirty-zone backup`.
 
 ---
 
