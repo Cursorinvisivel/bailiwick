@@ -247,23 +247,35 @@ Confidence is a human-curated field — the Memory stage proposes changes, the u
 | Level | Meaning |
 |---|---|
 | `low` | First capture from a single session; unvalidated |
-| `medium` | Used in at least one project; no open contradictions |
-| `high` | Proven stable and reusable across 3+ distinct projects; no open contradictions |
+| `medium` | Reached at least one project and judged `used` at least twice (`useful_count >= 2`); no open contradictions |
+| `high` | Stable across 3+ distinct projects; no open contradictions |
 
-The graduation signal is **distinct-project reuse**, not edit count.
-A file used correctly across 3 projects without contradiction has demonstrated stability in varied contexts.
+The graduation signal is **distinct-project reach**, not edit count. Reach (`distinct_projects_used`)
+is credited when a session loads the file (plus explicit `used@project` self-reports), so it shows the
+file was read in varied contexts, not that it mattered there: report `useful_count` (the curate-judged
+`used` tier) alongside it in every confidence or graduation proposal.
+A file loaded across 3 projects without contradiction has been exercised in varied contexts.
 A file edited 3 times is just a file that needed editing — that is not the same claim.
 
 **Confidence promotion proposal** (the Memory stage surfaces for approval, never auto-applies):
+Propose `low → medium` when, from `.telemetry.json`:
+- `useful_count >= 2`
+- `distinct_projects_used.length >= 1`
+- `open_contradictions == 0`
+
 Propose `medium → high` when, from `.telemetry.json`:
 - `distinct_projects_used.length >= 3`
 - `open_contradictions == 0`
+
+For `medium → high`, show `useful_count` alongside: there it is evidence for the approver, not a criterion.
 
 Note: `open_contradictions == 0` means no *currently unresolved* contradictions.
 A resolved contradiction does not bar graduation — only an unresolved one does.
 
 **Graduation to `patterns/`** (separate approval, after `confidence: high`):
-Surface as: "Consider graduating [id] to a pattern — used in N distinct projects, no open contradictions."
+Surface as: "Consider graduating [id] to a pattern — loaded in N distinct projects (useful_count=U), no open contradictions."
+`distinct_projects_used` is credited on load, so N is reach, not curate-judged use; `useful_count` is the
+only curate-judged signal, and the approver may defer when it is thin.
 Graduation requires the file to be rewritten in pattern format with full code examples.
 
 **`source_sessions`** is kept as contributor provenance — it answers "how many sessions added content
@@ -332,8 +344,8 @@ proactive staleness, non-blocking digest, and graduation review.
 1. **Proactive staleness scan**: read ALL `last_validated` fields in frontmatter regardless of recent tag activity. Flag any file older than 9 months — this catches the dangerous quadrant (stable, never-touched, silently wrong).
 2. **Non-blocking digest**: apply all EXPAND and non-contradicting IMPROVE candidates that were held from recent sessions. Present as a single batch for approval.
 3. **Archival candidates**: from `.telemetry.json`, surface files where `load_count` is high, `useful_count` is near zero, and `last_useful` is old. Present as "loaded repeatedly but rarely used — candidate for archival or rewrite." Never propose archiving a file for zero loads while `/metrics` prints its subagent `caveat:` line: older captures missed subagent reads (ADR-004 Amendment 1).
-4. **Graduation review**: surface any topic eligible for pattern graduation (`confidence: high`, `distinct_projects_used.length >= 3`, `open_contradictions == 0`).
-5. **Confidence proposals**: propose `medium → high` for any topic where `distinct_projects_used.length >= 3` and `open_contradictions == 0`.
+4. **Graduation review**: surface any topic eligible for pattern graduation (`confidence: high`, `distinct_projects_used.length >= 3`, `open_contradictions == 0`), with its `useful_count`.
+5. **Confidence proposals**: propose `low → medium` for any topic where `useful_count >= 2`, `distinct_projects_used.length >= 1` and `open_contradictions == 0`; propose `medium → high` for any topic where `distinct_projects_used.length >= 3` and `open_contradictions == 0`, with its `useful_count`.
 6. **GCP freshness report** (dispatched at curate Step 1, before off-machine captures are
    restored, and collected before the restore unless the agent is tool-restricted; listed here
    for completeness): the orchestrator dispatches the fetch-only

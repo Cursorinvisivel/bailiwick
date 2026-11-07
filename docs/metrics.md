@@ -77,13 +77,19 @@ are shortened.
                   backup last push ok: today
 ```
 
+This is the 2026-10-29 report (IDs replaced, lists shortened) in that day's format. The report has
+since renamed `used in >=3 distinct projects` to `reach: loaded in >=3 distinct projects`, because
+reach is credited on load. It now prints `loads=`/`used=`/`projects=` after each graduation-eligible
+topic and `used=` on bump candidates (see [reach & graduation](#reach--graduation)).
+
 ## Section by section
 
 ### [library]
 
 This is how much has been promoted through `/curate`. It tells you nothing about value: it is the
 intake side of the funnel. Almost everything is a `topic`, which is expected. A topic becomes a
-`pattern` only after it has proven itself across projects (see [reach & graduation](#reach--graduation)).
+`pattern` only after it has reached 3+ projects at `confidence: high` and a human approves it (see
+[reach & graduation](#reach--graduation)).
 
 ### [retrieval]
 
@@ -113,16 +119,18 @@ means not measured yet, not zero.
 
 Reach counts distinct projects, not loads: a file read ten times in one project has reach 1. It is
 credited when a session **loads** the file, so reach is load-based. It does not mean the file was
-judged `used` in those projects, even though the report line reads "used in >=3 distinct projects".
+judged `used` in those projects.
 A topic becomes **graduation-eligible** for `patterns/` when it is at `confidence: high` and
 reached in 3 or more projects ([FRAMEWORK.md §4](FRAMEWORK.md#confidence--graduation)). The report
 names it with the action to take. Graduating means rewriting the topic as a pattern, with full
 examples, at the next `/curate`. A file with reach ≥3 that is still at low or medium confidence is
-a candidate for a confidence bump instead.
+a candidate for a confidence bump instead; a `low` file also needs `used=` of 2 or more before it can
+move to `medium`.
 
 Eligibility is necessary, not sufficient. The curate flow proposes graduation on reach and no open
 contradictions; it does not check `used`. Before approving, look at the topic's `useful_count` in
-`report.py --json` (the text report prints no per-file used count). A topic loaded in 3 projects with
+the report, which prints `loads`/`used`/`projects` next to each eligible topic (`report.py --json`
+has `useful_count` for every file). A topic loaded in 3 projects with
 only 1 curate-judged `used` has been read, not shown to matter, and deferring it is a reasonable
 approver call, not a rule.
 

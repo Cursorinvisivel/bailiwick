@@ -67,6 +67,11 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
+      # GitHub-compatible heading ids, so one anchor works on GitHub and on the site
+      # ("A & B" -> "a--b"; the default slugify collapses it to "a-b").
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
   - pymdownx.details
   - pymdownx.highlight:
       anchor_linenums: true

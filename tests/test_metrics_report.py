@@ -1,10 +1,11 @@
-"""Contract tests for skills/metrics/report.py's capture-coverage caveat.
+"""Contract tests for skills/metrics/report.py: the capture-coverage caveat and the reach/graduation output.
 
 Captures before capture_schema 2 never saw subagent reads, so "never loaded" is no archive verdict
 until subagent-aware captures have covered SUBAGENT_WINDOW_DAYS. Synthetic headers only.
 """
 import datetime
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -59,3 +60,30 @@ def test_caveat_holds_until_the_window_is_covered(report):
 def test_caveat_when_no_capture_is_subagent_aware(report):
     cov = {"total": 0, "old": 0, "first_subagent_aware": None}
     assert "since never" in report.subagent_caveat(cov, datetime.date(2026, 10, 27))
+
+
+def test_graduation_prints_reach_label_and_used_evidence(report, tmp_path, capsys):
+    kdir = tmp_path / "knowledge"
+    (kdir / "topics").mkdir(parents=True)
+    (kdir / "topics" / "demo.md").write_text(
+        "---\nid: demo\ntype: topic\nconfidence: high\nlast_validated: 2026-10-01\n---\n# Demo\n")
+    (kdir / "topics" / "bump.md").write_text(
+        "---\nid: bump\ntype: topic\nconfidence: medium\nlast_validated: 2026-10-01\n---\n# Bump\n")
+    (kdir / "topics" / "held.md").write_text(
+        "---\nid: held\ntype: topic\nconfidence: low\nlast_validated: 2026-10-01\n---\n# Held\n")
+    (kdir / ".telemetry.json").write_text(json.dumps({"entries": {
+        "demo": {"load_count": 3, "useful_count": 1,
+                 "distinct_projects_used": ["a", "b", "c"]},
+        "bump": {"load_count": 4, "useful_count": 0,
+                 "distinct_projects_used": ["a", "b", "c"]},
+        "held": {"load_count": 3, "useful_count": 1,
+                 "distinct_projects_used": ["a", "b", "c"]}}}))
+    rows, orphans, missing = report.build(str(kdir))
+    assert rows["demo"]["useful_count"] == 1 and rows["demo"]["projects"] == 3
+    report.report_text(rows, orphans, missing, 5)
+    out = capsys.readouterr().out
+    assert "reach: loaded in >=3 distinct projects" in out
+    assert "loads=3, used=1, projects=3" in out
+    assert "confidence=medium, used=0, projects=3" in out
+    assert "confidence=low, used=1, projects=3; needs used>=2 for medium" in out
+    assert "projects=3; needs" not in out.split("→ bump")[1].splitlines()[0]

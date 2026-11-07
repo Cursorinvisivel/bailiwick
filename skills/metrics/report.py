@@ -293,14 +293,20 @@ def report_text(rows, orphans, missing, top, caveat=None):
         print("  (ADR-004), impact reads BLIND, not zero. `loaded` above is the reliable signal.")
 
     print("\n[reach & graduation]")
-    line("used in >=3 distinct projects", sum(1 for r in R if r["projects"] >= 3))
+    line("reach: loaded in >=3 distinct projects", sum(1 for r in R if r["projects"] >= 3))
     line("graduation-eligible (topic, high, >=3 projects)", len(grad))
     for c in grad:
-        print(f"    → {c}  (promote topics/ → patterns/)")
+        r = rows[c]
+        print(f"    → {c}  (promote topics/ → patterns/; loads={r['load_count']}, "
+              f"used={r['useful_count']}, projects={r['projects']})")
     if reach:
         line("reach>=3 but confidence<high (bump candidate)", len(reach))
         for c in reach[:top]:
-            print(f"    → {c}  (confidence={rows[c]['confidence']}, projects={rows[c]['projects']})")
+            r = rows[c]
+            hold = ("; needs used>=2 for medium"
+                    if r["confidence"] == "low" and r["useful_count"] < 2 else "")
+            print(f"    → {c}  (confidence={r['confidence']}, used={r['useful_count']}, "
+                  f"projects={r['projects']}{hold})")
 
     print(f"\n[top {top} by loads]")
     for c, r in sorted(rows.items(), key=lambda x: -x[1]["load_count"])[:top]:

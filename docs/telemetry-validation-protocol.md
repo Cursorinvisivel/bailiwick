@@ -6,12 +6,13 @@
 
 ---
 
-## Per-Session (light, ~2 min after each Collect)
+## Per-Session (light, ~2 min after each `/curate` run)
 
-**Spot-check one `used` entry per session.**
-Pick one file from `Retrieval Feedback.used` and ask: did this file actually shape the output,
-or was it loaded and ignored? Record the answer as `honest` or `inflated` next to the entry
-in the session output file. No action required — just a running tally.
+**Spot-check one `used` credit per curated capture.**
+Pick one id that `/curate` credited as `used` (its `useful_count` was incremented; an explicit
+`Retrieval Feedback.used` entry counts too) and ask: did this file actually shape the output, or was
+it loaded and ignored? Record the answer as `honest` or `inflated` in a running tally. No action
+required.
 
 **Note any `missed` entries.**
 These are the highest-signal inputs to the library. Capture them even if you don't promote
@@ -21,19 +22,21 @@ immediately — they tell you where retrieval is failing under real load.
 
 ## After 20 Sessions — Three Questions
 
-### 1. Are `used` self-reports honest?
+### 1. Are `used` credits honest?
 
-Open `.telemetry.json`. For the 5 files with the highest `useful_count`, cross-reference
-with your session output spot-checks.
+`used` is the curate-judged tier ([ADR-004](decisions/adr-004-tiered-usefulness-signal.md)): it
+feeds `useful_count`. Open `.telemetry.json`. For the 5 files with the highest `useful_count`,
+cross-reference with your spot-check tally.
 
 | Signal | Interpretation |
 |---|---|
-| `useful_count` matches spot-check tally | Self-reporting is trustworthy — allow it to drive archival flags |
-| `useful_count` consistently higher than spot-check | Inflation — agents are marking `used` without discrimination; add a stricter definition to agent-output-template.md before trusting graduation |
-| `useful_count` consistently lower | Agents are under-reporting; graduation will be too slow but won't promote incorrectly |
+| `useful_count` matches spot-check tally | Trustworthy — let it drive archival flags and serve as the approver's evidence for graduation |
+| `useful_count` consistently higher than spot-check | Inflation — `used` is credited without discrimination; tighten the `used` judgment (memory.md, "`used` is semantic") before trusting it |
+| `useful_count` consistently lower | Under-crediting — archival flags over-fire, and graduation evidence looks thinner than it is |
 
-**Decision gate**: do not let `distinct_projects_used` drive promotion until spot-checks confirm
-`used` entries are honest. Treat as human-review flags until then.
+**Decision gate**: do not let `useful_count` drive archival flags, or count as graduation evidence,
+until spot-checks confirm `used` credits are honest. This does not gate `distinct_projects_used`:
+reach is credited on load, not by `used` (Q3 checks it).
 
 ---
 
@@ -60,6 +63,9 @@ Query `.telemetry.json` for entries matching all three conditions:
 
 ### 3. Is `distinct_projects_used` crediting the right files?
 
+Reach is credited when a session loads the file (plus explicit `used@project` self-reports), so this
+question is about `project_id` normalisation and load crediting, not honesty.
+
 For each file with `distinct_projects_used.length >= 1`, read the list and ask:
 are these genuinely independent contexts, or the same venture under different repo names?
 
@@ -67,15 +73,17 @@ are these genuinely independent contexts, or the same venture under different re
 part of the same engagement or venture, those were not properly normalised — update the
 relevant CLAUDE.md `project_id` fields and re-evaluate.
 
-**Undercounting check**: if a file you know was used heavily in a client engagement shows
-`distinct_projects_used: []`, the `@project_id` tag was likely omitted from session outputs —
-add a reminder to agent-output-template.md or tighten the instruction in memory.md.
+**Undercounting check**: if a file you know was loaded in a client engagement shows
+`distinct_projects_used: []`, the load was not credited: check that the capture header carries the
+`loaded` block, that `/curate` applied it on the central machine (satellites skip the telemetry
+step), and that `project_id` resolved (memory.md, telemetry step). Captures older than
+`capture_schema: 2` also miss subagent-only reads (see the `/metrics` `caveat:` line).
 
 | Signal | Interpretation |
 |---|---|
 | `distinct_projects_used` lists independent projects | Signal is clean — allow confidence proposals when length >= 3 |
 | Same venture counted multiple times | Normalisation missed — fix `project_id` values, consider adding a known-projects registry to CLAUDE.md |
-| Lists are empty despite real usage | Tagging is not happening — strengthen the instruction in agent-output-template.md |
+| Lists are empty despite real loads | Load crediting is not happening — check the capture headers' `loaded` block, that `/curate` ran on central, and `project_id` resolution |
 
 ---
 
@@ -97,12 +105,13 @@ from this run. Note the oldest `last_validated` date and schedule a re-check at 
 
 | Finding | Action |
 |---|---|
-| `used` self-reports honest | Unlock `distinct_projects_used` to drive confidence proposals |
+| `used` credits honest | Trust `useful_count` for archival flags and as graduation evidence |
+| `distinct_projects_used` lists independent projects | Allow confidence proposals at length >= 3 |
 | Archival signatures present and credible | Run first Periodic Curation Session |
 | `distinct_projects_used` inflated | Fix `project_id` normalisation before any graduation |
 | `missed` entries accumulating in one domain | That domain needs new topic files — prioritise in next sessions |
-| Library still under 30 files after 20 sessions | Collect is under-triggering — check whether Lead is always invoking it |
-| No file near graduation gate | Either too few projects, or `used` inflation — determine which before adding more design |
+| Library still under 30 files after 20 sessions | Intake is under-triggering — check that captures are curated and Memory Collect runs at the end of led tasks |
+| No file near graduation gate | Either too few distinct projects, or reach undercounted (Q3) — determine which before adding more design |
 
 ---
 

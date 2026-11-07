@@ -46,13 +46,14 @@ from the section guide below.
   reasoning shows the tidbit informed the output). If it warns that no `applied`/`used` signal exists
   yet, say plainly the impact column is *blind, not zero* — do not present high-load files as low-value.
 - **[reach & graduation]** — reach is **load-based** (credited when a session loads the file), not
-  curate-judged use, despite the "used in >=3 distinct projects" label. `graduation-eligible` =
+  curate-judged use. `graduation-eligible` =
   topics at `confidence: high` reached in ≥3 distinct projects. Eligibility is necessary, not
   sufficient: the curate flow proposes graduation on reach plus no open contradictions, with no
-  `used` check. Advise the human approver to look at the topic's `useful_count` in `report.py --json`
-  (the text report prints no per-file used count) before approving `topics/ → patterns/`;
+  `used` check. Advise the human approver to look at the topic's `useful_count` in the report
+  (it prints `used=` next to each eligible topic) before approving `topics/ → patterns/`;
   deferring on thin `used` is a reasonable approver call, not a rule. `bump candidate` = ≥3
-  projects but confidence still low/medium → propose a confidence bump.
+  projects but confidence still low/medium → propose the next step whose criteria it meets
+  (`low → medium` also needs `useful_count >= 2`, shown as `used=`).
 - **[archival / rewrite candidates]** — while the `caveat:` line shows, `never loaded` files are
   **not** archive candidates: older captures in the window miss subagent reads. Recommend nothing
   be archived for coldness until it clears. Otherwise, `never loaded` files are archive-or-advertise candidates

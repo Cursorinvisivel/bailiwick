@@ -204,8 +204,12 @@ so later `/curate` sessions (which read decrypted client captures) would be capt
    3. **Scrub telemetry, then re-evaluate confidence** (**central only**; on a satellite skip this
       step and report "pending central purge", see 1.2). Remove the id from every
       `distinct_projects_used[]`. For each touched id, re-check the remaining projects against the
-      graduation evidence (medium = used in ≥1 project; high = stable across 3+ distinct projects) and
-      **downgrade frontmatter `confidence:` where it no longer holds** (a `high` under 3 → `medium`).
+      graduation evidence (medium = reached ≥1 project and `useful_count` ≥ 2; high = stable across
+      3+ distinct projects; reach is `distinct_projects_used`, credited on load) and **downgrade
+      frontmatter `confidence:` where it no longer holds** (a `high` under 3 → `medium`; any level with
+      no remaining reach → `low`). Purge removes reach, never `useful_count`, so touched files with
+      `useful_count` < 2 are listed for the next Periodic review, not downgraded here (ADR-004
+      Amendment 2).
       These downgrades were in the plan, never applied silently.
    4. **Remove the `org-shorthands.md` registry row LAST** (it was needed for detection).
    5. **Commit** the knowledge and definitions changes (`knowledge:` prefix; needs approval). **The

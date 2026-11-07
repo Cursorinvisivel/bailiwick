@@ -62,8 +62,9 @@ $BAILIWICK/knowledge/context/engineering-defaults.md
 ### Identity
 project_id: [unique-kebab-case-id]
 # Stable identifier for this project/venture across all its repos.
-# Used by Memory Agent to tag Retrieval Feedback `used` entries (@project_id).
-# Feeds distinct_projects_used in .telemetry.json — determines graduation eligibility.
+# Keys project reach: every knowledge file a session loads here is credited to this id in
+# distinct_projects_used (.telemetry.json), as are explicit `used@project_id` reports.
+# Reach (>=3 distinct projects) determines graduation eligibility.
 # If client-scoped, align with scope: client:<id> — use the same id here.
 # Examples: platform-hub, trading-engine, client-acme, home-lab
 

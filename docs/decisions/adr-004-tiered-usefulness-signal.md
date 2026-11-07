@@ -150,6 +150,26 @@ Claude Code only. Codex and Antigravity subagent transcript locations are not ye
 captures stay main-transcript-only. An unreadable subagent file degrades to the rest with a health
 warn. Captures already purged cannot be repaired.
 
+## Amendment 2 — reach is load-credited; `medium` needs judged use (2026-11-07)
+
+`distinct_projects_used` has always been credited on load (plus explicit `used@project` reports),
+yet several docs and the `/metrics` label described it as "used in N projects". That overstated the
+evidence behind confidence and graduation: a file read in three projects had not been shown to
+matter in any of them. Two changes follow.
+
+- **Wording.** Reach is described as load-credited everywhere; "used" means only the curate-judged
+  tier (`useful_count`). `/metrics` labels the line `reach: loaded in >=3 distinct projects` and
+  prints `loads=`/`used=`/`projects=` beside each graduation-eligible topic, and every confidence or
+  graduation proposal shows `useful_count` as evidence for the approver.
+- **`medium` needs judged use.** `low → medium` now requires `useful_count >= 2`, reach ≥ 1 and no
+  open contradictions. Before, a single load met "used in ≥1 project", so `medium` carried no
+  usefulness evidence. `medium → high` and graduation keep their reach-based gates; every file
+  promoted to `high` from now on has passed `medium`, so it has at least two judged uses behind it.
+  Existing `high` files are not re-checked automatically.
+
+Existing `medium` files are not downgraded automatically; the next Periodic Curation reviews them
+against the new bar like any other confidence proposal.
+
 ## References
 - `skills/metrics/report.py` + `SKILL.md` (the report that surfaced `useful_count = 0`)
 - `agents/memory.md` (Retrieval Feedback + telemetry counters)

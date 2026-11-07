@@ -287,10 +287,14 @@ enhancement that would not change this substrate; it is a roadmap possibility, n
 ([ROADMAP.md](../ROADMAP.md)).
 
 ### Confidence & graduation
-`low` (first capture) → `medium` (used in ≥1 project, no open contradictions) → `high` (stable
-across **3+ distinct projects**, no open contradictions). `topics/` graduate to `patterns/` after
+`low` (first capture) → `medium` (reached ≥1 project and judged `used` at least twice, i.e.
+`useful_count` ≥ 2, no open contradictions) → `high` (stable across **3+ distinct projects**, no open
+contradictions). `topics/` graduate to `patterns/` after
 reaching `high`, rewritten with full examples. Confidence is human-approved; the agent only
-proposes.
+proposes. Project reach (`distinct_projects_used`) is credited when a session **loads** the file, so
+it shows the file was read in that many projects, not that it mattered there; `useful_count` (the
+curate-judged `used` tier, [ADR-004](decisions/adr-004-tiered-usefulness-signal.md)) is the evidence
+the approver weighs for that.
 
 ---
 

@@ -4,7 +4,8 @@ type: topic
 tags: [tag1, tag2, tag3]
 confidence: low           # low | medium | high
                           # Memory Agent proposes changes; human approves
-                          # medium→high: source_sessions>=3 + contradiction_count==0 in .telemetry.json
+                          # low→medium: useful_count>=2 + distinct_projects_used>=1 + open_contradictions==0
+                          # medium→high: distinct_projects_used>=3 + open_contradictions==0 (.telemetry.json)
 last_validated: YYYY-MM-DD
 supersedes: []            # ids of files this replaces
 scope: generic            # generic | client:<id>
