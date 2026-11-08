@@ -101,3 +101,11 @@ adopt Bailiwick as-is (single practitioner / small trusted team) or invest in ge
 - **Provider / stack frontmatter tagging** on seed knowledge, so the GCP/Terraform-leaning seed
   patterns are cleanly filterable and swappable for other stacks (the machinery is domain-neutral;
   only the seed content leans a particular way).
+- **Antigravity stage adapters in the path it reads.** `--install-tools` generates stage adapters
+  only into the legacy `~/.gemini/agents/`; Antigravity CLI reads custom agents from
+  `~/.gemini/config/agents/` (`subagent: true`, `model: inherit|flash|pro`), so no Bailiwick stage
+  is dispatchable there and a led session falls back to playing every stage inline. Generate the
+  Antigravity format too (ADR-010 Amendment 2 and ADR-012 residuals).
+- **Verify guardrails inside Codex subagent threads.** PreToolUse coverage inside subagents is
+  verified for Claude Code only; Codex stages rely on policy plus the main session's approval
+  posture until a hook firing inside a spawned stage is demonstrated (ADR-010 Amendment 1 residual).
