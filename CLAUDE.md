@@ -66,7 +66,9 @@ Enforced by harness hooks ($BAILIWICK/hooks/) — Claude Code, and Codex CLI for
   to `<project>/.bailiwick-outputs/raw/` — under Claude Code and, since codex-cli 0.147, Codex CLI
   too (one script, both transcript shapes; inert until each Codex hook is trusted once). The
   SessionStart hook (Claude Code) asserts the framework defaults, injects the knowledge index (the
-  map), and nags when captures are pending. The harness runs these — capture cannot be forgotten.
+  map), and nags when captures are pending: always on the central machine, on a satellite only when
+  its backup is not active, so those captures cannot reach central. The harness runs these —
+  capture cannot be forgotten.
   Exception: `/purge` sessions (and skills in `capture.skip_skills`) are never backed up; a typed or
   sentinel-confirmed one is never captured, while an agent-invoked one without that confirmation is
   held local (captured, never pushed).
@@ -74,7 +76,10 @@ Enforced by harness hooks ($BAILIWICK/hooks/) — Claude Code, and Codex CLI for
   distills captures into the knowledge library; promotion always requires approval.
 - **Durability (optional).** With `capture_backup` enabled in `.bailiwick-sync.json`, Stop/SessionEnd
   hooks gpg-encrypt captures and push **ciphertext** to a dedicated private repo so un-curated
-  dirty data survives disk loss; `/curate` decrypts, promotes, and purges. See hooks/README.md.
+  dirty data survives disk loss; `/curate` decrypts, promotes, and purges. After a
+  successful knowledge sync on central, `/curate` can compact the backup history on explicit approval
+  (`capture_backup.sh compact`): the last 30 days and everything un-curated stay, older curated data
+  goes; a branch is rewritten only once its machine runs the upgraded script. See hooks/README.md.
 
 ## Skills (global, in `~/.claude/skills/`)
 - **`/curate`** — human-gated distillation of captures into the knowledge library (above). Large
@@ -186,8 +191,11 @@ scope limit, not a write block (see above).
 - **In a repo that signs commits, every commit goes through `/sign`** — the guardrail denies any
   commit that is not `git commit -S -F .git/COMMIT_MSG_<slug>` (the skill's shape: message drafted
   to a file and pre-flighted), and scans that file for attribution signatures
-- **Exempt:** dirty-zone capture plumbing (`capture_backup.sh`, capture-mirror) is never blocked —
-  capture prevents data loss. Validation-only commands (terraform plan/validate/fmt, kubectl
+- **Exempt:** dirty-zone capture plumbing (`capture_backup.sh` push/pull/purge/retract and
+  `compact --dry-run`; read-only git, plain `push` and `commit` on the capture-mirror) is never
+  blocked — capture prevents data loss. A real `compact`, and any other git operation on the mirror
+  (force-push, `reset`, `gc`, ref deletion), re-confirms: those destroy history rather than protect
+  it. Validation-only commands (terraform plan/validate/fmt, kubectl
   get/--dry-run, read-only cloud CLI) run untouched
 - Never modify /knowledge/ without explicit human gate (via `/curate`)
 - `.bailiwick-outputs/raw/` is enforced capture staging — never committed, never promoted unsanitised

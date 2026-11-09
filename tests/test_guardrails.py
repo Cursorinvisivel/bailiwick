@@ -318,6 +318,299 @@ def test_exempt_substring_does_not_disarm_tiers(cmd):
     assert decision_of(parsed) == "ask", f"{cmd!r} must not ride the capture exemption"
 
 
+# `capture_backup.sh compact` force-pushes a rewritten backup history: the exemption exists because
+# capture prevents data loss, the inverse of this verb. Only a real --dry-run keeps it.
+@pytest.mark.parametrize("cmd", [
+    "bash /r/hooks/capture_backup.sh compact",
+    "/r/hooks/capture_backup.sh compact --retain-days 30",
+    'bash "$BAILIWICK/hooks/capture_backup.sh" compact',
+    'bash "/path with space/hooks/capture_backup.sh" compact',
+    "BAILIWICK_HOME=/x bash /r/hooks/capture_backup.sh compact",
+    "env FOO=1 bash /r/hooks/capture_backup.sh compact",
+    "bash -x /r/hooks/capture_backup.sh compact",
+    "nohup bash /r/hooks/capture_backup.sh compact",
+    "cd /r && bash hooks/capture_backup.sh compact",
+    "(bash /r/hooks/capture_backup.sh compact)",
+    # Quoted verb, folded like any other shell word.
+    'bash /r/hooks/capture_backup.sh "compact"',
+    'bash /r/hooks/capture_backup.sh comp"act"',
+    # Wrappers the suite already covers.
+    "bash -c 'bash /r/hooks/capture_backup.sh compact'",
+    "bash -lc 'bash /r/hooks/capture_backup.sh compact --retain-days 30'",
+    "sh -c \"/r/hooks/capture_backup.sh compact\"",
+    "bash -c 'bash /r/hooks/capture_backup.sh compact' --dry-run",
+    # Decoys: the flag must be real and in the same segment.
+    "bash /r/hooks/capture_backup.sh compact # --dry-run",
+    "bash /r/hooks/capture_backup.sh compact; echo --dry-run",
+    "bash /r/hooks/capture_backup.sh compact && echo --dry-run",
+    "echo --dry-run && bash /r/hooks/capture_backup.sh compact",
+    'bash /r/hooks/capture_backup.sh compact "--dry-run is off"',
+    "bash /r/hooks/capture_backup.sh compact --dry-run=false",
+    "bash /r/hooks/capture_backup.sh compact --dry-run=none",
+    "bash /r/hooks/capture_backup.sh compact x--dry-run",
+    'bash "/path with space/hooks/capture_backup.sh" compact # --dry-run',
+    'bash "/path with space/hooks/capture_backup.sh" compact; echo --dry-run',
+])
+def test_compact_loses_the_capture_exemption(cmd):
+    rc, parsed = run_guard(cmd)
+    assert decision_of(parsed) == "ask", f"{cmd!r} must confirm: got {parsed!r}"
+
+
+_S = "/r/hooks/capture_backup.sh"
+_M = "/home/me/.cache/bailiwick/capture-mirror"
+
+
+# Each of these ran a real compact with no confirmation: the script name is matched anywhere in the
+# segment, so no wrapper in front of it can hide it.
+@pytest.mark.parametrize("cmd", [
+    f"/bin/bash {_S} compact",
+    f"/usr/bin/env bash {_S} compact",
+    f"bash -o pipefail {_S} compact",
+    f"if true; then bash {_S} compact; fi",
+    f"while true; do bash {_S} compact; done",
+    f"bash {_S} compact>/dev/null",
+    f"bash {_S} compact 2>/dev/null",
+    f"bash {_S} compact &>/dev/null",
+    f"nice -n 5 bash {_S} compact",
+    f"env -u X bash {_S} compact",
+    f"timeout -k 5 10 bash {_S} compact",
+    f"sudo -u me bash {_S} compact",
+    f"stdbuf -oL bash {_S} compact",
+    f"flock /tmp/l bash {_S} compact",
+    f"ionice -c3 bash {_S} compact",
+    f"xargs -n1 bash {_S} compact",
+    f"printf x | xargs bash {_S} compact",
+    f"source {_S} compact",
+    f"x=$(bash {_S} compact)",
+    f"`bash {_S} compact`",
+    # Quoted verb with a spaced path, which the tier form blanks.
+    'bash "/path with space/hooks/capture_backup.sh" "compact"',
+    "bash '/path with space/hooks/capture_backup.sh' 'compact'",
+    'bash "/path with space/hooks/capture_backup.sh" comp"act"',
+    'nice bash "/path with space/hooks/capture_backup.sh" compact',
+    # A redirect may sit between the script and the verb.
+    f"bash {_S} >/dev/null compact",
+    f"bash {_S} 2>&1 compact",
+    f"bash {_S} > /dev/null compact",
+])
+def test_compact_ask_is_unanchored(cmd):
+    rc, parsed = run_guard(cmd)
+    assert decision_of(parsed) == "ask", f"{cmd!r} must confirm: got {parsed!r}"
+
+
+# A verb the text does not show may expand to compact: the exemption needs a literal verb or none.
+@pytest.mark.parametrize("cmd", [
+    f"bash {_S} $M",
+    f'bash {_S} "$M"',
+    f"bash {_S} ${{M}}",
+    f"bash {_S} $(echo compact)",
+    f'bash {_S} "$(echo compact)"',
+    f"bash {_S} `echo compact`",
+    f"bash {_S} {{compact,}}",
+    f"bash {_S} compact{{,}}",
+    f"bash {_S} $'compact'",
+    f"bash {_S} frobnicate",
+    f"{_S} $M",
+    f"nice bash {_S} $M",
+    f"cat $(bash {_S} $M)",
+    f"uv run bash {_S} $M",
+    f"uv run {_S} $M",
+    f'uv run {_S} "$M"',
+    f"npx {_S} $M",
+    f"git -c alias.x=!{_S} x compact",
+    "x=$(git -C ~/.cache/bailiwick/capture-mirror update-ref -d refs/bw/pre-compact/capture/x)",
+    "echo `git -C ~/.cache/bailiwick/capture-mirror reset --hard HEAD~5`",
+    "echo $(git -C ~/.cache/bailiwick/capture-mirror gc --prune=now)",
+    'bash "/path with space/hooks/capture_backup.sh" $M',
+    'bash "/path with space/hooks/capture_backup.sh" "$(echo compact)"',
+    # The verb arrives from somewhere the text does not show.
+    f"printf compact | xargs bash {_S}",
+    f"set -- compact; source {_S}",
+])
+def test_backup_script_needs_a_literal_verb(cmd):
+    rc, parsed = run_guard(cmd)
+    assert decision_of(parsed) == "ask", f"{cmd!r} must confirm: got {parsed!r}"
+
+
+# Each of these holds `--dry-run` as text that is not an argument, and ran for real.
+@pytest.mark.parametrize("cmd", [
+    f"bash {_S} compact > --dry-run",
+    f"bash {_S} compact 2> --dry-run",
+    f"bash {_S} compact >> --dry-run",
+    f"bash {_S} compact <<< --dry-run",
+    f"bash {_S} compact < --dry-run",
+    f"bash {_S} compact $(: --dry-run)",
+    f"bash {_S} compact `: --dry-run`",
+    "bash " + _S + " compact ${U+ --dry-run }",
+    f"bash {_S} compact --retain-days 30 > --dry-run",
+    f"bash {_S} compact --retain-days --dry-run",
+    f"bash {_S} compact --retain-days=x --dry-run",
+    f"bash {_S} compact --force --dry-run",
+    f"bash {_S} compact --dry-run extra",
+    f"bash {_S} compact --dry-run 2>&1",
+    f"(bash {_S} compact) --dry-run",
+    f'bash "/path with space/hooks/capture_backup.sh" compact > --dry-run',
+])
+def test_compact_dry_run_must_be_the_whole_remainder(cmd):
+    rc, parsed = run_guard(cmd)
+    assert decision_of(parsed) == "ask", f"{cmd!r} must confirm: got {parsed!r}"
+
+
+@pytest.mark.parametrize("cmd", [
+    f"bash {_S} compact --retain-days=30 --dry-run",
+    f"bash {_S} compact --retain-days 7 --dry-run --retain-days 30",
+    f'bash {_S} compact "--dry-run"',
+    f'bash {_S} compact --retain-days="30" --dry-run',
+    f"nice -n 5 bash {_S} compact --dry-run",
+    f"bash {_S} >/dev/null compact --dry-run",
+    f"bash {_S} compact --dry-run; echo done",
+    f"bash {_S} compact --dry-run | tail -5",
+    f"bash {_S}",
+    f"bash {_S} >/dev/null 2>&1",
+    f"bash {_S} push </dev/null >/dev/null 2>&1",
+    f"bash {_S} <<< compact",
+    f"bash {_S} > compact",
+    f"(bash {_S})",
+    f"grep -n compact {_S}",
+    f"grep compact {_S} $OTHER",
+    f"cat {_S}",
+    f"wc -l {_S} $OTHER",
+    f"shellcheck -S warning {_S} scripts/purge_verify.sh",
+    f"git diff {_S} hooks/guardrails.py",
+    f"sed -n 1,5p {_S} | grep compact",
+    "bash tests/shell/test_capture_backup.sh --verbose",
+])
+def test_backup_script_real_uses_stay_quiet(cmd):
+    rc, parsed = run_guard(cmd)
+    assert parsed is None, f"{cmd!r} must not be blocked: got {parsed!r}"
+
+
+# The mirror exemption covers reads and the plain push/commit the plumbing uses. Everything that can
+# rewrite or destroy the ciphertext asks, and the undo in hooks/README.md is one of them.
+@pytest.mark.parametrize("args", [
+    "push --force",
+    "push -f",
+    "push --force-with-lease",
+    "push --mirror",
+    "push --delete origin capture/x",
+    "push --all",
+    "push origin --force",
+    "push origin +capture/x",
+    "push +capture/x",
+    "push origin :capture/x",
+    "push :capture/x",
+    "push origin HEAD:refs/heads/capture/x",
+    "push /tmp/elsewhere",
+    "push ../elsewhere main",
+    "push other-remote main",
+    "push --force origin refs/bw/pre-compact/capture/x:refs/heads/capture/x",
+    "update-ref -d refs/heads/capture/x",
+    "reset --hard origin/capture/x",
+    "filter-branch --force HEAD",
+    "filter-repo --force",
+    "reflog expire --expire=now --all",
+    "gc --prune=now",
+    "remote set-url origin file:///tmp/x",
+    "remote add evil /tmp/x",
+    "-c alias.x=!true x",
+    "-c core.sshCommand=x push",
+    "rebase --abort",
+    "branch -D capture/x",
+    "fetch --prune origin",
+    "fetch origin +refs/heads/x:refs/heads/y",
+])
+def test_mirror_exemption_is_narrow(args):
+    cmd = f"git -C {_M} {args}"
+    rc, parsed = run_guard(cmd)
+    assert decision_of(parsed) == "ask", f"{cmd!r} must confirm: got {parsed!r}"
+
+
+@pytest.mark.parametrize("args", [
+    "status",
+    "log --oneline -5",
+    "show HEAD:.purged",
+    "diff HEAD~1",
+    "ls-files",
+    "ls-tree -r HEAD",
+    "rev-parse HEAD",
+    "rev-list --count HEAD",
+    "cat-file -e HEAD",
+    "for-each-ref refs/bw",
+    "merge-base HEAD origin/capture/x",
+    "--no-pager log -1",
+    "push",
+    "push -q",
+    "push origin",
+    "push -q origin capture/x",
+    "push origin HEAD",
+    "push -q origin capture/x 2>/dev/null",
+    "commit -m snapshot",
+    "commit -qm snapshot",
+    "fetch origin",
+    "fetch -q",
+])
+def test_mirror_reads_and_plain_push_stay_quiet(args):
+    cmd = f"git -C {_M} {args}"
+    rc, parsed = run_guard(cmd)
+    assert parsed is None, f"{cmd!r} must not be blocked: got {parsed!r}"
+
+
+def test_mirror_ask_sees_a_quoted_spaced_path_and_a_full_git_path():
+    for cmd in ('git -C "/home/my user/.cache/bailiwick/capture-mirror" reset --hard',
+                f"/usr/bin/git -C {_M} reset --hard",
+                f"git --no-pager -C {_M} gc"):
+        rc, parsed = run_guard(cmd)
+        assert decision_of(parsed) == "ask", f"{cmd!r} must confirm: got {parsed!r}"
+
+
+def test_capture_plumbing_asks_are_linear_on_adversarial_input(guard_mod):
+    """A hook timeout fails open, so a matcher here must never be the slow path."""
+    import time
+    for text in ('echo ' + '"capture_backup.sh ' * 20000,
+                 "cat " + "capture_backup.sh " * 40000,
+                 "cat x; xargs " + "capture_backup.sh " * 40000,
+                 "bash capture_backup.sh " + "> " * 50000,
+                 "bash capture_backup.sh " + "1" * 200000,
+                 "bash capture_backup.sh" + " " * 200000 + "x",
+                 "bash capture_backup.sh compact" + " --retain-days 3" * 50000,
+                 "(" * 100000 + "capture_backup.sh",
+                 "git " + "-c x " * 50000,
+                 "git" + " " * 200000 + "x",
+                 "git " + "1" * 200000):
+        start = time.monotonic()
+        guard_mod.capture_plumbing_ask(text)
+        assert time.monotonic() - start < 2, text[:40]
+
+
+# Documented residuals: forms where the command text shows neither the script name nor the verb.
+@pytest.mark.parametrize("cmd", [
+    f"S={_S}; bash $S compact",
+    "cp /r/hooks/capture_backup.sh /tmp/x.sh; bash /tmp/x.sh compact",
+])
+def test_documented_residuals_stay_documented(cmd):
+    rc, parsed = run_guard(cmd)
+    assert parsed is None, "a residual was closed: update the guardrails.py docstring and README"
+
+
+@pytest.mark.parametrize("cmd", [
+    "bash /r/hooks/capture_backup.sh compact --dry-run",
+    "bash /r/hooks/capture_backup.sh compact --retain-days 30 --dry-run",
+    "bash /r/hooks/capture_backup.sh compact --dry-run --retain-days 30",
+    'bash "$BAILIWICK/hooks/capture_backup.sh" compact --dry-run',
+    'bash "/path with space/hooks/capture_backup.sh" compact --dry-run',
+    "bash -lc 'bash /r/hooks/capture_backup.sh compact --dry-run'",
+    "bash /r/hooks/capture_backup.sh push",
+    "bash /r/hooks/capture_backup.sh pull /tmp/inbox",
+    "bash /r/hooks/capture_backup.sh purge m/repo/s.jsonl.gpg",
+    "bash /r/hooks/capture_backup.sh retract",
+    "cat /r/hooks/capture_backup.sh | grep compact",
+    "(bash /r/hooks/capture_backup.sh compact --dry-run)",
+])
+def test_compact_dry_run_and_other_verbs_stay_exempt(cmd):
+    rc, parsed = run_guard(cmd)
+    assert parsed is None, f"{cmd!r} must not be blocked: got {parsed!r}"
+
+
 # ----------------------------------------------------------------------------- normalize / evasion
 
 def test_line_continuation_does_not_evade():

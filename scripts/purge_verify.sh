@@ -147,6 +147,27 @@ residual)
       done
       rm -rf "$(dirname "$bdir")"
     fi
+    # `compact` keeps one undo generation per branch in the local mirror only, so the fresh clone above
+    # cannot see it and its purged ciphertext would read as clean. Read-only: for-each-ref and log.
+    mirror="${XDG_CACHE_HOME:-$HOME/.cache}/bailiwick/capture-mirror"
+    if [ -d "$mirror/.git" ]; then
+      urefs="$(git -C "$mirror" for-each-ref --format='%(refname)' refs/bw/pre-compact 2>/dev/null || true)"
+      for p in "${bpaths[@]}"; do
+        n=0
+        while IFS= read -r uref; do
+          [ -n "$uref" ] || continue
+          u="$(git -C "$mirror" log --oneline "$uref" -- "$p" 2>/dev/null | wc -l | tr -d ' ')"
+          n=$(( n + ${u:-0} ))
+        done <<EOF
+$urefs
+EOF
+        if [ "$n" -gt 0 ]; then
+          hit "backup '$p': $n commit(s) in this machine's mirror undo refs (refs/bw/pre-compact/*) touch it — purged ciphertext stays here until the ref is dropped and gc runs, or the mirror is deleted (skills/purge/SKILL.md, erasure tiers)"
+        else
+          ok "backup '$p': this machine's mirror undo refs clean"
+        fi
+      done
+    fi
   fi
   ;;
 

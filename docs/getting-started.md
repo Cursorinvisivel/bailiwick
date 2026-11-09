@@ -186,8 +186,9 @@ credentials to this module, with tests.
 
 That's multi-step and domain-specific, so it routes through the Lead: it reads the `gcp.md` domain
 context file for retrieval hints + checklist, runs the Memory stage, dispatches the Implement and
-Quality stages, integrates, and closes with a Memory (Collect). Everything comes back as **drafts
-for your review**.
+Quality stages, integrates, and closes with a short Knowledge signals block for `/curate` (the
+Memory stage's Collect runs instead where capture is not active, or on demand). Everything comes
+back as **drafts for your review**.
 
 **Proportional routing.** Substantial work runs under the **Lead skill** by default — you don't
 need to type `/lead`. Trivial edits and direct questions are answered **inline**: the Lead does

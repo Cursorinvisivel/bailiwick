@@ -110,7 +110,7 @@ from this run. Note the oldest `last_validated` date and schedule a re-check at 
 | Archival signatures present and credible | Run first Periodic Curation Session |
 | `distinct_projects_used` inflated | Fix `project_id` normalisation before any graduation |
 | `missed` entries accumulating in one domain | That domain needs new topic files — prioritise in next sessions |
-| Library still under 30 files after 20 sessions | Intake is under-triggering — check that captures are curated and Memory Collect runs at the end of led tasks |
+| Library still under 30 files after 20 sessions | Intake is under-triggering — check that captures are curated, that led tasks end with a Knowledge signals block where capture hooks are active, and that Memory Collect runs at the end of led tasks where they are not |
 | No file near graduation gate | Either too few distinct projects, or reach undercounted (Q3) — determine which before adding more design |
 
 ---

@@ -85,6 +85,24 @@ out="$(pv residual never-was-here --backup-path m1/repo-x/)"; rc=$?
 assert_exit "tree-purged blob still fails on HISTORY" 1 "$rc"
 assert_contains "backup history hit names crypto-erasure" "crypto-erasure" "$out"
 
+echo "== residual: compact's undo ref in the local mirror is a hit the fresh clone cannot see"
+MDIR="$XDG_CACHE_HOME/bailiwick/capture-mirror"
+mkdir -p "$MDIR/m9/only-undo"; git -C "$MDIR" init -q
+echo "cipher" > "$MDIR/m9/only-undo/s.jsonl.gpg"
+git -C "$MDIR" add -A && git -C "$MDIR" -c user.name=t -c user.email=t@l commit -qm "capture"
+git -C "$MDIR" update-ref refs/bw/pre-compact/capture/m9 HEAD
+before="$(git -C "$MDIR" for-each-ref)"
+out="$(pv residual never-was-here --backup-path m9/only-undo/)"; rc=$?
+assert_exit "undo-ref ciphertext -> exit 1" 1 "$rc"
+assert_contains "the fresh clone reads clean" "backup 'm9/only-undo/': backup history clean" "$out"
+assert_contains "the undo ref is the hit" "mirror undo refs (refs/bw/pre-compact/*) touch it" "$out"
+assert_contains "the way out is named" "dropped and gc runs, or the mirror is deleted" "$out"
+assert_eq "the check is read-only" "$before" "$(git -C "$MDIR" for-each-ref)"
+git -C "$MDIR" update-ref -d refs/bw/pre-compact/capture/m9
+out="$(pv residual never-was-here --backup-path m9/only-undo/)"; rc=$?
+assert_exit "ref dropped -> exit 0" 0 "$rc"
+assert_contains "reported clean" "this machine's mirror undo refs clean" "$out"
+
 echo "== preflight: pending ciphertext on a capture branch BLOCKS deep removal"
 mkdir -p "$work/m1/repo-x"   # the earlier git rm pruned the empty dir
 echo "cipher2" > "$work/m1/repo-x/s2.jsonl.gpg"

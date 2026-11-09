@@ -35,6 +35,10 @@ t_sandbox() {  # sets T_SANDBOX, sandboxed HOME, stub gh on PATH; cleans up on e
   # Physical, normalized path: macOS TMPDIR ends in '/' and sits behind the /var -> /private/var
   # symlink, so string comparisons against paths the tools normalize would spuriously fail.
   T_SANDBOX="$(cd "$T_SANDBOX" && pwd -P)"
+  # An empty sandbox would point HOME and every remote below at the real filesystem root.
+  [ -n "$T_SANDBOX" ] || exit 1
+  # A suite started from a git hook inherits these, and git would then act on the caller's repo.
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
   export HOME="$T_SANDBOX/home"
   mkdir -p "$HOME"
   export XDG_CACHE_HOME="$T_SANDBOX/cache"

@@ -296,7 +296,10 @@ so later `/curate` sessions (which read decrypted client captures) would be capt
      gpg key is destroyed (a token in the repo key needs the rewrite regardless). Derived from
      verifiable state, never an operator assertion: `residual … --backup-path …` clean, the
      post-rewrite checks at `0`, and no 5b host-state item left. If `refs/pull` is still counted, the
-     claim stays "removed from all refs we control".
+     claim stays "removed from all refs we control". `compact`'s undo ref (`refs/bw/pre-compact/*`)
+     lives only in the local capture mirror, out of any clone's sight; `residual` reads it on the
+     machine it runs on. "Fully erased" requires, on every machine holding one, dropping that ref and
+     running gc (with the reflog expired), or deleting the mirror.
 
 7. **(`--attest`) Purge attestation: draft only, never sent** (`attest.md`). An **engineering record,
    not a legal or compliance assurance**. Recreate `$W` (1.4) and re-scan **every** Step 2 surface

@@ -18,12 +18,20 @@
 #                    .pending.spool-* file, hashed relpaths only) on this machine's branch. Run
 #                    detached by capture_session.py; every push retries what is left. Entries
 #                    leave the ledger (and spools) once origin has them.
+#   compact [--retain-days N] [--dry-run]
+#                    central only, user-approved. Rewrite every capture/* branch that carries the
+#                    .compact-capable marker: keep the last N days (default 30, or
+#                    capture_backup.retain_days) as commits on a new root, and remove from the whole
+#                    history what is older AND already curated (blob and sidecar gone from the tip).
+#                    Everything not yet curated stays. Force-pushes with a lease; one undo generation
+#                    stays in refs/bw/pre-compact/<branch> until it ages past the window. Mirrors
+#                    recover in ensure_mirror.
 #
 # BW_DRILL_SANDBOX applies (its .drill-sandbox marker exists and the project is inside it) and this
 # clone is not "$BW_DRILL_SANDBOX/framework" => push is a silent no-op, every other mode exits 3.
 #
 # Config: $BAILIWICK_ROOT/.bailiwick-sync.json -> "capture_backup": { enabled, repo, gpg_recipients[],
-#         branch, throttle_minutes, confidentiality_ack }. Disabled/absent => no-op.
+#         branch, throttle_minutes, retain_days, confidentiality_ack }. Disabled/absent => no-op.
 set -euo pipefail
 
 BAILIWICK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
@@ -71,6 +79,7 @@ command -v python3 >/dev/null 2>&1 || exit 0
 PAYLOAD_JSON=""
 if [ "$MODE" = "push" ]; then PAYLOAD_JSON="$(cat 2>/dev/null || true)"; fi
 ENABLED=0; ACK=0; REPO=""; BRANCH=""; THROTTLE=5; MACHINE="unknown"; EVENT=""; PAYLOAD_CWD=""; RCPTS=()
+ROLE="satellite"; RETAIN=30
 while IFS= read -r line; do
   case "$line" in
     ENABLED=*) ENABLED="${line#ENABLED=}";;
@@ -79,6 +88,8 @@ while IFS= read -r line; do
     BRANCH=*) BRANCH="${line#BRANCH=}";;
     THROTTLE=*) THROTTLE="${line#THROTTLE=}";;
     MACHINE=*) MACHINE="${line#MACHINE=}";;
+    ROLE=*) ROLE="${line#ROLE=}";;
+    RETAIN=*) RETAIN="${line#RETAIN=}";;
     EVENT=*) EVENT="${line#EVENT=}";;
     CWD=*) PAYLOAD_CWD="${line#CWD=}";;
     RCPT=*) RCPTS+=("${line#RCPT=}");;
@@ -94,6 +105,8 @@ print("REPO="+(b.get("repo") or ""))
 print("BRANCH="+(b.get("branch") or ""))
 print("THROTTLE="+str(b.get("throttle_minutes",5)))
 print("MACHINE="+(d.get("machine") or "unknown"))
+print("ROLE="+(d.get("role") or "satellite"))
+print("RETAIN="+str(b.get("retain_days",30)))
 for r in (b.get("gpg_recipients") or []): print("RCPT="+str(r))
 try:
     p=json.load(sys.stdin)
@@ -130,6 +143,12 @@ BW_HOME="${BAILIWICK_HOME:-$HOME/.bailiwick}"
 # Stop push or a /curate pull/purge. mkdir is atomic and portable (no flock on macOS).
 # Usage: mirror_lock <max-wait-seconds>   — returns 1 if still busy after waiting.
 LOCK="$MIRROR.lock"
+HB_PID=""; CP_TMP=""
+on_exit() {
+  if [ -n "$HB_PID" ]; then kill "$HB_PID" 2>/dev/null || true; fi
+  if [ -n "$CP_TMP" ]; then rm -rf "$CP_TMP" 2>/dev/null || true; fi
+  rmdir "$LOCK" 2>/dev/null || true
+}
 mirror_lock() {
   local waited=0
   mkdir -p "$(dirname "$MIRROR")"
@@ -142,10 +161,18 @@ mirror_lock() {
     [ "$waited" -lt "$1" ] || return 1
     sleep 1; waited=$((waited + 1))
   done
-  trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+  trap on_exit EXIT
+}
+# A long compact or gc must not look like a crashed holder (the 10-minute takeover above). The
+# redirects matter: a background job holding the caller's stdout would keep a hook "running".
+lock_heartbeat() {
+  # kill -0 $$: a holder killed by SIGKILL never runs its trap, and the lock must then age out.
+  ( while sleep 60; do kill -0 $$ 2>/dev/null || exit 0; touch "$LOCK" 2>/dev/null || exit 0; done ) </dev/null >/dev/null 2>&1 &
+  HB_PID=$!
 }
 
 ensure_mirror() {
+  local old_origin
   if [ ! -d "$MIRROR/.git" ]; then
     mkdir -p "$(dirname "$MIRROR")"
     git clone --quiet "$REPO" "$MIRROR" 2>/dev/null || {
@@ -153,6 +180,9 @@ ensure_mirror() {
       git -C "$MIRROR" remote add origin "$REPO" 2>/dev/null || true
     }
   fi
+  # Read BEFORE the fetch overwrites it: the last origin tip this mirror knew, which is what tells
+  # unpushed commits from pushed ones if origin turns out to have been rewritten by `compact`.
+  old_origin="$(git -C "$MIRROR" rev-parse -q --verify "refs/remotes/origin/$BRANCH^{commit}" 2>/dev/null || true)"
   # Explicit refspec guarantees refs/remotes/origin/<branch> is created when it exists upstream
   # (a bare 'fetch origin <branch>' only updates FETCH_HEAD, which the checks below would miss).
   git -C "$MIRROR" fetch --quiet origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" 2>/dev/null || true
@@ -170,6 +200,11 @@ ensure_mirror() {
     # Local branch exists — keep it (never reset to origin; that would discard
     # unpushed ciphertext). Divergence is reconciled by rebase at push time.
     git -C "$MIRROR" checkout -q "$BRANCH"
+    if git -C "$MIRROR" rev-parse -q --verify "refs/remotes/origin/$BRANCH" >/dev/null 2>&1 \
+       && ! git -C "$MIRROR" merge-base "$BRANCH" "origin/$BRANCH" >/dev/null 2>&1; then
+      recover_rewritten_origin "$old_origin" \
+        || bw_health capture_backup error "origin was rewritten and the mirror could not recover (ciphertext safe locally; next run retries)"
+    fi
   elif git -C "$MIRROR" rev-parse --verify -q "refs/remotes/origin/$BRANCH" >/dev/null 2>&1; then
     git -C "$MIRROR" checkout -q -b "$BRANCH" "origin/$BRANCH"
   else
@@ -218,8 +253,15 @@ rebase_resolve() {
            git_id add -- "$p" >/dev/null 2>&1 || true;;
       esac
     done < <(git -C "$MIRROR" status --porcelain 2>/dev/null | grep -E '^(DD|AU|UD|UA|DU|AA|UU)' || true)
-    GIT_EDITOR=true git_id rebase --continue >/dev/null 2>&1 \
-      || GIT_EDITOR=true git_id rebase --skip >/dev/null 2>&1 || break
+    # A failed --continue or --skip often means the NEXT commit conflicted: that is another turn of
+    # this loop, and only "failed with nothing unmerged" is a commit that became empty. Going
+    # straight to --skip dropped the next commit, and with it any tombstone it carried.
+    if ! GIT_EDITOR=true git_id rebase --continue >/dev/null 2>&1 \
+       && [ -z "$(git -C "$MIRROR" diff --name-only --diff-filter=U 2>/dev/null)" ] \
+       && ! GIT_EDITOR=true git_id rebase --skip >/dev/null 2>&1 \
+       && [ -z "$(git -C "$MIRROR" diff --name-only --diff-filter=U 2>/dev/null)" ]; then
+      break
+    fi
   done
   if [ -d "$MIRROR/.git/rebase-merge" ] || [ -d "$MIRROR/.git/rebase-apply" ]; then
     git -C "$MIRROR" rebase --abort 2>/dev/null || git -C "$MIRROR" rebase --quit 2>/dev/null || true
@@ -227,6 +269,105 @@ rebase_resolve() {
     return 1
   fi
   return 0
+}
+
+# Rollout marker: a tracked branch-root file saying the script that commits here understands a
+# rewritten origin (ensure_mirror recovery, no rebase across unrelated histories). `compact` refuses
+# a branch whose tip lacks it, because an older script would rebase the whole history and undo it.
+# `pull` only reads *.gpg and the tombstone sweep only touches *.gpg, so neither sees this file.
+MARKER=".compact-capable"
+stage_marker() {
+  [ "$(cat "$MIRROR/$MARKER" 2>/dev/null || true)" = "1" ] || printf '1\n' > "$MIRROR/$MARKER"
+  git_id add -- "$MARKER" >/dev/null 2>&1 || true
+}
+
+# `compact` replaced origin's history, so this mirror and origin share no commit. Replay only what
+# this mirror never pushed: the rebase range is cut at the merge-base with the last origin tip known
+# BEFORE the fetch, which keeps every already-pushed commit (and the blobs compact removed) out of
+# it. A rebase conflict reuses rebase_resolve (.purged union, deletion wins). No usable old tip
+# means the overlay fallback. The worktree is committed first: a half-finished push leaves untracked
+# ciphertext, and a modified .purged would stop the rebase before it starts.
+recover_rewritten_origin() {
+  local old_origin="$1" saved base="" how=rebase
+  if [ -n "$(git -C "$MIRROR" status --porcelain 2>/dev/null || true)" ]; then
+    git_id add -A >/dev/null 2>&1 || true
+    git_id commit -q -m "capture: $mtoken recovery $(date -u +%Y-%m-%dT%H:%M:%SZ)" >/dev/null 2>&1 || true
+    if [ -n "$(git -C "$MIRROR" status --porcelain 2>/dev/null || true)" ]; then return 1; fi
+  fi
+  saved="$(git -C "$MIRROR" rev-parse -q --verify "refs/heads/$BRANCH" 2>/dev/null || true)"
+  [ -n "$saved" ] || return 1
+  git -C "$MIRROR" update-ref "refs/bw/pre-compact/$BRANCH" "$saved" 2>/dev/null || return 1
+  if [ -n "$old_origin" ]; then
+    base="$(git -C "$MIRROR" merge-base "$old_origin" "$saved" 2>/dev/null || true)"
+  fi
+  if [ -n "$base" ]; then
+    git_id rebase -q --onto "origin/$BRANCH" "$base" "$BRANCH" >/dev/null 2>&1 || rebase_resolve || true
+  fi
+  # Checked rather than assumed: rebase_resolve returns 0 when the rebase never started.
+  if ! git -C "$MIRROR" merge-base --is-ancestor "origin/$BRANCH" "$BRANCH" 2>/dev/null; then
+    how=overlay
+    recover_by_overlay "$saved" || return 1
+  fi
+  bw_health capture_backup warn "origin history was rewritten by compact: mirror recovered ($how)"
+  return 0
+}
+
+# Fallback when the unpushed range cannot be computed (old tip unknown, or already the rewritten
+# one because a rejected push fetched it): restart from origin and overlay what the saved tree has
+# that origin does not. Tombstoned paths stay out (their sidecars too), and .purged is a union.
+recover_by_overlay() {
+  local saved="$1" tomb p h
+  git -C "$MIRROR" checkout -q -f -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || return 1
+  tomb="$(git -C "$MIRROR" show "origin/$BRANCH:.purged" 2>/dev/null || true)"
+  # NUL-separated paths, and literal pathspecs below: a git-quoted path would hash to a name no
+  # tombstone was written for, and a path holding `*` would check out every path it matches.
+  while IFS= read -r -d '' p; do
+    case "$p" in .purged|"$MARKER") continue;; esac
+    h="$(printf '%s' "${p%.sha256}" | sha256sum | awk '{print $1}')"
+    # A here-string, never `printf | grep -q`: grep exits at the first match, printf dies of SIGPIPE
+    # on a large manifest, and pipefail turns that into "not tombstoned".
+    if grep -qxF -- "$h" <<<"$tomb"; then continue; fi
+    GIT_LITERAL_PATHSPECS=1 git_id checkout -q "$saved" -- "$p" >/dev/null 2>&1 || true
+  done < <(python3 -c '
+import subprocess, sys
+mirror, base, saved = sys.argv[1:]
+def tree(rev):
+    out = subprocess.run(["git", "-C", mirror, "ls-tree", "-r", "-z", rev],
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
+    return {r.split(b"\t", 1)[1]: r.split(b"\t", 1)[0] for r in out.split(b"\0") if r}
+b, s = tree(base), tree(saved)
+for p in s:
+    if b.get(p) != s[p]:
+        sys.stdout.buffer.write(p + b"\0")' "$MIRROR" "origin/$BRANCH" "$saved")
+  { git -C "$MIRROR" show "$saved:.purged" 2>/dev/null || true; printf '%s\n' "$tomb"; } \
+    | grep -E '^[0-9a-f]{64}$' | sort -u > "$MIRROR/.purged" || true
+  if [ -s "$MIRROR/.purged" ]; then git_id add -- .purged >/dev/null 2>&1 || true; else rm -f "$MIRROR/.purged"; fi
+  if ! git -C "$MIRROR" diff --cached --quiet 2>/dev/null; then
+    git_id commit -q -m "capture: $mtoken recovery $(date -u +%Y-%m-%dT%H:%M:%SZ)" >/dev/null 2>&1 || return 1
+  fi
+  return 0
+}
+
+# Commits on this branch that origin does not have ("1" when that cannot be determined: the gc and
+# compact gates below must fail towards "unpushed").
+unpushed_count() {
+  git -C "$MIRROR" rev-list --count "origin/$BRANCH..$BRANCH" 2>/dev/null || echo 1
+}
+
+# A satellite after a recovery: once origin has the replayed commits the old history is only local
+# weight. Dropping the saved ref is what lets gc shrink the mirror. gc itself runs only in the
+# detached SessionEnd child (a Stop hook must stay fast); the flag file carries the request there.
+post_push_housekeeping() {
+  local flag="$MIRROR/.git/bw-gc-pending"
+  if [ "$ROLE" != "central" ] && git -C "$MIRROR" rev-parse -q --verify "refs/bw/pre-compact/$BRANCH" >/dev/null 2>&1 \
+     && [ "$(unpushed_count)" = "0" ]; then
+    git -C "$MIRROR" update-ref -d "refs/bw/pre-compact/$BRANCH" 2>/dev/null || return 0
+    : > "$flag"
+  fi
+  [ -n "${BW_BACKUP_DETACHED:-}" ] && [ -f "$flag" ] && [ "$(unpushed_count)" = "0" ] || return 0
+  lock_heartbeat
+  git -C "$MIRROR" reflog expire --expire=now --all >/dev/null 2>&1 || true
+  if git -C "$MIRROR" gc -q --prune=now >/dev/null 2>&1; then rm -f "$flag"; fi
 }
 
 # Push our branch. 0 = pushed, 2 = nothing ahead of origin, 1 = failed (commits stay in the mirror).
@@ -242,6 +383,10 @@ push_branch() {
   [ "${ahead:-0}" -gt 0 ] || return 2
   if ! git_id push -q origin "$BRANCH" 2>/dev/null; then
     if git -C "$MIRROR" fetch -q origin "$BRANCH" 2>/dev/null; then
+      # Origin was rewritten between ensure_mirror and this push. Rebasing unrelated histories would
+      # replay the whole local history (every blob compact removed) onto origin; ensure_mirror's
+      # recovery on the next run replays only the unpushed commits.
+      if ! git -C "$MIRROR" merge-base "$BRANCH" "origin/$BRANCH" >/dev/null 2>&1; then return 1; fi
       git_id rebase -q "origin/$BRANCH" >/dev/null 2>&1 || rebase_resolve || true
     fi
     git_id push -q origin "$BRANCH" 2>/dev/null || return 1
@@ -311,6 +456,7 @@ EOF
 $DRAINED
 EOF
   if ! git -C "$MIRROR" diff --cached --quiet 2>/dev/null; then
+    stage_marker
     git_id commit -q -m "purge: $(printf '%s\n' "$DRAINED" | cut -c1-12 | paste -sd' ' -) (purge-session)" >/dev/null 2>&1 || true
   fi
 }
@@ -323,7 +469,7 @@ pending_done() {
   committed="$(git -C "$MIRROR" show "HEAD:.purged" 2>/dev/null || true)"
   while IFS= read -r h; do
     [ -n "$h" ] || continue
-    printf '%s\n' "$committed" | grep -qx "$h" && done_list="$done_list$h
+    grep -qxF -- "$h" <<<"$committed" && done_list="$done_list$h
 "
   done <<EOF
 $DRAINED
@@ -350,6 +496,211 @@ EOF
 $done_list
 EOF
   return 0
+}
+
+# ---- compact ------------------------------------------------------------------------------------
+# Output and health lines carry counts and hashed branch ids only: a relpath holds a repo key.
+# The functions below read compact_branch's locals (bash dynamic scope) and run in a `||` context
+# where `set -e` is off, so every git call is checked.
+cp_report() {  # <status>
+  printf '[compact] branch=%s own=%s marker=%s commits=%s->%s D=%s redacted=%s disk=%s->%s status=%s\n' \
+    "$hid" "$own" "$marker" "$total" "$new_total" "$d_n" "$redacted" "$old_disk" "$new_disk" "$1"
+}
+cp_skip() {  # <status> [health-level]
+  CP_SKIPPED=$((CP_SKIPPED + 1))
+  bw_health capture_backup "${2:-warn}" "compact skipped ($hid: $1)"
+  cp_report "skipped:$1"
+}
+cp_noop() { CP_NOOP=$((CP_NOOP + 1)); cp_report "noop:$1"; }
+
+# D: paths anywhere in the history, absent from the tip, last added or modified before the cutoff.
+# Absent from the tip means curated only when the sidecar went too: every purge path removes blob and
+# sidecar together, while a failed encrypt deletes the blob and keeps its sidecar, and the next commit
+# records that. Such a blob is not curated, its older ciphertext is the only copy, and it stays.
+# git log is newest-first, so the first sighting of a path is its last add/modify. A blob in D takes
+# its sidecar along, whatever the sidecar's own date.
+# Paths travel NUL-separated (ls-tree/log -z): git quotes a path holding `"`, a backslash or a control
+# character even with core.quotepath=off, and a tombstone must hash the real path. Writes D and rm
+# NUL-separated, for `update-index -z`, and added one hash per line.
+# Tombstones cover capture blobs only: a sidecar is never looked up, and a tombstoned health shard
+# would be swept out of the tree the next time that machine re-encrypted it.
+cp_compute_d() {
+  git -C "$MIRROR" ls-tree -r -z --name-only "$tip" > "$w/tip-paths" 2>/dev/null || return 1
+  git -C "$MIRROR" log -z --format='%x01%ct' --name-only --no-renames \
+    --diff-filter=AM --topo-order "$tip" > "$w/touched" 2>/dev/null || return 1
+  python3 -c '
+import hashlib, sys
+w, cutoff, marker = sys.argv[1], int(sys.argv[2]), sys.argv[3].encode()
+def fields(name):
+    with open(w + "/" + name, "rb") as f:
+        return f.read().split(b"\0")
+tip, seen, ct = set(fields("tip-paths")), {}, 0
+for tok in fields("touched"):
+    # With -z the newline ending a commit header is printed in front of its first path.
+    tok = tok[1:] if tok[:1] == b"\n" else tok
+    if tok[:1] == b"\x01":
+        ct = int(tok[1:])
+    elif tok:
+        seen.setdefault(tok, ct)
+d = set()
+for p, when in seen.items():
+    if p in tip or p in (b".purged", marker) or when >= cutoff:
+        continue
+    if p.endswith(b".gpg") and p + b".sha256" in tip:
+        continue
+    d.add(p)
+for p in seen:
+    if p not in tip and p.endswith(b".gpg.sha256") and p[:-7] in d:
+        d.add(p)
+out = sorted(d)
+added = sorted({hashlib.sha256(p).hexdigest() for p in d
+                if p.endswith(b".gpg") and not p.startswith(b"health/")})
+with open(w + "/D", "wb") as f:
+    f.write(b"".join(p + b"\0" for p in out))
+with open(w + "/rm", "wb") as f:
+    f.write(b"".join(b"0 " + b"0" * 40 + b"\t" + p + b"\0" for p in out))
+with open(w + "/added", "w") as f:
+    f.write("".join(h + "\n" for h in added))' "$w" "$cutoff" "$MARKER" || return 1
+}
+
+# Tree of commit <c> minus D, with the new tombstones merged into .purged. Prints the tree id.
+cp_tree() {
+  local c="$1" pb nb
+  if [ ! -s "$w/D" ]; then git -C "$MIRROR" rev-parse -q --verify "$c^{tree}"; return; fi
+  GIT_INDEX_FILE="$w/index" git -C "$MIRROR" read-tree "$c^{tree}" 2>/dev/null || return 1
+  GIT_INDEX_FILE="$w/index" git -C "$MIRROR" update-index -z --index-info < "$w/rm" 2>/dev/null || return 1
+  if [ -s "$w/added" ]; then
+    pb="$(git -C "$MIRROR" rev-parse -q --verify "$c:.purged" 2>/dev/null || true)"
+    if [ -z "$CP_LAST_NB" ] || [ "$pb" != "$CP_LAST_PB" ]; then
+      nb="$( { if [ -n "$pb" ]; then git -C "$MIRROR" cat-file blob "$pb"; fi; cat "$w/added"; } \
+             | LC_ALL=C sort -u | git -C "$MIRROR" hash-object -w --stdin )" || return 1
+      CP_LAST_PB="$pb"; CP_LAST_NB="$nb"
+    fi
+    GIT_INDEX_FILE="$w/index" git -C "$MIRROR" update-index --add --cacheinfo "100644,$CP_LAST_NB,.purged" 2>/dev/null || return 1
+  fi
+  GIT_INDEX_FILE="$w/index" git -C "$MIRROR" write-tree 2>/dev/null
+}
+
+# Commit messages this script writes. Anything else is older than the hashed forms and can hold a
+# plaintext repo key or relpath, which a rewrite must not carry forward: an exact match on the whole
+# message, or the message is replaced.
+CP_REDACTED_MSG="legacy commit (message redacted)"
+CP_TS='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z'
+CP_MSG_OK="^(capture: [a-z0-9._-]+/[0-9a-f]{12} $CP_TS|capture: [a-z0-9._-]+ recovery $CP_TS"
+CP_MSG_OK="$CP_MSG_OK|purge: [0-9a-f]{12}( [0-9a-f]{12})* \((curated|purge-session)\)"
+CP_MSG_OK="$CP_MSG_OK|legacy commit \(message redacted\)"
+CP_MSG_OK="$CP_MSG_OK|compact: [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]+ commits)\$"
+cp_message() {  # <commit>: the message a rewrite may keep
+  local m
+  m="$(git -C "$MIRROR" cat-file commit "$1" | sed '1,/^$/d')" || return 1
+  if [[ "$m" =~ $CP_MSG_OK ]]; then printf '%s' "$m"; else printf '%s' "$CP_REDACTED_MSG"; fi
+}
+
+# Recreate commit <orig> on <tree> and optional <parent> with <message>, keeping author, committer and
+# dates. Prints the new commit id.
+cp_commit() {
+  local o="$1" t="$2" p="$3" m="$4" an ae ad cn ce cd
+  IFS=$'\037' read -r an ae ad cn ce cd < <(git -C "$MIRROR" log -1 --date=raw \
+    --format='%an%x1f%ae%x1f%ad%x1f%cn%x1f%ce%x1f%cd' "$o" 2>/dev/null)
+  [ -n "${ad:-}" ] && [ -n "${cd:-}" ] || return 1
+  local args=("$t"); if [ -n "$p" ]; then args+=(-p "$p"); fi
+  printf '%s\n' "$m" \
+    | GIT_AUTHOR_NAME="$an" GIT_AUTHOR_EMAIL="$ae" GIT_AUTHOR_DATE="@$ad" \
+      GIT_COMMITTER_NAME="$cn" GIT_COMMITTER_EMAIL="$ce" GIT_COMMITTER_DATE="@$cd" \
+      git -C "$MIRROR" commit-tree "${args[@]}" 2>/dev/null
+}
+
+# The rewrite must leave the current state exactly as it was: same tip tree except for .purged
+# gaining exactly the new tombstones, no D path added anywhere, and the expected commit count.
+cp_verify() {
+  local changed
+  changed="$(git -C "$MIRROR" diff-tree -r --name-only "$tip" "$new" 2>/dev/null)" || return 1
+  if [ -n "$changed" ] && [ "$changed" != ".purged" ]; then return 1; fi
+  git -C "$MIRROR" show "$tip:.purged" 2>/dev/null | LC_ALL=C sort -u > "$w/p-old" || true
+  git -C "$MIRROR" show "$new:.purged" 2>/dev/null | LC_ALL=C sort -u > "$w/p-new" || true
+  [ -z "$(LC_ALL=C comm -23 "$w/p-old" "$w/p-new")" ] || return 1
+  [ -z "$(LC_ALL=C comm -13 "$w/p-old" "$w/p-new" | LC_ALL=C comm -23 - "$w/added")" ] || return 1
+  git -C "$MIRROR" log -z --format= --name-only --no-renames --diff-filter=A "$new" > "$w/new-added" 2>/dev/null || return 1
+  python3 -c '
+import sys
+def paths(name):
+    with open(name, "rb") as f:
+        return set(f.read().split(b"\0")) - {b""}
+sys.exit(1 if paths(sys.argv[1]) & paths(sys.argv[2]) else 0)' "$w/new-added" "$w/D" || return 1
+  [ "$(git -C "$MIRROR" rev-list --count "$new" 2>/dev/null || echo 0)" = "$((replayed + 1))" ]
+}
+
+compact_branch() {  # <branch> <cutoff-epoch> <dry-run 0|1>
+  local b="$1" cutoff="$2" dry="$3" hid own=no marker=no total=0 new_total=- d_n=- old_disk=- new_disk=-
+  local tip new="" w cut_line cut folded root c t msg replayed=0 redacted=0 prev_undo
+  CP_LAST_PB=""; CP_LAST_NB=""
+  hid="$(id12 "$b")"
+  if [ "$b" = "$BRANCH" ]; then own=yes; fi
+  tip="$(git -C "$MIRROR" rev-parse -q --verify "refs/remotes/origin/$b^{commit}" 2>/dev/null || true)"
+  [ -n "$tip" ] || return 0
+  total="$(git -C "$MIRROR" rev-list --count "$tip" 2>/dev/null || echo 0)"
+  old_disk="$(git -C "$MIRROR" rev-list --objects --disk-usage "$tip" 2>/dev/null || echo '?')"
+  if [ "$(git -C "$MIRROR" show "$tip:$MARKER" 2>/dev/null || true)" = "1" ]; then marker=yes; fi
+  if [ "$marker" = no ]; then cp_skip no-marker; return 0; fi
+  if [ "$total" -le 1 ]; then cp_noop lone-root; return 0; fi
+  if [ "$(git -C "$MIRROR" rev-list --count --min-parents=2 "$tip" 2>/dev/null || echo 1)" != "0" ]; then
+    cp_skip non-linear; return 0
+  fi
+  if [ "$own" = yes ] && [ "$dry" = 0 ]; then
+    if [ "$CP_OWN_AHEAD" != "0" ]; then cp_skip unpushed-commits; return 0; fi
+    if [ -n "$(git -C "$MIRROR" status --porcelain 2>/dev/null || echo dirty)" ]; then cp_skip dirty-worktree; return 0; fi
+  fi
+  w="$CP_TMP/$hid"; mkdir -p "$w" || { cp_skip tempdir error; return 0; }
+  git -C "$MIRROR" log --reverse --topo-order --format='%H %ct' "$tip" > "$w/commits" 2>/dev/null \
+    || { cp_skip history-read error; return 0; }
+  cut_line="$(awk -v c="$cutoff" '$2 <= c { n = NR; h = $1 } END { if (n) print n " " h }' "$w/commits")"
+  if [ -z "$cut_line" ]; then cp_noop nothing-old-enough; return 0; fi
+  folded="${cut_line%% *}"; cut="${cut_line#* }"
+  cp_compute_d || { cp_skip history-read error; return 0; }
+  d_n="$(tr -cd '\000' < "$w/D" | wc -c | tr -d ' ')"
+  root="$(git -C "$MIRROR" rev-list --max-parents=0 "$tip" 2>/dev/null || true)"
+  if [ "$cut" = "$root" ] && [ ! -s "$w/D" ]; then cp_noop nothing-to-remove; return 0; fi
+
+  # The root keeps the cut commit's dates. A root dated "now" would make every blob in its tree look
+  # freshly added, hiding it from the next compact once it is curated.
+  t="$(cp_tree "$cut")" && [ -n "$t" ] || { cp_skip rewrite-failed error; return 0; }
+  new="$(cp_commit "$cut" "$t" "" "compact: $(date -u +%Y-%m-%d) $folded commits")" && [ -n "$new" ] \
+    || { cp_skip rewrite-failed error; return 0; }
+  while read -r c _; do
+    t="$(cp_tree "$c")" && [ -n "$t" ] || { cp_skip rewrite-failed error; return 0; }
+    msg="$(cp_message "$c")" || { cp_skip rewrite-failed error; return 0; }
+    if [ "$msg" = "$CP_REDACTED_MSG" ]; then redacted=$((redacted + 1)); fi
+    new="$(cp_commit "$c" "$t" "$new" "$msg")" && [ -n "$new" ] || { cp_skip rewrite-failed error; return 0; }
+    replayed=$((replayed + 1))
+  done < <(tail -n +"$((folded + 1))" "$w/commits")
+
+  new_total="$(git -C "$MIRROR" rev-list --count "$new" 2>/dev/null || echo '?')"
+  new_disk="$(git -C "$MIRROR" rev-list --objects --disk-usage "$new" 2>/dev/null || echo '?')"
+  if ! cp_verify; then cp_skip verification-failed error; return 0; fi
+  if [ "$dry" = 1 ]; then CP_REDACTED=$((CP_REDACTED + redacted)); cp_report dry-run; return 0; fi
+
+  # Saved before the push so a success always leaves its undo; put back if the push is refused.
+  prev_undo="$(git -C "$MIRROR" rev-parse -q --verify "refs/bw/pre-compact/$b" 2>/dev/null || true)"
+  git -C "$MIRROR" update-ref "refs/bw/pre-compact/$b" "$tip" 2>/dev/null || { cp_skip undo-ref-failed error; return 0; }
+  if ! git_id push -q --force-with-lease="refs/heads/$b:$tip" origin "$new:refs/heads/$b" >/dev/null 2>&1; then
+    if [ -n "$prev_undo" ]; then
+      git -C "$MIRROR" update-ref "refs/bw/pre-compact/$b" "$prev_undo" 2>/dev/null || true
+    else
+      git -C "$MIRROR" update-ref -d "refs/bw/pre-compact/$b" 2>/dev/null || true
+    fi
+    cp_skip push-rejected; return 0
+  fi
+  git -C "$MIRROR" update-ref "refs/remotes/origin/$b" "$new" 2>/dev/null || true
+  # When this undo generation was made: its tip's commit date can already be past the window.
+  { mkdir -p "$(dirname "$MIRROR/.git/bw-undo-stamp/$b")" && date +%s > "$MIRROR/.git/bw-undo-stamp/$b"; } 2>/dev/null || true
+  if [ "$own" = yes ]; then
+    # Worktree confirmed clean above, and the mirror lock has been held since.
+    git_id reset -q --hard "$new" >/dev/null 2>&1 \
+      || bw_health capture_backup error "compact: pushed but the mirror did not move ($hid) — next run recovers"
+  fi
+  CP_REWRITTEN=$((CP_REWRITTEN + 1)); CP_REDACTED=$((CP_REDACTED + redacted))
+  bw_health capture_backup info "compact ok ($hid; commits $total->$new_total; D=$d_n)"
+  cp_report rewritten
 }
 
 case "$MODE" in
@@ -427,7 +778,7 @@ case "$MODE" in
       while IFS= read -r trel; do
         [ -n "$trel" ] || continue
         th="$(printf '%s' "$trel" | sha256sum | awk '{print $1}')"
-        printf '%s\n' "$PURGED" | grep -qx "$th" || continue
+        grep -qxF -- "$th" <<<"$PURGED" || continue
         git_id rm -q -f --ignore-unmatch -- "$trel" "$trel.sha256" >/dev/null 2>&1 || true
         changed=1
       done < <(git -C "$MIRROR" ls-files 2>/dev/null | grep '\.gpg$' || true)
@@ -450,7 +801,7 @@ case "$MODE" in
       # a resumed session rewriting the capture must not re-leak purged content.
       if [ -n "$PURGED" ]; then
         ph="$(printf '%s' "$mtoken/$repo_name/$base.gpg" | sha256sum | awk '{print $1}')"
-        printf '%s\n' "$PURGED" | grep -qx "$ph" && continue
+        grep -qxF -- "$ph" <<<"$PURGED" && continue
       fi
       sha="$(sha256sum "$f" | awk '{print $1}')"
       shaf="$destdir/$base.gpg.sha256"
@@ -490,11 +841,12 @@ case "$MODE" in
     fi
     date +%s > "$STAMP"
     if [ "$changed" = "1" ]; then
+      stage_marker
       git_id add -A
       git_id commit -q -m "capture: $mtoken/$(id12 "$repo_name") $(date -u +%Y-%m-%dT%H:%M:%SZ)" || true
     fi
     prc=0; push_branch || prc=$?
-    if [ "$prc" = 2 ]; then pending_done; exit 0; fi   # nothing ahead: origin already has it all
+    if [ "$prc" = 2 ]; then pending_done; post_push_housekeeping; exit 0; fi   # nothing ahead: origin already has it all
     if [ "$prc" = 1 ]; then
       unp="$(git -C "$MIRROR" rev-list --count "origin/$BRANCH..$BRANCH" 2>/dev/null || echo '?')"
       bw_health capture_backup error "push failed ($BRANCH; $unp unpushed commit(s); ciphertext safe in local mirror)"
@@ -502,6 +854,7 @@ case "$MODE" in
       echo "[backup] push failed (ciphertext safe in local mirror $MIRROR)" >&2; exit 0
     fi
     pending_done
+    post_push_housekeeping
     bw_health capture_backup info "push ok ($(id12 "$repo_name") -> $BRANCH)"
     # stderr, not stdout: Codex parses a Stop/SessionEnd hook's stdout as JSON, so a plain line
     # there marks the hook Failed. Same channel its failure sibling above already uses.
@@ -655,9 +1008,10 @@ case "$MODE" in
     # the client-identifying repo-key in the current tree — exactly what purge_verify.sh residual
     # --backup-path greps for — while a hashed line matches no prefix and names no client.
     grep -qx "$ph" "$MIRROR/.purged" 2>/dev/null || { printf '%s\n' "$ph" >> "$MIRROR/.purged"; git_id add .purged; }
+    if ! git -C "$MIRROR" diff --cached --quiet 2>/dev/null; then stage_marker; fi
     git_id commit -q -m "purge: $h12 (curated)" 2>/dev/null || echo "[backup] nothing new to purge: $rel"
     # A manual purge of a blob the ledger still lists settles that entry too.
-    if pending_hashes | grep -qx "$ph"; then DRAINED="$(printf '%s\n%s' "$DRAINED" "$ph" | grep . | sort -u || true)"; fi
+    if grep -qxF -- "$ph" <<<"$(pending_hashes)"; then DRAINED="$(printf '%s\n%s' "$DRAINED" "$ph" | grep . | sort -u || true)"; fi
     # Always drain: a prior purge's push may have failed silently, leaving the mirror ahead —
     # "commit succeeded" and "push attempted" must stay decoupled or stranded commits never flush.
     git_id fetch -q origin "$BRANCH" 2>/dev/null || true
@@ -687,5 +1041,73 @@ case "$MODE" in
     fi
     pending_done
     ;;
-  *) echo "usage: capture_backup.sh [push | pull [dest] | purge <relpath> | retract]" >&2; exit 2;;
+  compact)
+    shift
+    retain_days="$RETAIN"; dry=0
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --dry-run) dry=1;;
+        --retain-days) retain_days="${2:-}"; if [ "$#" -ge 2 ]; then shift; fi;;
+        --retain-days=*) retain_days="${1#*=}";;
+        *) echo "usage: capture_backup.sh compact [--retain-days N] [--dry-run]" >&2; exit 2;;
+      esac
+      shift
+    done
+    case "$retain_days" in ''|*[!0-9]*) echo "[compact] --retain-days needs a whole number of days" >&2; exit 2;; esac
+    # Base 10 whatever the leading zeros (010 is ten days, 08 is eight). The digit count is checked
+    # first: a value past the integer range would wrap in the arithmetic and could look valid.
+    retain_digits="${retain_days#"${retain_days%%[!0]*}"}"
+    if [ "${#retain_digits}" -gt 4 ] || [ "$((10#${retain_digits:-0}))" -lt 1 ] || [ "$((10#${retain_digits:-0}))" -gt 3650 ]; then
+      echo "[compact] --retain-days must be between 1 and 3650" >&2; exit 2
+    fi
+    retain_days="$((10#$retain_digits))"
+    [ "$ROLE" = "central" ] || { echo "[compact] refused: only the central machine may compact (role is $ROLE)" >&2; exit 1; }
+    [ "$ACK" = "1" ] || { echo "[compact] refused: confidentiality_ack is false" >&2; exit 1; }
+    mirror_lock 120 || { echo "[compact] capture mirror busy — retry shortly" >&2; exit 1; }
+    lock_heartbeat
+    CP_TMP="$(mktemp -d "${TMPDIR:-/tmp}/bw-compact.XXXXXX")"
+    CP_OWN_AHEAD=0; CP_REWRITTEN=0; CP_SKIPPED=0; CP_NOOP=0; CP_REDACTED=0; CP_UNDO_DROPPED=0
+    if [ "$dry" = 1 ]; then
+      [ -d "$MIRROR/.git" ] || { echo "[compact] no capture mirror yet — nothing to report"; exit 0; }
+    else
+      ensure_mirror
+      push_branch || true   # drain our own unpushed commits; still ahead means skip below
+      CP_OWN_AHEAD="$(unpushed_count)"
+    fi
+    git -C "$MIRROR" fetch --quiet origin '+refs/heads/*:refs/remotes/origin/*' 2>/dev/null \
+      || { echo "[compact] cannot reach the backup repo — nothing changed" >&2; exit 1; }
+    if [ "$dry" = 1 ]; then
+      # The fetch above is a dry run's only write: it refreshes remote-tracking refs and objects.
+      # Rewrite objects go to a scratch store removed on exit, and nothing touches the remote.
+      export GIT_OBJECT_DIRECTORY="$CP_TMP/objects"
+      export GIT_ALTERNATE_OBJECT_DIRECTORIES="$MIRROR/.git/objects"
+      mkdir -p "$GIT_OBJECT_DIRECTORY"
+    fi
+    cutoff=$(( $(date +%s) - retain_days * 86400 ))
+    # The undo generation ages out with the data it protects: a tip older than the window would keep
+    # its purged ciphertext reachable in this mirror through every later gc, even when no branch moves.
+    if [ "$dry" = 0 ]; then
+      while IFS= read -r ref; do
+        undo_ct="$(cat "$MIRROR/.git/bw-undo-stamp/${ref#refs/bw/pre-compact/}" 2>/dev/null \
+          || git -C "$MIRROR" log -1 --format=%ct "$ref" 2>/dev/null || true)"
+        if [ -n "$undo_ct" ] && [ "$undo_ct" -lt "$cutoff" ] && git -C "$MIRROR" update-ref -d "$ref" 2>/dev/null; then
+          CP_UNDO_DROPPED=$((CP_UNDO_DROPPED + 1))
+        fi
+      done < <(git -C "$MIRROR" for-each-ref --format='%(refname)' refs/bw/pre-compact)
+    fi
+    while IFS= read -r ref; do
+      compact_branch "${ref#refs/remotes/origin/}" "$cutoff" "$dry" || true
+    done < <(git -C "$MIRROR" for-each-ref --format='%(refname)' refs/remotes/origin/capture)
+    if [ "$dry" = 0 ] && { [ "$CP_REWRITTEN" -gt 0 ] || [ "$CP_UNDO_DROPPED" -gt 0 ]; } && [ "$(unpushed_count)" = "0" ]; then
+      # refs/bw/pre-compact/* (the one undo generation) keeps its objects through this.
+      git -C "$MIRROR" reflog expire --expire=now --all >/dev/null 2>&1 || true
+      git -C "$MIRROR" gc -q --prune=now >/dev/null 2>&1 || bw_health capture_backup warn "compact: gc failed (history already rewritten)"
+    fi
+    if [ "$dry" = 1 ]; then
+      echo "[compact] dry run, retain ${retain_days}d: nothing changed on the remote (skipped $CP_SKIPPED, no-op $CP_NOOP, messages to redact $CP_REDACTED)"
+    else
+      echo "[compact] retain ${retain_days}d: rewrote $CP_REWRITTEN, skipped $CP_SKIPPED, no-op $CP_NOOP, messages redacted $CP_REDACTED, old undo refs dropped $CP_UNDO_DROPPED"
+    fi
+    ;;
+  *) echo "usage: capture_backup.sh [push | pull [dest] | purge <relpath> | retract | compact [--retain-days N] [--dry-run]]" >&2; exit 2;;
 esac

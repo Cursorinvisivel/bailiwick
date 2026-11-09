@@ -35,8 +35,92 @@ assert_contains "knowledge index injected (the map)" "INDEX-SENTINEL-LINE" "$out
 echo "== pending-capture nag counts raw transcripts"
 mkdir -p "$P1/.bailiwick-outputs/raw"
 touch "$P1/.bailiwick-outputs/raw/a.jsonl" "$P1/.bailiwick-outputs/raw/b.jsonl"
-out="$(CLAUDE_PROJECT_DIR="$P1" bash "$SS" 2>/dev/null)"
-assert_contains "nag reports 2 pending captures" "2 raw session capture(s) pending curation" "$out"
+# Written at the real default path, and removed each time: the sync tests below need a clean tree.
+CFG="$INST/.bailiwick-sync.json"
+CENTRAL_CFG='{"role":"central"}'
+run_cfg() {  # <json, or - for no config file> <project>: one session against that config
+  rm -f "$CFG"
+  [ "$1" = "-" ] || printf '%s\n' "$1" > "$CFG"
+  CLAUDE_PROJECT_DIR="$2" bash "$SS" 2>/dev/null
+  _rc=$?
+  rm -f "$CFG"
+  return $_rc
+}
+LOCAL_ONLY="2 raw session capture(s) are on this machine only and will not reach the central machine"
+PENDING="2 raw session capture(s) pending curation"
+BACKUP_REMEDY="set capture_backup enabled and confidentiality_ack to true in .bailiwick-sync.json"
+
+out="$(run_cfg "$CENTRAL_CFG" "$P1")"; rc=$?
+assert_exit "central: exit 0" 0 "$rc"
+assert_contains "central: nag reports 2 pending captures" "$PENDING" "$out"
+assert_contains "central: nag still says to run /curate" "Run /curate to review and promote (human-gated)." "$out"
+assert_not_contains "central: no local-only warning" "on this machine only" "$out"
+
+echo "== central with backup enabled: still today's nag (backups land here to be curated)"
+out="$(run_cfg '{"role":"central","capture_backup":{"enabled":true}}' "$P1")"
+assert_contains "central+backup: nag kept" "$PENDING" "$out"
+
+echo "== satellite with backup enabled: silent (the backup carries captures to central)"
+out="$(run_cfg '{"role":"satellite","capture_backup":{"enabled":true,"confidentiality_ack":true}}' "$P1")"; rc=$?
+assert_exit "satellite+backup: exit 0" 0 "$rc"
+assert_contains "satellite+backup: session still starts" "Framework defaults active" "$out"
+assert_not_contains "satellite+backup: no pending nag" "pending curation" "$out"
+assert_not_contains "satellite+backup: no local-only warning" "on this machine only" "$out"
+
+echo "== satellite with backup off: one line naming both remedies"
+out="$(run_cfg '{"role":"satellite","capture_backup":{"enabled":false}}' "$P1")"; rc=$?
+assert_exit "satellite, backup off: exit 0" 0 "$rc"
+assert_contains "satellite, backup off: says local-only" "$LOCAL_ONLY" "$out"
+assert_contains "satellite, backup off: names the backup remedy" "$BACKUP_REMEDY" "$out"
+assert_contains "satellite, backup off: names the curate remedy" "or run /curate here" "$out"
+assert_not_contains "satellite, backup off: not the central nag" "pending curation" "$out"
+assert_eq "satellite, backup off: exactly one line" "1" "$(printf '%s\n' "$out" | grep -c 'on this machine only')"
+
+echo "== satellite enabled without the confidentiality ack: nothing is pushed, so it warns"
+out="$(run_cfg '{"role":"satellite","capture_backup":{"enabled":true,"confidentiality_ack":false}}' "$P1")"; rc=$?
+assert_exit "satellite, no ack: exit 0" 0 "$rc"
+assert_contains "satellite, no ack: says local-only" "$LOCAL_ONLY" "$out"
+assert_contains "satellite, no ack: names the ack remedy" "$BACKUP_REMEDY" "$out"
+assert_eq "satellite, no ack: exactly one line" "1" "$(printf '%s\n' "$out" | grep -c 'on this machine only')"
+out="$(run_cfg '{"role":"satellite","capture_backup":{"enabled":true}}' "$P1")"
+assert_contains "satellite, ack absent: same as false" "$LOCAL_ONLY" "$out"
+out="$(run_cfg '{"role":"satellite","capture_backup":{"enabled":false,"confidentiality_ack":true}}' "$P1")"
+assert_contains "satellite, ack without enabled: still local-only" "$LOCAL_ONLY" "$out"
+
+echo "== config without a role: defaults to satellite, and the nested key decides"
+out="$(run_cfg '{"capture_backup":{"enabled":true,"confidentiality_ack":true}}' "$P1")"
+assert_not_contains "no role + backup on: silent" "on this machine only" "$out"
+out="$(run_cfg '{"machine":"x"}' "$P1")"
+assert_contains "no role + no backup block: local-only" "$LOCAL_ONLY" "$out"
+
+echo "== missing or broken config: treated as a satellite without backup, fail-open"
+out="$(run_cfg - "$P1")"; rc=$?
+assert_exit "missing config: exit 0" 0 "$rc"
+assert_contains "missing config: local-only" "$LOCAL_ONLY" "$out"
+assert_contains "missing config: index still injected" "INDEX-SENTINEL-LINE" "$out"
+out="$(run_cfg 'not json {' "$P1")"; rc=$?
+assert_exit "malformed config: exit 0" 0 "$rc"
+assert_contains "malformed config: local-only" "$LOCAL_ONLY" "$out"
+out="$(run_cfg '{"role":"satellite","capture_backup":"yes"}' "$P1")"; rc=$?
+assert_exit "non-object backup block: exit 0" 0 "$rc"
+assert_contains "non-object backup block: off, as capture_backup.sh reads it" "$LOCAL_ONLY" "$out"
+
+echo "== BW_CFG_FILE overrides the config path for role and backup alike"
+ALT_CFG="$T_SANDBOX/alt-sync.json"
+printf '%s\n' '{"role":"satellite","capture_backup":{"enabled":true,"confidentiality_ack":true}}' > "$ALT_CFG"
+out="$(BW_CFG_FILE="$ALT_CFG" run_cfg - "$P1")"
+assert_not_contains "override: backup read from BW_CFG_FILE" "on this machine only" "$out"
+printf '%s\n' "$CENTRAL_CFG" > "$ALT_CFG"
+out="$(BW_CFG_FILE="$ALT_CFG" run_cfg - "$P1")"
+assert_contains "override: role read from BW_CFG_FILE" "$PENDING" "$out"
+
+echo "== no captures: no nag in any role"
+P3="$T_SANDBOX/no-captures"; mkdir -p "$P3/.bailiwick-outputs/raw"
+printf 'uses $BAILIWICK\n' > "$P3/CLAUDE.local.md"
+out="$(run_cfg - "$P3")"
+assert_not_contains "zero captures, satellite: silent" "on this machine only" "$out"
+out="$(run_cfg "$CENTRAL_CFG" "$P3")"
+assert_not_contains "zero captures, central: silent" "pending curation" "$out"
 
 echo "== shadow-only repo: nag looks at CENTRAL staging via repo_key, not in-repo"
 P2="$T_SANDBOX/shadowed"; mkdir -p "$P2" "$BAILIWICK_HOME"
@@ -44,7 +128,7 @@ printf '%s\n' "$P2" > "$BAILIWICK_HOME/allowlist"
 key="$(PYTHONPATH="$INST/hooks" python3 -c 'import sys, capture_session; sys.stdout.write(capture_session.repo_key(sys.argv[1]))' "$P2")"
 mkdir -p "$BAILIWICK_HOME/captures/$key/raw"
 touch "$BAILIWICK_HOME/captures/$key/raw/s.jsonl"
-out="$(CLAUDE_PROJECT_DIR="$P2" bash "$SS" 2>/dev/null)"
+out="$(run_cfg "$CENTRAL_CFG" "$P2")"
 assert_contains "shadow repo activates" "Framework defaults active" "$out"
 assert_contains "nag counts the CENTRALLY staged capture" "1 raw session capture(s) pending curation" "$out"
 assert_contains "nag names the central path (writer/nag agreement)" "$BAILIWICK_HOME/captures/$key/raw" "$out"

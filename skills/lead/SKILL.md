@@ -87,16 +87,20 @@ here.
   Quality, scoped to evidence, freshness, and applicability rather than a code checklist.
 - **Advisor** (`agents/advisor.md`, read-only): required for Edge-rated tasks, on the plan
   before Implement and on the final diff; otherwise on demand (see "Size the stages").
-- **Memory Collect** after integration, including research-only and partially completed tasks.
+- **Knowledge close-out** after integration, including research-only and partially completed
+  tasks: a **Knowledge signals** block where capture hooks are active, **Memory Collect** where
+  they are not (see "Completion and evidence").
 
 Once you decide to lead a task, these applicable stages are required even when it turns out
 small; keep the scope of each stage small (rate it Trivial in "Size the stages" when its signals
-fit). **Split large Implement work into slices.** Give each module or file-ownership
-boundary its own Implement dispatch, each starting fresh, rather than one long run. A stage
-re-reads its whole context on every turn, so one long run costs far more than the same work done
-in fresh slices. Run independent slices concurrently and dependent ones in order. Review the
-integrated result: Quality and Security Review see all slices together, so no cross-slice issue
-escapes review. Do not silently replace delegated work with solo execution for convenience.
+fit). **Split large Implement work into slices.** One Implement dispatch owns one concern: a
+single script, module, or document, plus its own tests. A new mode, the guardrail that gates it,
+and the skill that calls it are three dispatches, and a fix pass follows the same limit. Each
+dispatch starts fresh rather than continuing one long run. A stage re-reads its whole context on
+every turn, so one long run costs far more than the same work done in fresh slices. Run
+independent slices concurrently and dependent ones in order. Review slices that interact as one
+integrated result, so no cross-slice issue escapes review; review unrelated slices separately, each
+at its own rating. Do not silently replace delegated work with solo execution for convenience.
 Stage dependencies determine order: research findings must reach implementation before decisions
 that depend on them, and review must consume the completed draft. Parallelize only independent
 work within runtime limits. An explicitly requested narrower scope still takes precedence;
@@ -104,9 +108,12 @@ record the omitted stages and the user's constraint.
 
 ## Size the stages
 
-Rate the task before dispatch and add model tier and effort to each stage's plan entry. This
-skill explicitly instructs per-dispatch sizing: pass both on every delegated stage where the
-host accepts them, never leaving them to the session default by omission.
+Rate each slice before dispatch, not the request as a whole, and add model tier and effort to
+each stage's plan entry. A request that bundles separable work gets one rating per slice: an Edge
+signal in one slice does not raise the sizing, reviewers, or Advisor of the others. Slices that
+interact take the highest rating among them. This skill explicitly instructs per-dispatch
+sizing: pass both on every delegated stage where the host accepts them, never leaving them to the
+session default by omission.
 
 | Task rating | Signals | Implement | Docs / Cloud Research | Quality / Security Review | Advisor |
 |---|---|---|---|---|---|
@@ -119,6 +126,12 @@ host accepts them, never leaving them to the session default by omission.
 templates, org policies, landing-zone/host projects; in the framework repo, stage instructions,
 skills, hooks and guardrails. Shared reach raises Quality and Security Review to the Complex row;
 Implement and Docs / Cloud Research stay at the rating the edit itself earns.
+
+**Low-risk instruction edits** — prose-only changes to stage instructions, skills, or docs that
+leave every gate, guardrail, and security control as strict as before — are exempt from Shared
+reach: one reviewer, Quality at no more than the Standard row and never below the implementer, no
+Security Review. An Edge-rated slice keeps its Advisor. An edit that removes or loosens a gate is
+not low-risk.
 
 Tiers: light = `haiku`, standard = `sonnet`, deep = `opus`, advisor = `fable`. Use the cheapest
 tier that fits the rating; do not default to `opus`. Memory Query, Federation, and freshness
@@ -205,7 +218,11 @@ contradictions with existing knowledge as soon as found.
 Keep implementation and review in separate agent contexts when delegation is available. Give
 the reviewer the task, the final diff (inline or as a diff file, per the brief requirement
 above), the touched-symbol map, and raw validation evidence; request its own assessment.
-Resolve material findings, rerun affected checks, and return revised portions to review. If a
+Resolve material findings, rerun affected checks, and return revised portions to review.
+**Re-review is scoped by default:** give each reviewer the fix diff and its own findings, and ask
+it to confirm each finding is closed and that the fixes broke nothing they touch, not to review
+unchanged code afresh. The first final-diff Advisor consult still gets the whole diff; only a
+repeat consult takes the scoped inputs. Widen the scope only when a fix changed the design. If a
 material issue cannot be resolved within the authorized scope, report the unfinished requirement
 and its blocker; do not label the task complete. If delegation fails, record the failed attempt
 and use the disclosed fallback above, without claiming an independent review occurred.
@@ -227,19 +244,38 @@ Result / evidence cell: `diff inline`, `diff file: <path> (<n> lines)`, or
 blocked or unverified requirements; retain that distinction when context is compacted or the
 task resumes.
 
-Run Memory Collect on the integrated outputs and unresolved questions. Use its read-only
-candidate/report operation, not its curation write/telemetry/commit steps. When the host's
-capture hooks are active (Claude Code; Codex CLI 0.147+ once its hooks are trusted), include
-knowledge signals in the main conversation. Otherwise write a short manual session output
-(unless the user forbids it), using `knowledge/templates/agent-output-template.md`, and record
-the execution table, validation, knowledge candidates, and retrieval feedback there. Stage it
-where `/curate` gathers, using the same seeded/shadow split as `/learn` (seeded wins if both):
+Close the knowledge loop according to the host and the repository, including for research-only
+and partially completed tasks.
+
+**Capture hooks active** means both: the host runs them (Claude Code; Codex CLI 0.147+ once its
+hooks are trusted), and the repository passes "Wired repository?" under "When to lead" on a test
+other than being the framework repo itself. The hooks self-gate and do not exempt the framework
+repo: without a complement file, an allowlist entry, or `BAILIWICK_SHADOW=1`, nothing is captured
+there. When both hold, do not dispatch Memory Collect. The capture carries the conversation to `/curate`, which distills it,
+so a Collect subagent would repeat that work; it needs no execution-table row. End the main
+conversation with a compact **Knowledge signals** block of at most a few lines: non-obvious
+findings, validated assumptions, contradictions with existing knowledge, and which loaded KB
+notes were actually useful, or `none`. The capture already derives which notes were loaded, so
+state only the applied/useful judgement.
+
+**No capture hook active** (Gemini, Copilot, other hosts, Codex before 0.147 or with untrusted
+hooks, and any repository failing the wiring condition above): run Memory Collect on the integrated outputs and unresolved questions. Use its
+read-only candidate/report operation, not its curation write/telemetry/commit steps. Then write
+a short manual session output (unless the user forbids it), using
+`knowledge/templates/agent-output-template.md`, and record the execution table, validation,
+knowledge candidates, and retrieval feedback there. Stage it where `/curate` gathers, using the
+same seeded/shadow split as `/learn` (seeded wins if both):
 
 - **seeded** → the project's `.bailiwick-outputs/`. Verify the path is git-ignored first; if it
   is not, keep the report in the conversation and disclose why it was not persisted.
 - **shadow** → `$BAILIWICK_HOME/captures/<repo-key>/` (`$BAILIWICK_HOME`, default `~/.bailiwick`), with
   `<repo-key>` computed by `capture_session.repo_key` as `/learn` does. Nothing is written into
   the repository.
+- **neither** (a repository the hooks do not recognise as wired) → write nothing: keep the report
+  in the conversation and disclose that it was not persisted.
+
+Memory Collect stays available on demand and inside `/curate` on any host. Do not suggest running
+`/curate` at task end; the SessionStart nag owns that prompt.
 
 Leading a task, whether invoked or by default, authorizes orchestration of that task only, not
 extra external actions.

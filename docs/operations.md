@@ -184,6 +184,15 @@ that runs `/curate`, which decrypts blobs into `.bailiwick-inbox/raw/`, promotes
 clean zone, and purges the blob. Because the remote only ever holds ciphertext, the post-curate
 purge is hygiene — not a history rewrite you have to trust.
 
+Retention is separate: `purge` only clears the tip, so the old ciphertext stays in history. On the
+central machine, `/curate` Step 10 offers `capture_backup.sh compact`, which keeps the last 30 days
+(`capture_backup.retain_days`) and removes anything older that is already curated. Anything not yet
+curated stays. It previews with `--dry-run`, which refreshes the mirror's remote-tracking refs and
+changes nothing on the remote, and force-pushes only on your approval. Other machines'
+mirrors recover on their next run. A branch without the `.compact-capable` marker is skipped until
+that machine has run the upgraded script. Details and undo: `$BAILIWICK/hooks/README.md → Encrypted
+dirty-zone backup`.
+
 Delivery is **best-effort / fail-open** with local-first durability: the raw transcript is always on
 local disk, ciphertext is committed to a local mirror before the network push, and an unpushed
 commit rides along on the next successful push — a failed push lags only the *remote* copy, it never
@@ -246,6 +255,8 @@ lag by one push, so confirm there before triaging):
 | `encrypt FAILED for … (recipient key unusable/missing?)` | error | fix the recipient key (step 1) |
 | `enabled but no repo configured` / `enabled but no gpg_recipients configured` / `gpg not installed` | error | fix `capture_backup` config or install gpg |
 | `mirror busy >120 s — SessionEnd push skipped` | warn | another push held the mirror; the next Stop push retries |
+| `origin history was rewritten by compact: mirror recovered (rebase\|overlay)` | warn | expected once on each machine after a `compact`; unpushed work was replayed |
+| `compact skipped (<id>: no-marker\|push-rejected\|…)` | warn/error | no-marker: run a capture on that machine; push-rejected: a concurrent push won, re-run `compact` |
 | `stale mirror lock (>10 min) — taken over` | warn | a crashed push left a lock; self-cleared |
 | `mirror rebase could not be auto-resolved — aborted (ciphertext safe locally)` | warn | the rebase is already aborted: origin diverged, and a `push failed` error follows |
 

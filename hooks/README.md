@@ -14,7 +14,7 @@ trigger them. They sit underneath the soft prompt-level design in
 | `fetch_guard.py` | Claude Code `PreToolUse` (`WebFetch`) — two layers | **Fetch-time allowlist for the `/curate` freshness agent.** Checks the URL with `skills/curate/scripts/check_source.py` (same code as the orchestrator's post-hoc check) and **denies** anything outside the GCP source registry. **Agent-scoped layer:** the agent's own frontmatter hook (`agents/cloud-research-freshness.md`) runs `--scoped` through a fixed-path launcher that `install_hooks.py` writes at `$BAILIWICK_HOME/hooks/fetch_guard.py`; Claude Code runs it only while that agent is active, so it needs no `agent_type`, and a missing launcher (or a launcher whose clone is gone) **blocks every fetch of that agent**. **Global layer:** the `settings.json` hook acts only when the payload `agent_type` is `bailiwick-cloud-research-freshness`; every other caller passes untouched. Inside scope it fails **closed** on errors it can see (unreadable registry, unusable URL or payload, internal error) and **open** when it cannot run (no `python3` on PATH, crash or timeout) or, for the global layer, cannot identify the caller. `doctor.sh` runs both installed layers against a synthetic off-registry and registry URL; `scripts/smoke_fetch_guard.sh` runs one live session after a Claude Code upgrade and checks that **both** layers logged the refusal (`fetch-deny:scoped` / `fetch-deny:global` — the latter proves `agent_type` is still sent). The frontmatter command uses POSIX shell expansion; on Windows it is unverified. A **missing** script is the opposite trap: `python3` exits 2, which Claude Code treats as blocking, so a moved clone blocks every WebFetch until `--install-tools` is re-run (`doctor.sh` fails on hook paths that no longer exist). Sees the requested URL only, not same-host redirects the fetch tool follows. Every denial is appended to `~/.bailiwick/guardrail-audit.log` with the host and a hash of the URL, never the raw URL. The fallback `bailiwick-cloud-research` agent is not covered; neither are the generated Gemini/Codex/Copilot adapters. |
 | `capture_session.py` | Claude Code `Stop`, `SessionEnd` · Codex CLI `Stop`, `SessionEnd` (>= 0.147) | Enforced raw capture: copies the transcript to `<project>/.bailiwick-outputs/raw/<session_id>.jsonl` when the session shows substantive work. No intelligence, no promotion. **One script, two transcript shapes:** both CLIs pass the same payload fields (`session_id`/`transcript_path`/`cwd`/`hook_event_name`), so only the transcript differs — Claude Code's `message.content[].tool_use` vs Codex's rollout `payload` records (`function_call`/`custom_tool_call`, plus `patch_apply_end` for a patch applied from inside a code-mode `exec`, which is otherwise invisible). Records are dispatched per line on that shape, so a resumed or mixed file cannot mislead it. Signals are read only from what the agent actually RAN — never from instruction text or command output. **Subagents (Claude Code only):** it also scans `<session_id>/subagents/agent-*.jsonl` beside the main transcript — reads credited as `loaded_via_subagents`, header `capture_schema: 2` — and appends those records to the same capture tagged `isSidechain`/`agentId` (`capture.include_subagents` in `.bailiwick-sync.json`, default on), keeping one `.jsonl` + `.md` per session. **Never captures a `/purge` session** (see *Design guarantees*): detected by skill name — `purge` always, plus any exact names in `capture.skip_skills` — or by the `mark_purge_session.sh` sentinel once it has run successfully. Only a user-typed name or the confirmed main-transcript sentinel skips and retracts; an agent `Skill` call, an injected skill body, or anything in a subagent only holds the capture local (`purge_detection: error`). Inert inside an applying drill sandbox (`BW_DRILL_SANDBOX` with its `.drill-sandbox` marker, project inside it) when this clone is not `$BW_DRILL_SANDBOX/framework`; a stale variable is ignored with a warn. |
 | `mark_purge_session.sh` | run by `/purge` as its first action | **Positive sentinel** for a `/purge` session: `bash "$BAILIWICK/hooks/mark_purge_session.sh"`. Takes no argument (refuses any, exit 2), writes nothing, prints a fixed confirmation plus the one accepted invocation form (so the agent can self-check). The tool call that ran it is what `capture_session.py` matches; the script itself has no effect. Because that match disables capture and deletes the session's captures, `guardrails.py` **asks** before it runs (Codex: deny; `/purge` there relies on the typed `$bailiwick-purge`), and it counts only in the main transcript, never a subagent's, and only once it has run successfully (its paired result is not an error / exits 0 and carries the fixed success line; a declined ask leaves the session captured). |
-| `capture_backup.sh` | Claude Code + Codex `Stop`, `SessionEnd` (`push`); `/curate` (`pull`/`purge`) | **Optional** encrypted off-machine backup of the dirty zone. `push` gpg-encrypts new captures and pushes **ciphertext** to a per-machine branch of a dedicated private repo (throttled on `Stop`, forced on `SessionEnd` — **detached**: the hook returns immediately and a background child does the push; **best-effort / fail-open** with local-mirror durability — see below; an unusable recipient key logs a health `error`, keeps the SOURCE capture untouched, and retries that file automatically once the key is fixed). `pull` decrypts blobs — every machine's `capture/*` branch, not just this one's — into `$BAILIWICK/.bailiwick-inbox/raw/` for `/curate`; `purge` drops a blob post-curation from whichever machine's branch holds it and **tombstones** it in that branch's root `.purged` manifest (hashed relpaths, no identifiers), so `push` never re-encrypts a purged blob while its source capture is still un-retired on some machine. `retract` drains the purge-session ledger (below). No-op unless `capture_backup.enabled` (+ `confidentiality_ack`) in `.bailiwick-sync.json`; inert under a foreign `BW_DRILL_SANDBOX`. See *Encrypted dirty-zone backup* below. |
+| `capture_backup.sh` | Claude Code + Codex `Stop`, `SessionEnd` (`push`); `/curate` (`pull`/`purge`) | **Optional** encrypted off-machine backup of the dirty zone. `push` gpg-encrypts new captures and pushes **ciphertext** to a per-machine branch of a dedicated private repo (throttled on `Stop`, forced on `SessionEnd` — **detached**: the hook returns immediately and a background child does the push; **best-effort / fail-open** with local-mirror durability — see below; an unusable recipient key logs a health `error`, keeps the SOURCE capture untouched, and retries that file automatically once the key is fixed). `pull` decrypts blobs — every machine's `capture/*` branch, not just this one's — into `$BAILIWICK/.bailiwick-inbox/raw/` for `/curate`; `purge` drops a blob post-curation from whichever machine's branch holds it and **tombstones** it in that branch's root `.purged` manifest (hashed relpaths, no identifiers), so `push` never re-encrypts a purged blob while its source capture is still un-retired on some machine. `retract` drains the purge-session ledger (below). `compact` (central, `/curate` Step 10 on user approval) rewrites each marked `capture/*` branch to the last N days and removes old curated blobs from its history. No-op unless `capture_backup.enabled` (+ `confidentiality_ack`) in `.bailiwick-sync.json`; inert under a foreign `BW_DRILL_SANDBOX`. See *Encrypted dirty-zone backup* below. |
 | `sync_knowledge.sh` | run by `/curate` (or manual) | **Outbound sync** of approved knowledge commits. Role-aware via `.bailiwick-sync.json`: `central` pushes `HEAD:main`; `satellite` parks commits on `sync/<machine>`, pushes `--force-with-lease`, and opens/refreshes a PR **as the account resolved by `gh_account.sh`, targeting the repo explicitly** (bare `gh` acts as the globally *active* account, which on a multi-account machine may not even see the repo — the push then succeeds while PR creation 404s and the knowledge strands). PR-creation failure is loud: health `error` + multi-line stderr with the exact manual command, **exit 2** (push-only, no `gh`, stays exit 0 — opening the PR manually is the documented flow there). Telemetry is central-owned and never synced from satellites. See docs/operations.md → Multi-machine sync. |
 | `gh_account.sh` | sourced helper | **GitHub account resolution, shared** by `sync_knowledge.sh` (PR creation), `bootstrap.sh` (github MCP pinning), and `scripts/doctor.sh` (reachability check) — one implementation, so they can never disagree on the account. `bw_resolve_gh_account <root>` picks the account that can actually reach the clone's origin repo (priority: `github_account` override > `github_account_map[owner]` > access probe over every logged-in account; ambiguity warns and points at the map). `bw_gh <args…>` then runs `gh` as that account, re-reading the token from gh's keychain on every call — nothing lands in a dotfile, and the pin survives `gh auth switch` for daily work. `BW_NO_GH_AUTH=1` skips resolution. |
 | `install_hooks.py` | helper (`bootstrap.sh --install-tools`) | Idempotent, non-destructive safe-merge of the `hooks` block into `~/.claude/settings.json` (dedups by command, preserves the `matcher`, preserves other keys, refuses on invalid JSON). **Adoption pass:** an existing install whose Bailiwick-owned hook commands run from ANOTHER root (old layout, a renamed/retired clone) is re-pointed at this clone (`MIGRATED: <old> -> <new>`) and deduped so hooks never fire twice — but a rewrite is committed ONLY when the result lands exactly on one of the template's own commands, so a user's hook that merely reuses an owned filename is never touched. |
@@ -188,13 +188,65 @@ dies before `/curate`. `capture_backup.sh` adds a durable, **encrypted** off-mac
 - **Distribute keys:** every backup machine needs the recipient *public* key imported (to encrypt);
   the *private* key lives only on the curating machine (to decrypt).
 - **Erasure is a non-issue:** because the remote only ever holds ciphertext, post-curate `purge` is
-  hygiene, not a security-critical history rewrite (which hosted git can't guarantee anyway).
+  hygiene, not a security-critical history rewrite (which hosted git can't guarantee anyway). `purge`
+  removes a blob from the tip only, so its older ciphertext stays in history until `compact` runs.
 - **Purged stays purged.** `purge` removes the blob *and* appends a tombstone to the branch-root
   `.purged` manifest — sha256 of the blob relpath, never the path itself, so the manifest carries no
   client identifier and `purge_verify.sh residual --backup-path` prefix checks stay clean. `push`
   skips tombstoned relpaths, so a source capture left un-retired on any machine cannot resurrect a
   purged blob. A purge may target another machine's blob: it routes to that machine's `capture/*`
   branch via a throwaway detached worktree.
+- **`compact [--retain-days N] [--dry-run]` (retention).** Each push stores a whole new ciphertext, so
+  history grows without bound. Central only, needs `confidentiality_ack`, default 30 days
+  (`capture_backup.retain_days`). For each `capture/*` branch it folds everything up to the cutoff into
+  one parentless root and replays later commits with their dates. It removes `D` from all of that:
+  paths absent from the tip whose last add/modify is older than the cutoff, plus their `.sha256`
+  sidecars. A blob absent from the tip whose sidecar is still there is not curated (a failed encrypt
+  deletes the blob and keeps the sidecar; every purge path removes both), so it stays. Each removed
+  blob gets a `.purged` tombstone (this closes pre-tombstone purges). `--retain-days` is decimal,
+  between 1 and 3650. **Not yet curated stays**, however old, and a capture curated inside the window stays in
+  history. Before pushing it verifies the tip tree is unchanged apart from `.purged` gaining lines, no
+  `D` path is added anywhere, and the commit count; any failure leaves that branch untouched. The
+  push is `--force-with-lease` against the fetched tip, so a concurrent push skips that branch. It
+  drains this machine's own unpushed commits first and skips its own branch if still ahead.
+  `--dry-run` refreshes the mirror's remote-tracking refs and objects (the fetch) and changes nothing
+  on the remote; rewrite objects go to a scratch store removed on exit. Output, health lines and commit
+  messages carry counts and hashed ids only, never relpaths or repo keys. A replayed commit keeps its
+  message only if it is exactly one of the hashed forms this script writes; anything else becomes
+  `legacy commit (message redacted)`, and the report's `redacted=` counts those, in a dry run too.
+  `/curate` Step 10 runs it on explicit approval.
+- **What the `guardrails.py` exemption does not clear.** It passes `capture_backup.sh` and git against
+  the canonical mirror, ahead of the other tiers, except for three cases that ask. `compact`, unless
+  everything after it in the segment is `--dry-run` plus `--retain-days` values (a `--dry-run` that is a
+  redirect target or sits inside `$(...)` is no flag). The script with a verb that is not a literal
+  word (`$M`, `$(...)`, `{compact,}`, `$'compact'`). Git against the mirror beyond read-only
+  subcommands, plain `fetch`, plain `push` and `commit`: `push --force`, `-f`, `--mirror`, `--delete`,
+  `+ref`, `:ref`, `src:dst` or another destination, `update-ref`, `reset`, `filter-*`, `reflog`, `gc`,
+  `remote`, `-c alias.*`. The script name is matched anywhere in the segment, so `/bin/bash`,
+  `bash -o pipefail`, `nice`, `env -u`, `timeout -k`, `sudo -u`, `stdbuf`, `flock`, `xargs`, or an
+  `if ...; then` in front of it change nothing, nor does a quoted path or an adjacent redirect. The
+  script's own git calls never pass through the guardrail. **Residuals:** a script path held in a
+  variable, `eval`, a copy under another name, and generally any form whose text shows neither name.
+- **Rollout marker `.compact-capable`.** A tracked file containing `1` at the branch root, added when
+  the upgraded script commits on its own branch. `compact` skips (and reports) a branch whose tip lacks
+  it, because an older script would answer the rewrite with a full-history rebase. There is no override;
+  run any capture on that machine to add the marker. `pull` and the tombstone paths ignore it.
+- **Mirror recovery.** `ensure_mirror` records the origin tip before fetching. If the fetch brings a
+  branch with no merge-base (origin was rewritten), it commits any dirty worktree, saves
+  `refs/bw/pre-compact/<branch>`, and rebases only the unpushed commits onto origin, reusing the `.purged`
+  union and deletion-wins handling. If the old tip is unknown or already rewritten, it restarts from
+  origin and overlays the saved tree, skipping tombstoned paths. `push_branch` never rebases across
+  unrelated histories: it reports failure and the next run recovers. On a satellite the saved ref is
+  dropped after the recovery reaches origin, and the detached SessionEnd child expires reflogs and runs
+  gc (never with unpushed commits). The central machine runs gc at the end of `compact`.
+- **One undo generation.** Central keeps the previous tip in `refs/bw/pre-compact/<branch>`, replaced
+  at that branch's next successful compact and dropped at the start of a real compact once its tip is
+  older than the retention period, even if that branch has nothing to rewrite. Undo:
+  `git -C <mirror> push --force origin refs/bw/pre-compact/<branch>:refs/heads/<branch>`; the guardrail
+  asks for a confirmation first. **The undo brings every blob the compact removed back into the
+  backup repo, purged ones included, and discards anything pushed to that branch since the compact.**
+  Mirrors recover the same way. The saved history is also what the mirror cannot gc until the ref goes,
+  and `purge_verify.sh residual --backup-path` reports it as a hit on the machine holding it.
 - **Commit messages and health lines carry no identifier.** Repo keys open with the repo's (often
   client-named) basename and relpaths add the session id. The backup repo's commit messages are
   plaintext that crypto-erasure cannot reach, and the health shard is aggregated fleet-wide. So every
@@ -203,8 +255,9 @@ dies before `/curate`. `capture_backup.sh` adds a durable, **encrypted** off-mac
   <branch>)`, `encrypt FAILED for <file-hash12>`. Terminal echoes keep the readable name.
   **Residual:** blob **paths** keep the `<machine>/<repo-key>/<session>` layout (changing it would orphan
   every existing blob), so the tree and history of the backup repo still name repo keys. Commits made
-  before this change also keep their old plaintext messages. Removing either needs the history
-  rewrite in `docs/history-purge.md`.
+  before this change keep their old plaintext messages until `compact` rewrites past them (see the
+  allowlist above); only a branch that compact rewrites is redacted. Removing either sooner needs the
+  history rewrite in `docs/history-purge.md`.
 - **Tombstones merge as a union.** When a push rebase conflicts on `.purged` (both sides appended),
   the resolution keeps every line from both sides. Picking one side would drop the other's tombstones
   and let a later push resurrect purged ciphertext.

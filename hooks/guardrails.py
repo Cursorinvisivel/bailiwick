@@ -32,6 +32,14 @@ instead of mere instructions:
           the /sign route in the reason; break-glass downgrades the deny like the error path.
   - EXEMPT: dirty-zone capture plumbing (capture_backup.sh, the capture-mirror repo)
           always passes — capture exists to guarantee no data loss and is never blocked.
+          Three things it does NOT clear, decided ahead of it on every segment
+          (capture_plumbing_ask): `capture_backup.sh compact`, unless everything after the verb is
+          --dry-run plus --retain-days values; capture_backup.sh with a verb that is not a literal
+          word (`$M`, `$(...)`, `{compact,}`, `$'compact'`); and git against the canonical mirror
+          beyond read-only subcommands, plain fetch/push and commit. The script name is matched
+          anywhere in the segment, so a wrapper (/bin/bash, nice, env -u, timeout -k, sudo -u, stdbuf,
+          flock, xargs, `if ...; then`) cannot hide it. Residuals: a script path held in a variable,
+          eval, a copy under another name, and any other form where the text shows neither name.
           The /purge asks (sentinel, purge_delete.sh / purge_scrub.py --apply) are evaluated
           on every segment BEFORE the exemption, so an exemption claim cannot swallow them.
 
@@ -120,7 +128,8 @@ EXEMPT_PATTERNS = [
     # path THROUGH it (the kernel resolves it to the other script), never the backup script.
     r"(?:^|[;&|]\s*)(?:(?:bash|sh|zsh)\s+)?\S*capture_backup\.sh(?=\s|$|[;&|])",
     # git against the CANONICAL mirror only (capture_backup.sh: $XDG_CACHE_HOME|~/.cache/bailiwick/
-    # capture-mirror), with -C immediately after `git` and the path ending the token. Matching any
+    # capture-mirror), with -C immediately after `git` and the path ending the token. Which
+    # subcommands may run at all is capture_plumbing_ask's decision, ahead of this. Matching any
     # path merely containing "capture-mirror" turned the exemption into an unconfirmed push channel:
     # an agent-created /tmp/capture-mirror, or a decoy -C path while --git-dir pointed git at the
     # client repo, both rode it to `git push <arbitrary-url>` with no confirmation.
@@ -246,6 +255,53 @@ PURGE_ASK_PATTERNS = [
      r"mark_purge_session\.sh(?=\s|$)", False, MARK_PURGE_WHAT),
 ]
 
+# What the capture exemption must NOT clear, decided per segment ahead of EXEMPT (see
+# capture_plumbing_ask, which reads these tables):
+#   - capture_backup.sh compact, the one verb of that script that removes data, unless everything
+#     after it is --dry-run plus --retain-days values. The match is anywhere in the segment, so no
+#     wrapper in front of the script can hide it, and only an exact argument list counts: `compact >
+#     --dry-run` and `compact $(: --dry-run)` run for real.
+#   - capture_backup.sh with a verb the text does not show (`$M`, `$(...)`, `{compact,}`, `$'compact'`),
+#     which may expand to compact.
+#   - git against the canonical mirror beyond read-only subcommands, plain fetch/push and commit.
+COMPACT_WHAT = "capture_backup.sh compact rewrites and force-pushes the capture backup's history"
+BACKUP_VERB_WHAT = ("capture_backup.sh with a verb that is not a literal word may run `compact`, "
+                    "which rewrites and force-pushes the capture backup's history")
+MIRROR_WHAT = ("git against the capture mirror beyond read-only commands, plain fetch/push and commit "
+               "can rewrite or destroy the ciphertext backup")
+_BACKUP_SCRIPT = r"(?<![\w.-])capture_backup\.sh(?=[\s)`<>]|$)"
+_BACKUP_LITERAL_VERB = r"(push|pull|purge|retract|compact)(?=[\s)`<>]|$)"
+_BACKUP_DRY_RUN_ONLY = r"(\s+--retain-days(=|\s+)\d+)*\s+--dry-run(\s+--retain-days(=|\s+)\d+)*\s*"
+# A quoted run ENDING in the script name or mirror path: kept as the bare name, because strip_quoted()
+# blanks a quoted path holding a space and the command would then show neither.
+_PLUMBING_QUOTED_PATH = r"""(?:"[^"\n]*|'[^'\n]*)(capture_backup\.sh|/bailiwick/capture-mirror/?)["']"""
+# Redirect operators holding a separator (2>&1, &>x, >|x), which segments() would split on.
+_REDIRECT_SEPARATOR = r"(?<=[<>])[&|]|&(?=>)"
+# (?<!\d): unanchored over a long digit run, `\d*` would otherwise restart at every digit.
+_SHELL_REDIRECT = r"(?<!\d)\d*(?:<<<|<<-?|<>|>>|<|>)(?:\s*[^\s<>)`]+)?"
+_BACKUP_TAIL_EMPTY = r"[\s)`]*"
+# Commands that take the script as a file to read or check: a non-literal word after it is not a
+# verb, unless an interpreter also appears before the script. Launchers (uv, uvx, npx) are not
+# readers: `uv run <script> $M` executes it.
+_BACKUP_READERS = frozenset((
+    "cat", "bat", "less", "more", "head", "tail", "wc", "file", "stat", "ls", "diff", "cmp", "grep",
+    "egrep", "fgrep", "rg", "ag", "sed", "awk", "gawk", "cut", "sort", "uniq", "tr", "sha256sum",
+    "md5sum", "shellcheck", "shfmt", "vi", "vim", "nvim", "nano", "code", "echo", "printf", "cp",
+    "mv", "ln", "chmod", "chown", "touch", "git", "python", "python3", "pytest", "make",
+))
+_BACKUP_SUBSTITUTION = r"\$\(|`|[<>]\("
+_BACKUP_INTERPRETER = r"(?:^|[\s(])(?:[^\s(]*/)?(?:bash|sh|zsh|dash|ksh|source|exec|\.)(?:\s|$)"
+# With no verb on its own line the script defaults to push, except where something else supplies the
+# arguments: xargs/parallel from stdin, source/. from the caller's positional parameters.
+_BACKUP_ARGS_ELSEWHERE = r"(?:^|[\s(])(?:[^\s(]*/)?(?:xargs|parallel|source|\.)(?:\s|$)"
+_MIRROR_WORD = r"\S*/bailiwick/capture-mirror/?"
+MIRROR_READ_ONLY = frozenset((
+    "status", "log", "show", "diff", "diff-tree", "ls-files", "ls-tree", "rev-parse", "rev-list",
+    "cat-file", "for-each-ref", "show-ref", "merge-base", "shortlog", "describe", "count-objects",
+    "name-rev", "blame", "grep",
+))
+_MIRROR_REF = r"[\w.][\w./-]*"
+
 # ASK-IMPACT: real-world impact — forced reconfirmation even when the user instructed the action.
 # Tuples: (pattern, dry_run_exempt, what). dry_run_exempt=True lets a --dry-run form pass as
 # validation-only (kubectl/helm support it; terraform's validation path is `plan`, which the
@@ -318,6 +374,19 @@ try:
     PURGE_SCRUB_RAW_RE = _QuotedHead(*_PURGE_SCRUB_RAW)
     PURGE_RAW_ASKS = [(MARK_PURGE_RAW_RE, MARK_PURGE_WHAT), (PURGE_DELETE_RAW_RE, PURGE_DELETE_WHAT),
                       (PURGE_SCRUB_RAW_RE, PURGE_SCRUB_WHAT)]
+    BACKUP_SCRIPT_RE = re.compile(_BACKUP_SCRIPT, re.IGNORECASE)
+    BACKUP_LITERAL_VERB_RE = re.compile(_BACKUP_LITERAL_VERB)
+    BACKUP_DRY_RUN_ONLY_RE = re.compile(_BACKUP_DRY_RUN_ONLY)
+    BACKUP_SUBSTITUTION_RE = re.compile(_BACKUP_SUBSTITUTION)
+    BACKUP_INTERPRETER_RE = re.compile(_BACKUP_INTERPRETER)
+    BACKUP_ARGS_ELSEWHERE_RE = re.compile(_BACKUP_ARGS_ELSEWHERE)
+    PLUMBING_QUOTED_PATH_RE = re.compile(_PLUMBING_QUOTED_PATH)
+    REDIRECT_SEPARATOR_RE = re.compile(_REDIRECT_SEPARATOR)
+    SHELL_REDIRECT_RE = re.compile(_SHELL_REDIRECT)
+    BACKUP_TAIL_EMPTY_RE = re.compile(_BACKUP_TAIL_EMPTY)
+    WHITESPACE_RUN_RE = re.compile(r"\s*")
+    MIRROR_WORD_RE = re.compile(_MIRROR_WORD)
+    MIRROR_REF_RE = re.compile(_MIRROR_REF)
 except Exception as _e:  # exercised by test_import_time_compile_failure_fails_closed
     _TABLE_ERROR = _e
 
@@ -408,7 +477,9 @@ class _Prefilter:
         (r"\bgh\b", r"\b(create|merge|close|ready|delete|archive)\b"),
     ]
     _DIRECT = (r"(^|[;&|]\s*|\s)rm\s+(-[a-zA-Z]*[rf]|--recursive\b|--force\b)|"
-               r"purge_delete\.sh|purge_scrub|mark_purge_session\.sh")
+               r"purge_delete\.sh|purge_scrub|mark_purge_session\.sh|"
+               r"capture_backup\.sh[\"']?[^\n;&|]*compact|capture_backup\.sh[\"']?\s+[\"']?[$`{]|"
+               r"bailiwick/capture-mirror/?[\"']?\s+(?:-c\s|(?:update-ref|reset|filter-|reflog|gc|remote)\b)")
 
     def __init__(self):
         flags = re.IGNORECASE
@@ -609,6 +680,131 @@ def segments(command):
     can never be misread here as a comment or a separator."""
     no_comments = re.sub(r"(?:^|\s)#[^\n]*", " ", command)
     return [seg for seg in re.split(r"[;&|\n]+", no_comments) if seg.strip()]
+
+
+_QUOTED_PLACEHOLDER = "__bw_quoted__"
+
+
+def _mark_run(m):
+    """A quoted run becomes a visible placeholder word: a run blanked by strip_quoted() could read as
+    "no verb" (`capture_backup.sh "$(echo compact)"`). Glued to a following `#`, as in _blank_run."""
+    run = m.group(0)
+    if run[0] == "\\":
+        return run
+    return " " + _QUOTED_PLACEHOLDER + ("_" if m.string.startswith("#", m.end()) else " ")
+
+
+def plumbing_segments(command):
+    """The segments the capture-plumbing asks read. Differs from the tier form in three ways, all so
+    that what the script or mirror really receives stays visible: quoted paths ending in either stay
+    as bare words, redirect operators holding a separator (`2>&1`) do not split the segment, and a
+    quoted argument is a placeholder word rather than a blank."""
+    view = PLUMBING_QUOTED_PATH_RE.sub(lambda m: m.group(1), command)
+    view = REDIRECT_SEPARATOR_RE.sub("", view)
+    view = unwrap_token_quotes(view, keep_values=False)
+    return segments(_QUOTED_RUN.sub(_mark_run, view))
+
+
+def _backup_script_ask(seg):
+    """The `what` of the confirmation this segment's use of capture_backup.sh needs, or None.
+
+    One pass by position, with everything about the text before a script name computed once: a
+    segment can name the script thousands of times, and slicing per name was quadratic, which is a
+    hook timeout, which fails open."""
+    seg = seg.strip()
+    if seg.startswith("(") and seg.endswith(")"):  # a segment that is one whole subshell
+        seg = seg[1:-1]
+    if not seg.strip():
+        return None
+    # A reading tool takes the script as a file, unless a substitution or an interpreter in front of
+    # the script runs it after all.
+    # `git -c alias.x=!<script> x compact` defines a command, so git with config options is no reader.
+    first = seg.split(None, 1)[0].lstrip("(!{").rsplit("/", 1)[-1]
+    reader = first in _BACKUP_READERS and not (
+        first == "git" and any(t == "-c" or t.startswith("--config-env") for t in seg.split()))
+    substitution = BACKUP_SUBSTITUTION_RE.search(seg)
+    interpreter = BACKUP_INTERPRETER_RE.search(seg)
+    executes_at = min(substitution.start() if substitution else len(seg),
+                      interpreter.start() if interpreter else len(seg))
+    elsewhere = BACKUP_ARGS_ELSEWHERE_RE.search(seg)
+    elsewhere_at = elsewhere.start() if elsewhere else len(seg)
+    for script in BACKUP_SCRIPT_RE.finditer(seg):
+        runs = not reader or executes_at < script.start()
+        # Redirects may precede the verb (`script >/dev/null compact`), and their targets are not one.
+        pos = script.end()
+        while True:
+            pos = WHITESPACE_RUN_RE.match(seg, pos).end()
+            redirect = SHELL_REDIRECT_RE.match(seg, pos)
+            if redirect is None:
+                break
+            pos = redirect.end()
+        if BACKUP_TAIL_EMPTY_RE.fullmatch(seg, pos):
+            if runs and elsewhere_at < script.start():
+                return BACKUP_VERB_WHAT
+            continue
+        verb = BACKUP_LITERAL_VERB_RE.match(seg, pos)
+        if verb is None:
+            if runs:
+                return BACKUP_VERB_WHAT
+            continue
+        if verb.group(1) == "compact" and not BACKUP_DRY_RUN_ONLY_RE.fullmatch(seg, verb.end()):
+            return COMPACT_WHAT
+    return None
+
+
+def _mirror_push_is_plain(args):
+    """`push`, `-q`/`--quiet`, then at most `origin` and plain branch names: no force, delete, mirror,
+    `+ref`, `src:dst` or other destination."""
+    words = [a for a in args if a not in ("-q", "--quiet")]
+    if not words:
+        return True
+    return words[0] == "origin" and all(MIRROR_REF_RE.fullmatch(w) for w in words[1:])
+
+
+def _mirror_fetch_is_plain(args):
+    return all(a in ("-q", "--quiet", "origin") for a in args)
+
+
+def _mirror_git_ask(seg):
+    """The `what` of the confirmation this segment's git against the canonical mirror needs, or None.
+    A token scan like is_git_commit: global options are walked, so `-c alias.x=...` is seen wherever
+    it sits. The script's own git calls never come through here (the guardrail sees only the agent's
+    command text)."""
+    tokens = SHELL_REDIRECT_RE.sub(" ", seg).split()
+    for i, tok in enumerate(tokens):
+        # The word after the last substitution opener: `x=$(git`, `` `git ``, `(git`.
+        if re.split(r"\$\(|`", tok)[-1].lstrip("(!{") != "git" and not tok.endswith("/git"):
+            continue
+        j, mirror, other_options = i + 1, False, False
+        while j < len(tokens) and tokens[j].startswith("-"):
+            option = tokens[j]
+            if option == "-C" and j + 1 < len(tokens) and MIRROR_WORD_RE.fullmatch(tokens[j + 1]):
+                mirror = True
+            elif option != "--no-pager":
+                other_options = True
+            j += 2 if option in GIT_OPTS_WITH_VALUE else 1
+        if not mirror or j >= len(tokens):
+            continue
+        sub, args = tokens[j].rstrip(")`"), tokens[j + 1:]
+        if other_options:
+            return MIRROR_WHAT
+        if sub in MIRROR_READ_ONLY or sub == "commit":
+            continue
+        if sub == "push" and _mirror_push_is_plain(args):
+            continue
+        if sub == "fetch" and _mirror_fetch_is_plain(args):
+            continue
+        return MIRROR_WHAT
+    return None
+
+
+def capture_plumbing_ask(command):
+    """The `what` of the first confirmation the capture plumbing needs in `command`, or None."""
+    for seg in plumbing_segments(command):
+        what = _backup_script_ask(seg) or _mirror_git_ask(seg)
+        if what:
+            return what
+    return None
 
 
 _SHELL_LONG_OPTS = ("--norc", "--noprofile", "--login")
@@ -815,6 +1011,13 @@ def _evaluate(command, adapter, payload, raw_command, project_dir):
                          + " — blocked from agent initiative; re-confirm this is really the intent.",
                          raw_command, project_dir)
                 return True
+    # The capture-plumbing asks, ahead of EXEMPT, which would otherwise clear these segments.
+    what = capture_plumbing_ask(command)
+    if what:
+        _respond(adapter, "impact", "HIGH-IMPACT: " + what
+                 + " — blocked from agent initiative; re-confirm this is really the intent.",
+                 raw_command, project_dir)
+        return True
     # Per-segment evaluation (ADR-006 amendment): EXEMPT clears only its own segment, and the
     # dry-run exemption only the segment that matched — neither speaks for a chained command.
     segs = [seg for seg in all_segs

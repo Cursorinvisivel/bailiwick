@@ -1,6 +1,6 @@
 ---
 name: bailiwick-memory
-description: Memory stage of the Bailiwick Quality Workflow — Query (load relevant knowledge before a task, given domain tags) and Collect (gather reusable knowledge candidates after a task). Dispatched by the Lead orchestrator at task start and task end. Read-only — proposes knowledge, never writes it (/curate owns writes).
+description: Memory stage of the Bailiwick Quality Workflow — Query (load relevant knowledge before a task, given domain tags) and Collect (gather reusable knowledge candidates after a task). The Lead orchestrator dispatches Query at task start; Collect runs inside /curate, on request, or at task end on hosts without capture hooks. Read-only — proposes knowledge, never writes it (/curate owns writes).
 model: sonnet
 effort: low
 tools: Read, Grep, Glob
@@ -18,7 +18,7 @@ tools: Read, Grep, Glob
 ## Responsibility
 Knowledge library management: load relevant context before tasks, collect and promote reusable knowledge after tasks.
 
-Two distinct operations, both dispatched by the orchestrator (ADR-010).
+Two distinct operations (ADR-010): the orchestrator dispatches Query at task start; Collect runs as its section below describes.
 
 ---
 
@@ -45,14 +45,23 @@ Two distinct operations, both dispatched by the orchestrator (ADR-010).
 
 ---
 
-## Operation: Collect (dispatched by the orchestrator — mandatory after every task)
+## Operation: Collect (inside /curate, on request, or at task end on hosts without capture hooks)
 
-After every task — including research-only sessions, partial tasks, and conversations
-where no code was written — extract reusable knowledge from agent session outputs.
-Any decision, finding, non-obvious pattern, or validated assumption is a candidate.
+Extract reusable knowledge from agent session outputs. Any decision, finding, non-obvious
+pattern, or validated assumption is a candidate, including from research-only sessions, partial
+tasks, and conversations where no code was written.
+
+The Lead dispatches Collect at task end only on hosts without active capture hooks (Gemini,
+Copilot, other hosts, and Codex before 0.147 or with untrusted hooks). Where the hooks are active
+(Claude Code; Codex CLI 0.147+ once its hooks are trusted), the capture carries the task to
+`/curate` and the Lead ends with a Knowledge signals block instead.
 
 ### Step 1 — Read session outputs
-Read all manual session outputs written during this task: `.bailiwick-outputs/*.md` (seeded) or
+**Lead-dispatched Collect:** read only that task's manual session outputs and the material in
+the brief. Do not read raw captures or the rest of the uncurated pool, and do not run
+`capture_backup.sh pull`; everything below in this step applies only when invoked through `/curate`.
+
+**Through `/curate`:** read all manual session outputs: `.bailiwick-outputs/*.md` (seeded) or
 `$BAILIWICK_HOME/captures/<repo-key>/*.md` (shadow; `$BAILIWICK_HOME` defaults to `~/.bailiwick`).
 Also read any enforced raw captures in `.bailiwick-outputs/raw/*.jsonl` or the shadow
 `$BAILIWICK_HOME/captures/<repo-key>/raw/*.jsonl` (written by the Stop/SessionEnd
@@ -60,7 +69,8 @@ hooks) that have not yet been curated — these are the safety net for sessions 
 output was written. If `capture_backup` is enabled (`.bailiwick-sync.json`), first restore off-machine
 captures with `capture_backup.sh pull` (decrypts to `.bailiwick-inbox/`) and include those too. Raw
 captures are unsanitised: abstract to generic before promoting.
-Extract: Candidates for Promotion, Retrieval Feedback blocks.
+
+Either way, extract: Candidates for Promotion, Retrieval Feedback blocks.
 
 > On-demand entry: this Collect flow is also invoked by the `/curate` skill
 > ($BAILIWICK/skills/curate/), which the SessionStart hook nags about when raw

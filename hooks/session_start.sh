@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SessionStart hook for the bailiwick.
 #  1. Asserts the framework defaults (knowledge always on, orchestration proportional).
-#  2. Nags when raw session captures are pending curation.
+#  2. Nags about raw session captures pending curation (role- and backup-aware).
 # stdout from a SessionStart hook is injected into the session context.
 set -euo pipefail
 
@@ -136,12 +136,35 @@ sync_inbound() {
 }
 sync_inbound || true
 
-if [ -d "$RAW_DIR" ]; then
+# The backup is on only when enabled AND confidentiality_ack, the gate capture_backup.sh push and
+# capture_session.py apply. Both keys are nested, so bw_cfg_bool (top-level) cannot read them.
+# Truthiness matches capture_backup.sh's own parser; anything unreadable counts as off, as it does there.
+capture_backup_active() {
+  local cfg="${BW_CFG_FILE:-$BAILIWICK_ROOT/.bailiwick-sync.json}"
+  [ -f "$cfg" ] && command -v python3 >/dev/null 2>&1 || return 1
+  python3 -c 'import json,sys
+try:
+  b = json.load(open(sys.argv[1])).get("capture_backup") or {}
+  sys.exit(0 if b.get("enabled") and b.get("confidentiality_ack") else 1)
+except Exception: sys.exit(1)' "$cfg" 2>/dev/null
+}
+
+# Pending-capture nag. Curation belongs on the central machine: a satellite stays quiet when its
+# backup carries captures there, and says so when nothing will. Config is read only when count>0,
+# which keeps the python spawns off the common path.
+capture_nag() {
+  local count role="satellite"
+  [ -d "$RAW_DIR" ] || return 0
   count=$(find "$RAW_DIR" -maxdepth 1 -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' ')
-  if [ "${count:-0}" -gt 0 ]; then
+  [ "${count:-0}" -gt 0 ] || return 0
+  command -v bw_cfg_get >/dev/null 2>&1 && role="$(bw_cfg_get role satellite)"
+  if [ "$role" = "central" ]; then
     printf '\n[bailiwick] %s raw session capture(s) pending curation in %s. Run /curate to review and promote (human-gated).\n' "$count" "$RAW_LABEL"
+  elif ! capture_backup_active; then
+    printf '\n[bailiwick] %s raw session capture(s) are on this machine only and will not reach the central machine: set capture_backup enabled and confidentiality_ack to true in .bailiwick-sync.json, or run /curate here.\n' "$count"
   fi
-fi
+}
+capture_nag || true
 
 # Framework-health nag: surface recent errors (last ~24h, this machine's shard only) so silent
 # fail-open failures become visible. Signal only — details live in /metrics [framework health].

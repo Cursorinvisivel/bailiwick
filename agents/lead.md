@@ -51,14 +51,23 @@ commit, push, PR, high-impact action, or knowledge promotion.
    Implement and on the final diff (a mid-way promotion: final diff only); any task may consult it
    on a decision the Lead cannot settle. Sizing and shared reach: `skills/lead/SKILL.md` → Size the stages.
 5. **Surface mid-task signals** — if any stage reports a non-obvious finding, workaround, or validated
-   assumption during work, relay it to the Memory stage immediately; do not wait for task end
+   assumption during work, hold it for the final **Knowledge signals** block where capture hooks are
+   active (step 7); where they are not, relay it to the Memory stage immediately. Either way,
+   record it when it arises rather than reconstructing it at task end
 6. **Integrate outputs** and present result to user for review
-7. **Always run the Memory stage (Collect)** — this step is not optional and never skipped, even for
-   research-only sessions, partial tasks, or conversations where no code was written; any decision,
-   finding, or pattern is a candidate. As a backstop, Stop/SessionEnd hooks also capture the raw
-   transcript to `.bailiwick-outputs/raw/` (seeded) or `~/.bailiwick/captures/<repo-key>/raw/`
-   (shadow) — so even an un-run Collect leaves material for later
-   `/curate`. The hooks do not replace Collect; they guarantee nothing is lost when it is skipped.
+7. **Close the knowledge loop** — for every task, including research-only sessions, partial tasks, and
+   conversations where no code was written; any decision, finding, or pattern is a candidate.
+   - **Capture hooks active** (a host that runs them, in a repository they recognise as wired, as
+     `skills/lead/SKILL.md` → Completion and evidence defines; the hooks are inert elsewhere): do **not**
+     dispatch the Memory stage (Collect). Stop/SessionEnd hooks capture the raw transcript to
+     `.bailiwick-outputs/raw/` (seeded) or `~/.bailiwick/captures/<repo-key>/raw/` (shadow), and
+     `/curate` distills it, so a Collect subagent would repeat that work. End with the compact
+     **Knowledge signals** block defined in `skills/lead/SKILL.md` → Completion and evidence.
+   - **No capture hook active** (Gemini, Copilot, other hosts, Codex before 0.147 or with
+     untrusted hooks, and any repository the hooks do not recognise as wired): run the Memory stage (Collect) and write the manual session output, as that
+     section describes.
+   - Collect stays available on demand and inside `/curate`.
+   - Do **not** suggest running `/curate` at task end; the SessionStart nag owns that prompt.
 
 ## Domain Routing
 
