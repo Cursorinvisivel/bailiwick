@@ -603,6 +603,7 @@ def test_documented_residuals_stay_documented(cmd):
     "bash /r/hooks/capture_backup.sh pull /tmp/inbox",
     "bash /r/hooks/capture_backup.sh purge m/repo/s.jsonl.gpg",
     "bash /r/hooks/capture_backup.sh retract",
+    "bash /r/hooks/capture_backup.sh refresh",
     "cat /r/hooks/capture_backup.sh | grep compact",
     "(bash /r/hooks/capture_backup.sh compact --dry-run)",
 ])

@@ -298,3 +298,25 @@ more than Claude Code Standard reviews. The Lead model is a recommendation the u
 3. **Inbox plaintext rule.** While the `/curate` inbox holds decrypted plaintext, no web- or
    shell-capable stage receives decrypted content. Decrypted copies are deleted after extraction,
    before any reviewer runs.
+
+## Amendment 6 (2026-11-09) — Memory Collect follows capture; led work is sized per slice
+
+Amends Amendment 3's accepted residual that led tasks gain a Memory Collect stage.
+
+1. **Collect follows capture.** Where capture hooks are active (a host that runs them, in a
+   repository they recognise as wired), led tasks no longer dispatch Memory Collect and close with a
+   compact Knowledge signals block instead, because the capture already carries the conversation to
+   `/curate`. Collect remains the close-out elsewhere and stays available on demand and inside
+   `/curate`.
+2. **Sized per slice.** The Lead rates each slice rather than the whole request, so an Edge signal
+   in one slice no longer raises the others. One Implement dispatch owns one concern.
+3. **Scoped re-review.** Re-review after a fix pass covers the fix diff and that reviewer's own
+   findings. The first final-diff Advisor consult still gets the whole diff.
+4. **Low-risk instruction edits** take one reviewer, unless they remove or loosen a gate.
+
+**Why:** a substantial bundled task cost about 1.36M subagent tokens, with an instruction-only slice
+sized by the force-push beside it, and Collect repeated work `/curate` does from the same capture.
+
+**Accepted residual:** without Collect, a session's reusable knowledge depends on the Lead's closing
+block and on `/curate` reading the capture. The mechanical `loaded` feedback is unaffected; judged
+usefulness now comes only from that block.

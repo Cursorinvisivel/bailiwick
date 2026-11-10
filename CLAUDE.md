@@ -191,7 +191,7 @@ scope limit, not a write block (see above).
 - **In a repo that signs commits, every commit goes through `/sign`** — the guardrail denies any
   commit that is not `git commit -S -F .git/COMMIT_MSG_<slug>` (the skill's shape: message drafted
   to a file and pre-flighted), and scans that file for attribution signatures
-- **Exempt:** dirty-zone capture plumbing (`capture_backup.sh` push/pull/purge/retract and
+- **Exempt:** dirty-zone capture plumbing (`capture_backup.sh` push/pull/purge/retract/refresh and
   `compact --dry-run`; read-only git, plain `push` and `commit` on the capture-mirror) is never
   blocked — capture prevents data loss. A real `compact`, and any other git operation on the mirror
   (force-push, `reset`, `gc`, ref deletion), re-confirms: those destroy history rather than protect

@@ -80,7 +80,8 @@ Rules:
   Never add AI attribution signatures (Co-Authored-By, "Generated with …", 🤖) to commit/PR
   messages unless the user explicitly wants them.
 - Validation-only commands (terraform plan/validate/fmt, `--dry-run`, read-only cloud CLI) run
-  freely; dirty-zone capture plumbing (`capture_backup.sh`) is never blocked.
+  freely; dirty-zone capture plumbing (`capture_backup.sh` push/pull/purge/retract/refresh and
+  `compact --dry-run`) is never blocked. A real `compact` re-confirms.
 - Never modify `knowledge/` without an explicit human gate (via `/curate`).
 - `.bailiwick-outputs/raw/` is enforced capture staging — never committed, never promoted unsanitised.
 - All outputs are drafts for human review.

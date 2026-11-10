@@ -26,9 +26,14 @@
 #                    Everything not yet curated stays. Force-pushes with a lease; one undo generation
 #                    stays in refs/bw/pre-compact/<branch> until it ages past the window. Mirrors
 #                    recover in ensure_mirror.
+#   refresh          central only, spawned detached by SessionStart. Fetch every capture/* branch into
+#                    the existing mirror so /curate's pending count sees other machines. Throttled
+#                    (30 minutes; BW_BACKUP_REFRESH_MIN overrides), silent, and it never creates a
+#                    mirror.
 #
 # BW_DRILL_SANDBOX applies (its .drill-sandbox marker exists and the project is inside it) and this
-# clone is not "$BW_DRILL_SANDBOX/framework" => push is a silent no-op, every other mode exits 3.
+# clone is not "$BW_DRILL_SANDBOX/framework" => push and refresh are silent no-ops, every other mode
+# exits 3.
 #
 # Config: $BAILIWICK_ROOT/.bailiwick-sync.json -> "capture_backup": { enabled, repo, gpg_recipients[],
 #         branch, throttle_minutes, retain_days, confidentiality_ack }. Disabled/absent => no-op.
@@ -47,7 +52,7 @@ command -v bw_health >/dev/null 2>&1 || bw_health() { :; }
 # The variable counts only when "$BW_DRILL_SANDBOX/.drill-sandbox" exists AND the project
 # (CLAUDE_PROJECT_DIR > BW_HOOK_CWD > cwd) resolves inside the sandbox: a stale or leaked export
 # would otherwise turn every backup into a silent no-op. Ignored with a content-free warn.
-# When it does apply: push (the hook) exits 0 quietly; every other mode says so on stderr and exits 3,
+# When it does apply: push and refresh (the hooks) exit 0 quietly; every other mode says so on stderr and exits 3,
 # so a manual run never "succeeds" having done nothing.
 if [ -n "${BW_DRILL_SANDBOX:-}" ]; then
   sbx_root="$(cd "$BW_DRILL_SANDBOX" 2>/dev/null && pwd -P || true)"
@@ -61,7 +66,7 @@ if [ -n "${BW_DRILL_SANDBOX:-}" ]; then
     drill_root="$(cd "$sbx_root/framework" 2>/dev/null && pwd -P || true)"
     if [ -z "$drill_root" ] || [ "$own_root" != "$drill_root" ]; then
       bw_health capture_backup info "drill sandbox active and this is not its framework copy — $MODE skipped"
-      [ "$MODE" = "push" ] && exit 0
+      case "$MODE" in push|refresh) exit 0;; esac
       echo "[backup] drill sandbox active (BW_DRILL_SANDBOX) and this is not its framework copy — $MODE NOT run" >&2
       exit 3
     fi
@@ -703,6 +708,32 @@ compact_branch() {  # <branch> <cutoff-epoch> <dry-run 0|1>
   cp_report rewritten
 }
 
+# A tombstoned capture is curated: retire the local plaintext to raw/.curated/, where /curate Step 8
+# puts it ($RAW is already the seeded or shadow staging dir, and the glob in the push loop never
+# descends there). A move, never a delete, and any failure leaves the source in place for the next
+# push. A file written in the last 60 minutes may be a live session's, rewritten on every Stop.
+# A tombstone says this PATH was purged, not this content: a file changed after its own tombstone is
+# a resumed session that nobody has curated, so it stays where a human and /curate will find it.
+# Counts only reach the health shard: paths and repo keys stay local.
+RETIRED=0; RETIRE_KEPT=0
+retire_curated() {  # <source-file> <basename> <tombstone-hash>
+  local dest="$RAW/.curated/$2" purged_at mtime
+  [ -n "$(find "$1" -maxdepth 0 -mmin +60 2>/dev/null || true)" ] || return 0
+  purged_at="$(git -C "$MIRROR" log -1 -S"$3" --format=%ct --all -- .purged 2>/dev/null || true)"
+  mtime="$(stat -c %Y -- "$1" 2>/dev/null || stat -f %m -- "$1" 2>/dev/null || true)"
+  if [ -z "$purged_at" ] || [ -z "$mtime" ] || [ "$mtime" -gt "$purged_at" ]; then
+    RETIRE_KEPT=$((RETIRE_KEPT + 1)); return 0
+  fi
+  if [ -e "$dest" ] && { [ -d "$dest" ] || ! [ "$1" -nt "$dest" ]; }; then
+    RETIRE_KEPT=$((RETIRE_KEPT + 1)); return 0
+  fi
+  if mkdir -p "$RAW/.curated" 2>/dev/null && mv -f -- "$1" "$dest" 2>/dev/null; then
+    RETIRED=$((RETIRED + 1))
+  else
+    RETIRE_KEPT=$((RETIRE_KEPT + 1))
+  fi
+}
+
 case "$MODE" in
   push)
     # Payload was parsed alongside the config in the single spawn above.
@@ -798,10 +829,14 @@ case "$MODE" in
       # Purged blobs must stay purged: a purge removes the sha sidecar, so without this check the
       # next push re-encrypts and resurrects the blob for as long as the source capture is
       # un-retired (curated from another repo/machine than the origin). Skip by relpath, not sha —
-      # a resumed session rewriting the capture must not re-leak purged content.
+      # a resumed session rewriting the capture must not re-leak purged content. Below the held
+      # check on purpose: a purge_detection header keeps a capture where a human will look for it.
       if [ -n "$PURGED" ]; then
         ph="$(printf '%s' "$mtoken/$repo_name/$base.gpg" | sha256sum | awk '{print $1}')"
-        grep -qxF -- "$ph" <<<"$PURGED" && continue
+        if grep -qxF -- "$ph" <<<"$PURGED"; then
+          retire_curated "$f" "$base" "$ph"
+          continue
+        fi
       fi
       sha="$(sha256sum "$f" | awk '{print $1}')"
       shaf="$destdir/$base.gpg.sha256"
@@ -824,6 +859,8 @@ case "$MODE" in
     if [ "$held" -gt 0 ]; then
       bw_health capture_backup warn "$held capture file(s) held local-only: purge detection error — review, then remove the 'purge_detection: error' header line"
     fi
+    if [ "$RETIRED" -gt 0 ]; then bw_health capture_backup info "retired $RETIRED curated capture file(s) from raw"; fi
+    if [ "$RETIRE_KEPT" -gt 0 ]; then bw_health capture_backup warn "$RETIRE_KEPT curated capture file(s) could not be retired — kept in raw (next push retries)"; fi
     # Health-shard transport: upload this machine's health shard (encrypted, like captures) so the
     # central machine can aggregate a fleet view in /metrics. Sha-sidecar skips unchanged shards.
     hshard="$BW_HOME/health/$mtoken.jsonl"
@@ -1041,6 +1078,29 @@ case "$MODE" in
     fi
     pending_done
     ;;
+  refresh)
+    # Moves remote-tracking refs only: no ensure_mirror (checkout, rebase, recovery), no gc, no commit.
+    # On the own branch that can replace the last-known origin tip ensure_mirror keeps for compact
+    # recovery; a later recovery then uses recover_by_overlay, the path a rejected push already takes.
+    [ "$ACK" = "1" ] && [ "$ROLE" = "central" ] && [ -d "$MIRROR/.git" ] || exit 0
+    refresh_stamp="$MIRROR/.git/bw-pool-refresh"
+    refresh_min="${BW_BACKUP_REFRESH_MIN:-30}"
+    case "$refresh_min" in ''|*[!0-9]*) refresh_min=30;; esac
+    if [ -f "$refresh_stamp" ]; then
+      last="$(cat "$refresh_stamp" 2>/dev/null || true)"
+      case "$last" in ''|*[!0-9]*) last=0;; esac
+      age=$(( $(date +%s) - 10#$last ))
+      # A stamp from the future (clock moved back) must not hold the refresh off for that long.
+      if [ "$age" -ge 0 ] && [ "$age" -lt $(( 10#$refresh_min * 60 )) ]; then exit 0; fi
+    fi
+    mirror_lock 0 || exit 0
+    if ! GIT_TERMINAL_PROMPT=0 git -C "$MIRROR" fetch --quiet --no-auto-gc --prune origin \
+         '+refs/heads/capture/*:refs/remotes/origin/capture/*' </dev/null >/dev/null 2>&1; then
+      bw_health capture_backup warn "refresh: fetch failed — other machines' pending captures may be stale"
+      exit 0
+    fi
+    { date +%s > "$refresh_stamp"; } 2>/dev/null || true
+    ;;
   compact)
     shift
     retain_days="$RETAIN"; dry=0
@@ -1109,5 +1169,5 @@ case "$MODE" in
       echo "[compact] retain ${retain_days}d: rewrote $CP_REWRITTEN, skipped $CP_SKIPPED, no-op $CP_NOOP, messages redacted $CP_REDACTED, old undo refs dropped $CP_UNDO_DROPPED"
     fi
     ;;
-  *) echo "usage: capture_backup.sh [push | pull [dest] | purge <relpath> | retract | compact [--retain-days N] [--dry-run]]" >&2; exit 2;;
+  *) echo "usage: capture_backup.sh [push | pull [dest] | purge <relpath> | retract | compact [--retain-days N] [--dry-run] | refresh]" >&2; exit 2;;
 esac

@@ -4,7 +4,8 @@
 # The invariant under test, end to end: A CAPTURE IS NEVER LOST. The source file in
 # .bailiwick-outputs/raw/ survives every failure mode (unusable key, unreachable remote,
 # missing secret key at decrypt time) and survives SUCCESS too — only /curate's explicit
-# purge removes anything, and that removes the remote blob, never the source. Every failure
+# purge removes anything, and that removes the remote blob, never the source (a later push moves
+# a tombstoned source to raw/.curated/, it does not delete it). Every failure
 # leaves a health-log event (no silent death) and the data stays replayable.
 set -u
 . "$(dirname "$0")/lib.sh"
@@ -1093,5 +1094,276 @@ for bad in 99999999999999999999 3651 0 000; do
   assert_contains "--retain-days $bad: names the range" "between 1 and 3650" "$out"
   assert_eq "--retain-days $bad: no git call at all" "0" "$(grep -c . "$T_SANDBOX/git-calls.log")"
 done
+
+echo "== refresh: central's mirror learns other machines' branches, and nothing else changes"
+RFBARE="$T_SANDBOX/refresh.git"; git init -q --bare "$RFBARE"
+RFINST="$T_SANDBOX/inst-refresh"; t_make_instance "$RFINST"
+RFCACHE="$T_SANDBOX/cache-refresh"; RFMIRROR="$RFCACHE/bailiwick/capture-mirror"
+RFSTAMP="$RFMIRROR/.git/bw-pool-refresh"
+RFHEALTH="$BAILIWICK_HOME/health/rfcentral.jsonl"
+RFPROJ="$T_SANDBOX/proj-refresh"; mkdir -p "$RFPROJ/.bailiwick-outputs/raw"
+rf_cfg() {  # <enabled> <ack> <role>
+  cat > "$RFINST/.bailiwick-sync.json" <<EOF
+{ "role": "$3", "machine": "rfcentral",
+  "capture_backup": { "enabled": $1, "confidentiality_ack": $2, "repo": "file://$RFBARE",
+    "gpg_recipients": ["$FPR"], "branch": "capture/rfcentral", "throttle_minutes": 0 } }
+EOF
+}
+rf() { XDG_CACHE_HOME="$RFCACHE" CLAUDE_PROJECT_DIR="$RFPROJ" bash "$RFINST/hooks/capture_backup.sh" refresh </dev/null; }
+rf_tip() { git -C "$RFMIRROR" rev-parse -q --verify "refs/remotes/origin/capture/$1" 2>/dev/null; }
+RFSEED="$T_SANDBOX/refresh-seed"; git init -q -b seed "$RFSEED"
+rf_seed() {  # <branch> <file>: a new commit on capture/<branch>, as another machine's push would make
+  echo "$2" > "$RFSEED/$2"
+  git -C "$RFSEED" add -A
+  git -C "$RFSEED" -c user.name=s -c user.email=s@s -c commit.gpgsign=false commit -qm "$2"
+  git -C "$RFSEED" push -q -f "file://$RFBARE" "HEAD:refs/heads/capture/$1"
+  git -C "$RFBARE" rev-parse "capture/$1"
+}
+
+rf_cfg true true central
+out="$(rf 2>&1)"; rc=$?
+assert_exit "refresh without a mirror exits 0" 0 "$rc"
+assert_eq "refresh without a mirror is silent" "" "$out"
+assert_no_dir "refresh never creates a mirror" "$RFMIRROR"
+assert_no_dir "refresh without a mirror does not even make the cache dir" "$RFCACHE/bailiwick"
+assert_no_file "refresh without a mirror attempts no fetch to warn about" "$RFHEALTH"
+
+echo '{"a":1}' > "$RFPROJ/.bailiwick-outputs/raw/own.jsonl"
+echo '{"hook_event_name":"SessionEnd"}' | XDG_CACHE_HOME="$RFCACHE" CLAUDE_PROJECT_DIR="$RFPROJ" \
+  bash "$RFINST/hooks/capture_backup.sh" push >/dev/null 2>&1
+assert_dir "the push created the mirror" "$RFMIRROR/.git"
+
+OTHER1="$(rf_seed other first)"
+for gate in "true true satellite:role=satellite" "true false central:no confidentiality_ack" "false true central:disabled"; do
+  args="${gate%%:*}"; why="${gate#*:}"
+  # shellcheck disable=SC2086
+  rf_cfg $args
+  out="$(rf 2>&1)"; rc=$?
+  assert_exit "refresh skipped ($why) exits 0" 0 "$rc"
+  assert_eq "refresh skipped ($why) is silent" "" "$out"
+  assert_eq "refresh skipped ($why) fetches nothing" "" "$(rf_tip other)"
+  assert_no_file "refresh skipped ($why) writes no stamp" "$RFSTAMP"
+done
+rf_cfg true true central
+
+echo '{}' > "$T_SANDBOX/.drill-sandbox"
+out="$(BW_DRILL_SANDBOX="$T_SANDBOX" XDG_CACHE_HOME="$RFCACHE" CLAUDE_PROJECT_DIR="$RFPROJ" bash "$RFINST/hooks/capture_backup.sh" refresh </dev/null 2>&1)"; rc=$?
+assert_exit "drill-foreign refresh exits 0 (spawned by a hook, like push)" 0 "$rc"
+assert_eq "drill-foreign refresh is silent" "" "$out"
+assert_eq "drill-foreign refresh fetches nothing" "" "$(rf_tip other)"
+rm -f "$T_SANDBOX/.drill-sandbox"
+
+mkdir "$RFMIRROR.lock"
+out="$(rf 2>&1)"; rc=$?
+assert_exit "refresh with a busy mirror exits 0" 0 "$rc"
+assert_eq "refresh with a busy mirror is silent" "" "$out"
+assert_eq "refresh with a busy mirror fetches nothing" "" "$(rf_tip other)"
+rmdir "$RFMIRROR.lock"
+
+before_refs="$(git -C "$RFMIRROR" for-each-ref refs/heads refs/bw)"
+before_head="$(git -C "$RFMIRROR" rev-parse HEAD)"
+before_remote="$(git -C "$RFBARE" for-each-ref)"
+before_status="$(git -C "$RFMIRROR" status --porcelain)"
+: > "$T_SANDBOX/git-calls.log"
+out="$(PATH="$LSHIM:$PATH" rf 2>/dev/null)"; rc=$?
+assert_exit "refresh exits 0" 0 "$rc"
+assert_eq "refresh writes nothing to stdout" "" "$out"
+assert_eq "refresh brings the other branch's tip" "$OTHER1" "$(rf_tip other)"
+assert_eq "local branches untouched" "$before_refs" "$(git -C "$RFMIRROR" for-each-ref refs/heads refs/bw)"
+assert_eq "HEAD untouched" "$before_head" "$(git -C "$RFMIRROR" rev-parse HEAD)"
+assert_eq "worktree untouched" "$before_status" "$(git -C "$RFMIRROR" status --porcelain)"
+assert_eq "the remote is untouched" "$before_remote" "$(git -C "$RFBARE" for-each-ref)"
+assert_file "refresh writes its stamp" "$RFSTAMP"
+assert_no_dir "refresh releases the lock" "$RFMIRROR.lock"
+assert_eq "git is called exactly once" "1" "$(grep -c . "$T_SANDBOX/git-calls.log")"
+assert_contains "that call is the capture/* fetch" 'fetch --quiet --no-auto-gc --prune origin +refs/heads/capture/*:refs/remotes/origin/capture/*' "$(cat "$T_SANDBOX/git-calls.log")"
+
+OTHER2="$(rf_seed other second)"
+stamp_before="$(cat "$RFSTAMP")"
+rf >/dev/null 2>&1
+assert_eq "inside the 30-minute window refresh is throttled" "$OTHER1" "$(rf_tip other)"
+assert_eq "a throttled refresh leaves the stamp" "$stamp_before" "$(cat "$RFSTAMP")"
+echo "$(( $(date +%s) - 29 * 60 ))" > "$RFSTAMP"
+rf >/dev/null 2>&1
+assert_eq "still throttled at 29 minutes" "$OTHER1" "$(rf_tip other)"
+echo "$(( $(date +%s) - 31 * 60 ))" > "$RFSTAMP"
+rf >/dev/null 2>&1
+assert_eq "past 30 minutes refresh fetches" "$OTHER2" "$(rf_tip other)"
+OTHER3="$(rf_seed other third)"
+BW_BACKUP_REFRESH_MIN=0 rf >/dev/null 2>&1
+assert_eq "the env override shortens the throttle" "$OTHER3" "$(rf_tip other)"
+OTHER4="$(rf_seed other fourth)"
+echo "$(( $(date +%s) + 86400 ))" > "$RFSTAMP"
+rf >/dev/null 2>&1
+assert_eq "a stamp from the future does not hold refresh off" "$OTHER4" "$(rf_tip other)"
+OTHER5="$(rf_seed other fifth)"
+echo garbage > "$RFSTAMP"
+rf >/dev/null 2>&1
+assert_eq "an unreadable stamp does not hold refresh off" "$OTHER5" "$(rf_tip other)"
+
+rm -f "$RFSTAMP"
+OTHER6="$(rf_seed other sixth)"
+rf_url="$(git -C "$RFMIRROR" remote get-url origin)"
+git -C "$RFMIRROR" remote set-url origin "file://$T_SANDBOX/does-not-exist.git"
+out="$(rf 2>&1)"; rc=$?
+assert_exit "a failed fetch exits 0" 0 "$rc"
+assert_eq "a failed fetch is silent" "" "$out"
+assert_no_file "a failed fetch writes no stamp" "$RFSTAMP"
+assert_eq "exactly one health warn for the failed fetch" "1" "$(grep -c 'refresh: fetch failed' "$RFHEALTH")"
+assert_no_dir "a failed fetch releases the lock" "$RFMIRROR.lock"
+git -C "$RFMIRROR" remote set-url origin "$rf_url"
+rf >/dev/null 2>&1
+assert_eq "the next refresh after a failure recovers" "$OTHER6" "$(rf_tip other)"
+assert_file "the stamp returns once a fetch works" "$RFSTAMP"
+
+out="$(bash "$RFINST/hooks/capture_backup.sh" no-such-mode 2>&1 </dev/null)"; rc=$?
+assert_exit "an unknown mode still exits 2" 2 "$rc"
+assert_contains "the usage line names refresh" "refresh" "$out"
+
+echo "== refresh over a rewritten origin: the next push keeps this machine's unpushed capture"
+# The one refresh side effect worth pinning: it can move the own branch's tracking ref to a rewritten
+# tip, replacing the last-known tip ensure_mirror keeps. Recovery must still lose nothing.
+rf_git() { git -C "$RFMIRROR" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
+echo "unpushed" > "$RFMIRROR/rfcentral-unpushed.bin"
+rf_git add -A; rf_git commit -qm "local only"
+rf_seed rfcentral rewritten >/dev/null
+BW_BACKUP_REFRESH_MIN=0 rf >/dev/null 2>&1
+assert_eq "refresh moved the own tracking ref to the rewritten tip" "$(git -C "$RFBARE" rev-parse capture/rfcentral)" "$(rf_tip rfcentral)"
+echo '{"hook_event_name":"SessionEnd"}' | XDG_CACHE_HOME="$RFCACHE" CLAUDE_PROJECT_DIR="$RFPROJ" \
+  bash "$RFINST/hooks/capture_backup.sh" push >/dev/null 2>&1
+assert_contains "the unpushed file reaches origin after recovery" "rfcentral-unpushed.bin" "$(git -C "$RFBARE" ls-tree -r --name-only capture/rfcentral)"
+assert_contains "the recovery reports overlay" "mirror recovered (overlay)" "$RFHEALTH"
+
+echo "== retire: a curated capture leaves raw/ for raw/.curated/, moved, never deleted"
+new_sat retiresat
+RT_RAW="$NS_RAW"; RT_CUR="$RT_RAW/.curated"; RT_HEALTH="$BAILIWICK_HOME/health/retiresat.jsonl"
+rt_key="$(ns_key)"
+rt_rel() { printf 'retiresat/%s/%s.gpg' "$rt_key" "$1"; }
+# From the central instance, on purpose: the tombstone reaches this machine through origin's .purged
+# only, the exact case of a capture curated on another machine.
+rt_purge() { XDG_CACHE_HOME="$CCACHE" bash "$CINST/hooks/capture_backup.sh" purge "$(rt_rel "$1")" >/dev/null 2>&1; }
+rt_tree() { git -C "$CBARE" ls-tree -r --name-only capture/retiresat; }
+echo 'CURATED-JSONL' > "$RT_RAW/cur.jsonl"; echo 'CURATED-MD' > "$RT_RAW/cur.md"
+echo 'KEEP-UNCURATED' > "$RT_RAW/keep.jsonl"
+echo 'STILL-ACTIVE' > "$RT_RAW/live.jsonl"
+ns_push >/dev/null 2>&1
+rt_purge cur.jsonl; rt_purge cur.md; rt_purge live.jsonl
+assert_not_contains "the purge reached the remote" "cur.jsonl.gpg" "$(rt_tree)"
+assert_eq "this mirror has not seen the tombstones yet" "" "$(cat "$NS_MIRROR/.purged" 2>/dev/null)"
+age_minutes "$RT_RAW/cur.jsonl" 120; age_minutes "$RT_RAW/cur.md" 120; age_minutes "$RT_RAW/keep.jsonl" 120
+echo 'NEW-CAPTURE' > "$RT_RAW/new1.jsonl"
+out="$(ns_push 2>/dev/null)"; rc=$?
+assert_exit "the push with retirement exits 0" 0 "$rc"
+assert_eq "retirement writes nothing to stdout" "" "$out"
+assert_no_file "curated .jsonl left raw/" "$RT_RAW/cur.jsonl"
+assert_no_file "curated .md left raw/" "$RT_RAW/cur.md"
+assert_eq "curated .jsonl moved intact" "CURATED-JSONL" "$(cat "$RT_CUR/cur.jsonl" 2>/dev/null)"
+assert_eq "curated .md moved intact" "CURATED-MD" "$(cat "$RT_CUR/cur.md" 2>/dev/null)"
+assert_file "an uncurated capture stays, however old" "$RT_RAW/keep.jsonl"
+assert_no_file "an uncurated capture is not retired" "$RT_CUR/keep.jsonl"
+assert_file "a capture modified within the hour stays" "$RT_RAW/live.jsonl"
+assert_no_file "a capture modified within the hour is not retired" "$RT_CUR/live.jsonl"
+assert_contains "the push still carries new work" "new1.jsonl.gpg" "$(rt_tree)"
+assert_not_contains "the retired .jsonl is not resurrected" "cur.jsonl.gpg" "$(rt_tree)"
+assert_not_contains "the retired .md is not resurrected" "cur.md.gpg" "$(rt_tree)"
+assert_not_contains "the recent file is skipped, not re-pushed" "live.jsonl.gpg" "$(rt_tree)"
+
+health_retire="$(grep -E 'retired [0-9]+|could not be retired' "$RT_HEALTH")"
+assert_contains "health logs the count" "retired 2 curated capture file(s)" "$health_retire"
+assert_not_contains "health names no capture file" "cur." "$health_retire"
+assert_not_contains "health names no repo key" "$rt_key" "$(cat "$RT_HEALTH")"
+assert_not_contains "health names no project path" "$NS_PROJ" "$(cat "$RT_HEALTH")"
+assert_not_contains "health names no blob relpath" "$(rt_rel cur.jsonl)" "$(cat "$RT_HEALTH")"
+
+age_minutes "$RT_RAW/live.jsonl" 59
+ns_push >/dev/null 2>&1
+assert_file "59 minutes old still stays" "$RT_RAW/live.jsonl"
+age_minutes "$RT_RAW/live.jsonl" 120
+ns_push >/dev/null 2>&1
+assert_no_file "once older than the hour it leaves raw/" "$RT_RAW/live.jsonl"
+assert_eq "once older than the hour it is retired" "STILL-ACTIVE" "$(cat "$RT_CUR/live.jsonl" 2>/dev/null)"
+assert_not_contains "a retired capture never comes back" "live.jsonl.gpg" "$(rt_tree)"
+
+echo "== retire: content written after its own tombstone is a resumed session, and stays"
+echo 'ORIGINAL' > "$RT_RAW/res.jsonl"
+ns_push >/dev/null 2>&1
+GIT_COMMITTER_DATE="@$(epoch_ago 1) +0000" rt_purge res.jsonl
+echo 'RESUMED-NOT-CURATED' > "$RT_RAW/res.jsonl"; age_minutes "$RT_RAW/res.jsonl" 90
+ns_push >/dev/null 2>&1
+assert_eq "resumed content stays in raw/" "RESUMED-NOT-CURATED" "$(cat "$RT_RAW/res.jsonl" 2>/dev/null)"
+assert_no_file "resumed content is not retired" "$RT_CUR/res.jsonl"
+rm -f "$RT_RAW/res.jsonl"
+
+echo "== retire: an existing destination is overwritten only by a newer file"
+# A resumed session wrote the capture again after it was retired.
+echo 'RESUMED-LATER' > "$RT_RAW/cur.jsonl"; age_minutes "$RT_RAW/cur.jsonl" 90
+ns_push >/dev/null 2>&1
+assert_no_file "the newer capture left raw/" "$RT_RAW/cur.jsonl"
+assert_eq "the newer capture replaced the older copy" "RESUMED-LATER" "$(cat "$RT_CUR/cur.jsonl")"
+assert_not_contains "the resumed capture is not re-pushed" "cur.jsonl.gpg" "$(rt_tree)"
+echo 'OLDER-THAN-DEST' > "$RT_RAW/cur.jsonl"; age_minutes "$RT_RAW/cur.jsonl" 300
+ns_push >/dev/null 2>&1
+assert_eq "an older source does not overwrite" "RESUMED-LATER" "$(cat "$RT_CUR/cur.jsonl")"
+assert_eq "an older source is kept, not deleted" "OLDER-THAN-DEST" "$(cat "$RT_RAW/cur.jsonl")"
+assert_contains "health counts the file left in raw" "1 curated capture file(s) could not be retired" "$RT_HEALTH"
+rm -f "$RT_RAW/cur.jsonl"
+
+echo "== retire: a move failure never aborts the push"
+MVSHIM="$T_SANDBOX/shim-mv"; mkdir -p "$MVSHIM"
+cat > "$MVSHIM/mv" <<EOF
+#!/usr/bin/env bash
+case "\$*" in *.curated*) exit 1;; esac
+exec "$(command -v mv)" "\$@"
+EOF
+chmod +x "$MVSHIM/mv"
+echo 'FAIL-MOVE' > "$RT_RAW/failmv.jsonl"
+ns_push >/dev/null 2>&1
+rt_purge failmv.jsonl
+age_minutes "$RT_RAW/failmv.jsonl" 120
+echo 'AFTER-FAILED-MOVE' > "$RT_RAW/zz-after.jsonl"
+PATH="$MVSHIM:$PATH" ns_push >/dev/null 2>&1; rc=$?
+assert_exit "a failed mv: push exits 0" 0 "$rc"
+assert_file "a failed mv leaves the source in raw/" "$RT_RAW/failmv.jsonl"
+assert_contains "a failed mv: a later file in the same run is still pushed" "zz-after.jsonl.gpg" "$(rt_tree)"
+ns_push >/dev/null 2>&1
+assert_file "the next push retries the move" "$RT_CUR/failmv.jsonl"
+assert_no_file "the retried move empties raw/" "$RT_RAW/failmv.jsonl"
+mv "$RT_CUR" "$RT_CUR.bak"; : > "$RT_CUR"
+echo 'FAIL-MKDIR' > "$RT_RAW/failmk.jsonl"
+ns_push >/dev/null 2>&1
+rt_purge failmk.jsonl
+age_minutes "$RT_RAW/failmk.jsonl" 120
+echo 'AFTER-FAILED-MKDIR' > "$RT_RAW/zz-mkdir.jsonl"
+ns_push >/dev/null 2>&1; rc=$?
+assert_exit "an unusable .curated: push exits 0" 0 "$rc"
+assert_file "an unusable .curated leaves the source in raw/" "$RT_RAW/failmk.jsonl"
+assert_contains "an unusable .curated: the rest of the run is pushed" "zz-mkdir.jsonl.gpg" "$(rt_tree)"
+rm -f "$RT_CUR"; mv "$RT_CUR.bak" "$RT_CUR"
+
+echo "== retire: a purge_detection: error capture stays where it is, tombstoned or not"
+echo '{"x":1}' > "$RT_RAW/heldrt.jsonl"
+printf '# Raw capture\n\n- captured: x\n' > "$RT_RAW/heldrt.md"
+ns_push >/dev/null 2>&1
+rt_purge heldrt.jsonl; rt_purge heldrt.md
+printf '# Raw capture\n\n- purge_detection: error\n- captured: x\n' > "$RT_RAW/heldrt.md"
+age_minutes "$RT_RAW/heldrt.jsonl" 120; age_minutes "$RT_RAW/heldrt.md" 120
+ns_push >/dev/null 2>&1
+assert_file "a held .jsonl stays in raw/" "$RT_RAW/heldrt.jsonl"
+assert_file "a held .md stays in raw/" "$RT_RAW/heldrt.md"
+assert_no_file "a held .jsonl is not retired" "$RT_CUR/heldrt.jsonl"
+
+echo "== retire: a shadow capture goes to its central staging .curated/"
+SHPROJ="$T_SANDBOX/proj-shadow"; mkdir -p "$SHPROJ"
+sh_key="$(PYTHONPATH="$NS_INST/hooks" python3 -c 'import sys, capture_session; sys.stdout.write(capture_session.repo_key(sys.argv[1]))' "$SHPROJ")"
+SHRAW="$BAILIWICK_HOME/captures/$sh_key/raw"; mkdir -p "$SHRAW"
+sh_push() { echo '{"hook_event_name":"SessionEnd"}' | BAILIWICK_SHADOW=1 XDG_CACHE_HOME="$NS_CACHE" CLAUDE_PROJECT_DIR="$SHPROJ" bash "$NS_INST/hooks/capture_backup.sh" push; }
+echo 'SHADOW-CURATED' > "$SHRAW/sh.jsonl"
+sh_push >/dev/null 2>&1
+XDG_CACHE_HOME="$CCACHE" bash "$CINST/hooks/capture_backup.sh" purge "retiresat/$sh_key/sh.jsonl.gpg" >/dev/null 2>&1
+age_minutes "$SHRAW/sh.jsonl" 120
+sh_push >/dev/null 2>&1
+assert_no_file "the shadow capture left raw/" "$SHRAW/sh.jsonl"
+assert_eq "the shadow capture is in raw/.curated/" "SHADOW-CURATED" "$(cat "$SHRAW/.curated/sh.jsonl" 2>/dev/null)"
+assert_no_dir "the seeded path is not created for a shadow repo" "$SHPROJ/.bailiwick-outputs"
 
 t_summary
