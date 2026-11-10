@@ -270,7 +270,7 @@ BACKUP_VERB_WHAT = ("capture_backup.sh with a verb that is not a literal word ma
 MIRROR_WHAT = ("git against the capture mirror beyond read-only commands, plain fetch/push and commit "
                "can rewrite or destroy the ciphertext backup")
 _BACKUP_SCRIPT = r"(?<![\w.-])capture_backup\.sh(?=[\s)`<>]|$)"
-_BACKUP_LITERAL_VERB = r"(push|pull|purge|retract|compact)(?=[\s)`<>]|$)"
+_BACKUP_LITERAL_VERB = r"(push|pull|purge|retract|refresh|compact)(?=[\s)`<>]|$)"
 _BACKUP_DRY_RUN_ONLY = r"(\s+--retain-days(=|\s+)\d+)*\s+--dry-run(\s+--retain-days(=|\s+)\d+)*\s*"
 # A quoted run ENDING in the script name or mirror path: kept as the bare name, because strip_quoted()
 # blanks a quoted path holding a space and the command would then show neither.

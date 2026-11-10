@@ -134,6 +134,98 @@ assert_contains "nag counts the CENTRALLY staged capture" "1 raw session capture
 assert_contains "nag names the central path (writer/nag agreement)" "$BAILIWICK_HOME/captures/$key/raw" "$out"
 rm -f "$BAILIWICK_HOME/allowlist"
 
+# ---- central nag counts the backup pool of ALL machines --------------------------------------------
+echo "== central+backup: pool of other machines' captures nags (mirror = sandbox XDG_CACHE_HOME)"
+MIRROR="$XDG_CACHE_HOME/bailiwick/capture-mirror"
+BK_CENTRAL='{"role":"central","capture_backup":{"enabled":true,"confidentiality_ack":true}}'
+BK_SAT='{"role":"satellite","capture_backup":{"enabled":true,"confidentiality_ack":true}}'
+mg() { git -C "$MIRROR" -c user.name=bw-test -c user.email=test@local "$@"; }
+mirror_branch() {  # <machine> <path>...: a remote-tracking capture/<machine> tip holding those files
+  local m="$1" f tree; shift
+  rm -rf "$MIRROR/.stage"; mkdir -p "$MIRROR/.stage"
+  for f in "$@"; do mkdir -p "$MIRROR/.stage/$(dirname "$f")"; : > "$MIRROR/.stage/$f"; done
+  GIT_INDEX_FILE="$MIRROR/.git/idx-$m" git -C "$MIRROR" --work-tree="$MIRROR/.stage" add -A >/dev/null
+  tree="$(GIT_INDEX_FILE="$MIRROR/.git/idx-$m" git -C "$MIRROR" write-tree)"
+  mg update-ref "refs/remotes/origin/capture/$m" "$(mg commit-tree "$tree" -m "$m")"
+  rm -rf "$MIRROR/.stage"
+}
+# Stub the refresh script in the instance (the real one is a copy of hooks/capture_backup.sh).
+MARK="$T_SANDBOX/refresh.marker"
+printf '#!/usr/bin/env bash\necho "$*" >> "%s"\n' "$MARK" > "$INST/hooks/capture_backup.sh"
+wait_mark() { local i=0; while [ ! -s "$MARK" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; }
+PENDING_BASE="2 raw session capture(s) pending curation"
+
+rm -rf "$P1/.bailiwick-outputs/raw"; mkdir -p "$P1/.bailiwick-outputs/raw"
+git init -q "$MIRROR"
+mirror_branch laptop s1.jsonl.gpg s2.jsonl.gpg health/x.jsonl.gpg notes.txt
+mirror_branch desktop s3.jsonl.gpg
+rm -f "$MARK"
+out="$(run_cfg "$BK_CENTRAL" "$P1")"; rc=$?
+assert_exit "pool: exit 0" 0 "$rc"
+assert_contains "pool, empty local: counts 3 across branches, excluding health/" "3 capture(s) pending curation (backup, all machines: 3; this repo, local: 0). Run /curate to review and promote (human-gated)." "$out"
+wait_mark
+assert_contains "central+backup (count 0 locally): refresh spawned" "refresh" "$(cat "$MARK" 2>/dev/null)"
+
+touch "$P1/.bailiwick-outputs/raw/a.jsonl" "$P1/.bailiwick-outputs/raw/b.jsonl"
+out="$(run_cfg "$BK_CENTRAL" "$P1")"
+assert_contains "pool 3 + local 2: N is the larger" "3 capture(s) pending curation (backup, all machines: 3; this repo, local: 2)." "$out"
+mirror_branch desktop s3.jsonl.gpg health/h.jsonl.gpg
+mirror_branch laptop s1.jsonl.gpg health/y.jsonl.gpg
+out="$(run_cfg "$BK_CENTRAL" "$P1")"
+assert_contains "pool 2 + local 2: N=2" "2 capture(s) pending curation (backup, all machines: 2; this repo, local: 2)." "$out"
+mirror_branch desktop health/h.jsonl.gpg; mirror_branch laptop health/y.jsonl.gpg
+out="$(run_cfg "$BK_CENTRAL" "$P1")"
+assert_contains "pool only health/: today's message" "$PENDING in" "$out"
+assert_not_contains "pool only health/: no pool wording" "backup, all machines" "$out"
+
+echo "== pool: nothing extra on stdout when idle; no mirror = today's message"
+rm -rf "$P1/.bailiwick-outputs/raw"; mkdir -p "$P1/.bailiwick-outputs/raw"
+out="$(run_cfg "$BK_CENTRAL" "$P1")"
+assert_not_contains "empty pool, no local: silent" "pending curation" "$out"
+mv "$MIRROR" "$MIRROR.off"
+touch "$P1/.bailiwick-outputs/raw/a.jsonl" "$P1/.bailiwick-outputs/raw/b.jsonl"
+rm -f "$MARK"
+out="$(run_cfg "$BK_CENTRAL" "$P1")"
+assert_contains "no mirror: today's message" "$PENDING in" "$out"
+assert_not_contains "no mirror: no pool wording" "backup, all machines" "$out"
+wait_mark
+assert_contains "no mirror: refresh still spawned (and exits quietly)" "refresh" "$(cat "$MARK" 2>/dev/null)"
+mv "$MIRROR.off" "$MIRROR"
+
+echo "== pool: satellite and central-without-backup neither count nor spawn"
+mirror_branch laptop s1.jsonl.gpg s2.jsonl.gpg s9.jsonl.gpg
+rm -f "$MARK"
+out="$(run_cfg "$BK_SAT" "$P1")"
+assert_not_contains "satellite: no pool nag" "pending curation" "$out"
+out="$(run_cfg "$CENTRAL_CFG" "$P1")"
+assert_contains "central, backup off: today's message" "$PENDING in" "$out"
+assert_not_contains "central, backup off: no pool wording" "backup, all machines" "$out"
+sleep 0.5
+assert_eq "satellite / backup off: refresh never spawned" "" "$(cat "$MARK" 2>/dev/null)"
+
+echo "== pool: a failing or hanging refresh script cannot leak output or delay the session"
+printf '#!/usr/bin/env bash\necho NOISE; echo ERR >&2; sleep 5; exit 1\n' > "$INST/hooks/capture_backup.sh"
+t0=$(date +%s)
+out="$(run_cfg "$BK_CENTRAL" "$P1")"; rc=$?
+assert_exit "slow failing refresh: exit 0" 0 "$rc"
+assert_not_contains "refresh output never reaches SessionStart" "NOISE" "$out"
+assert_not_contains "refresh stderr never reaches SessionStart" "ERR" "$out"
+assert_eq "session did not wait for refresh" "1" "$([ $(( $(date +%s) - t0 )) -lt 4 ] && echo 1 || echo 0)"
+rm -f "$INST/hooks/capture_backup.sh"
+out="$(run_cfg "$BK_CENTRAL" "$P1")"; rc=$?
+assert_exit "missing refresh script: exit 0" 0 "$rc"
+assert_contains "missing refresh script: nag still shown" "capture(s) pending curation" "$out"
+
+echo "== pool: a corrupt mirror is harmless"
+rm -rf "$MIRROR"; mkdir -p "$MIRROR/.git"; echo garbage > "$MIRROR/.git/HEAD"
+out="$(run_cfg "$BK_CENTRAL" "$P1")"; rc=$?
+assert_exit "corrupt mirror: exit 0" 0 "$rc"
+assert_contains "corrupt mirror: today's message" "$PENDING in" "$out"
+assert_not_contains "corrupt mirror: no git noise" "fatal" "$out"
+rm -rf "$MIRROR"
+git -C "$INST" checkout -q -- hooks/capture_backup.sh
+rm -rf "$P1/.bailiwick-outputs/raw"; mkdir -p "$P1/.bailiwick-outputs/raw"
+
 # ---- inbound sync: the satellite self-heal (#37) ------------------------------------------------
 # sync_knowledge.sh leaves a satellite on sync/<machine>; SessionStart only fast-forwards main, so
 # without the heal a clone stops receiving knowledge after its first sync — silently.

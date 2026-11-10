@@ -149,15 +149,52 @@ try:
 except Exception: sys.exit(1)' "$cfg" 2>/dev/null
 }
 
+# Captures waiting in the backup pool: .jsonl.gpg paths (health/ excluded) at the tips of the
+# remote capture/* branches of the local mirror. Local refs only, no network; prints the count,
+# or nothing when the mirror is absent/unreadable (unknown). Never fails.
+capture_pool_count() {
+  local mirror="${XDG_CACHE_HOME:-$HOME/.cache}/bailiwick/capture-mirror" refs ref n
+  [ -e "$mirror/.git" ] || return 0
+  refs="$(git -C "$mirror" for-each-ref --format='%(refname)' refs/remotes/origin/capture/ 2>/dev/null)" || return 0
+  n="$(for ref in $refs; do git -C "$mirror" ls-tree -r --name-only "$ref" 2>/dev/null; done \
+        | grep -v '^health/' | grep '\.jsonl\.gpg$' | sort -u | wc -l | tr -d ' ')" || return 0
+  printf '%s' "${n:-0}"
+}
+
+# Detached refresh so the NEXT session sees a current pool. Cannot delay or print into this one.
+capture_refresh_spawn() {
+  local script="$BAILIWICK_ROOT/hooks/capture_backup.sh"
+  [ -f "$script" ] || return 0
+  if command -v setsid >/dev/null 2>&1; then
+    (setsid nohup bash "$script" refresh </dev/null >/dev/null 2>&1 &) >/dev/null 2>&1
+  else
+    (nohup bash "$script" refresh </dev/null >/dev/null 2>&1 &) >/dev/null 2>&1
+  fi
+  return 0
+}
+
 # Pending-capture nag. Curation belongs on the central machine: a satellite stays quiet when its
-# backup carries captures there, and says so when nothing will. Config is read only when count>0,
-# which keeps the python spawns off the common path.
+# backup carries captures there, and says so when nothing will. On central with the backup active
+# it also counts the pool of every machine's backed-up captures and refreshes it in the background.
+# Config is read only when needed (count>0 or a mirror exists), which keeps python spawns off the
+# common path.
 capture_nag() {
-  local count role="satellite"
-  [ -d "$RAW_DIR" ] || return 0
-  count=$(find "$RAW_DIR" -maxdepth 1 -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' ')
-  [ "${count:-0}" -gt 0 ] || return 0
+  local count=0 role="satellite" pool="" n mirror
+  mirror="${XDG_CACHE_HOME:-$HOME/.cache}/bailiwick/capture-mirror"
+  [ -d "$RAW_DIR" ] && count=$(find "$RAW_DIR" -maxdepth 1 -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' ')
+  [ -e "$mirror/.git" ] || [ "${count:-0}" -gt 0 ] || return 0
   command -v bw_cfg_get >/dev/null 2>&1 && role="$(bw_cfg_get role satellite)"
+  if [ "$role" = "central" ] && capture_backup_active; then
+    pool="$(capture_pool_count)" || pool=""
+    capture_refresh_spawn
+    case "$pool" in ''|*[!0-9]*) pool="" ;; esac
+    if [ "${pool:-0}" -gt 0 ]; then
+      n="$count"; [ "$pool" -gt "$n" ] && n="$pool"
+      printf '\n[bailiwick] %s capture(s) pending curation (backup, all machines: %s; this repo, local: %s). Run /curate to review and promote (human-gated).\n' "$n" "$pool" "$count"
+      return 0
+    fi
+  fi
+  [ "${count:-0}" -gt 0 ] || return 0
   if [ "$role" = "central" ]; then
     printf '\n[bailiwick] %s raw session capture(s) pending curation in %s. Run /curate to review and promote (human-gated).\n' "$count" "$RAW_LABEL"
   elif ! capture_backup_active; then
